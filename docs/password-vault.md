@@ -20,7 +20,7 @@ Private bindings check the portable file identity, consumer/owner UUIDs, actual 
 
 Each loaded file has an independent **Connections** root, runtime identity, master, revision, selection and save state. Copies with the same portable file/profile UUIDs remain separate runtime documents. Root path/filename context distinguishes them. Saved tabs, reconnect and worker replies resolve their owning file, not the selected root.
 
-Tools provides **Unlock passwords…**, **Lock passwords**, and **Set or change file password…** for the selected file. A file locks after 15 idle minutes. Wrong/canceled masters do not reset or rewrite it. Manual/idle Lock clears that file's reusable master/cache and invalidates pending lookup; other files and active sessions remain usable.
+Tools provides **Unlock passwords…**, **Lock passwords**, and **Set or change file password…** for the selected file. An unlocked file stays unlocked until you lock or close it; it never relocks on its own. Wrong/canceled masters do not reset or rewrite it. Lock clears that file's reusable master/cache and invalidates pending lookup; other files and active sessions remain usable.
 
 **Lock does not conceal already opened metadata or active targets.** It is not a screen/privacy lock. Active sessions retain their transient credentials. Close stops their workers; a file cannot close while its saved tabs remain, including disconnected tabs.
 

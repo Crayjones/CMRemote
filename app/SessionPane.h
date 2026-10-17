@@ -35,6 +35,8 @@ public:
     bool mock() const { return mock_; }
     SessionTarget target() const { return target_; }
     bool active() const { return active_; }
+    // The pane's current status line (connection phase or failure reason).
+    QString statusDetail() const;
     bool graphicalDesktop() const { return desktop_ && (target_.protocol == "rdp" || target_.protocol == "vnc"); }
     void event(const QString& kind, const QString& text);
     void startRdp(RdpConfig config);
@@ -54,6 +56,8 @@ signals:
     void resized(QString id, QSize size);
     void state(QString id, QString state);
     void clipboardSharingChanged(bool enabled);
+    // Security or diagnostic message for the Notifications panel.
+    void notice(QString text);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:

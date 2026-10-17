@@ -68,7 +68,6 @@ public:
     void close(DocumentId id, Completion complete);
     void lock(DocumentId id);
     void acknowledgeWarning(DocumentId id);
-    void setIdleInterval(DocumentId id, int milliseconds);
     std::optional<DocumentStatus> status(DocumentId id) const;
     void setFault(DocumentId id, AtomicFile::Fault fault, Completion complete);
     void setCommitGate(DocumentId id, AtomicFile::CommitGate gate, Completion complete);

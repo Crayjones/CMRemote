@@ -437,6 +437,8 @@ void TerminalView::contextMenuEvent(QContextMenuEvent* event) {
     action("Copy", Qt::Key_C, clipboard, Shortcut::Copy, selection_);
     action("Paste", Qt::Key_V, clipboard, Shortcut::Paste, inputEnabled_ && pendingPaste_.isEmpty());
     action("Select All", Qt::Key_A, clipboard, Shortcut::SelectAll, sessionShortcuts_);
+    bool extras = false;
+    for (const auto& extra : contextActions_) if (extra && extra->isVisible()) { if (!extras) menu->addSeparator(); extras = true; menu->addAction(extra); }
     if (sessionShortcuts_) {
         menu->addSeparator();
         action("Scroll Page Up", Qt::Key_PageUp, Qt::ShiftModifier, Shortcut::PageUp, !screen_->alternate());

@@ -426,6 +426,21 @@ private slots:
         QTRY_VERIFY(reply.has_value()); QVERIFY(reply->result.ok && !reply->password);
         QVERIFY(!contents(path).contains("synthetic-host-password")); assertSecretFree(window, "synthetic-host-password");
     }
+    void changedProtocolKeepsSavedPasswordAndDefaultPort() {
+        QTemporaryDir dir; const auto path = dir.filePath("protocol.xml"); QVERIFY(fixture(path, "127.0.0.1"));
+        MainWindow window(path, true); window.show(); auto* files = window.findChild<DocumentService*>(); const auto id = window.connectionFiles().first();
+        QTRY_VERIFY(files->status(id) && !files->status(id)->busy); window.unlockConnectionFile(id, Secret(QByteArray("synthetic file master")));
+        QTRY_VERIFY(files->status(id)->unlocked && !files->status(id)->busy); QVERIFY(window.selectConnectionProfile({id, Folder}));
+        setGridText(window, "password", "synthetic-protocol-password"); acceptReview(window); QVERIFY(settled(window, id));
+        QVERIFY(window.selectConnectionProfile({id, Consumer})); setGridChoice(window, "protocol", "ssh"); QVERIFY(settled(window, id));
+        QVERIFY(files->status(id)->passwords.value(Consumer).authorized);
+        // The inherited RDP default port follows the protocol to SSH's 22.
+        SessionTarget ssh; ssh.protocol = "ssh"; ssh.host = "127.0.0.1"; ssh.port = 22; ssh.username = "synthetic-user";
+        std::optional<DocumentReply> reply; files->lookup({id, Consumer}, ssh, [&](DocumentReply value) { reply.emplace(std::move(value)); });
+        QTRY_VERIFY(reply.has_value()); QVERIFY(reply->result.ok && reply->password);
+        QVERIFY(reply->password->takeBytes() == QByteArray("synthetic-protocol-password"));
+        assertSecretFree(window, "synthetic-protocol-password");
+    }
     void hostChangedOutsideAppDoesNotReusePassword() {
         QTemporaryDir dir; const auto path = dir.filePath("outside.xml"); QVERIFY(fixture(path, "127.0.0.1"));
         {

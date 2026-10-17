@@ -69,6 +69,7 @@ void SessionPane::setClipboardSharingEnabled(bool enabled) {
     refreshClipboardFocus(); clipboard_->setEnabled(enabled);
     if (previous != clipboard_->enabled()) emit clipboardSharingChanged(clipboard_->enabled());
 }
+QString SessionPane::statusDetail() const { return status_ ? status_->text() : QString(); }
 void SessionPane::event(const QString& kind, const QString& text) {
     if (!active_) return;
     status_->setText("MOCK — " + text);
@@ -226,6 +227,7 @@ VncWorker* SessionPane::startVnc(rust::Box<rm::vnc::Authentication> authenticati
     vncWorker_ = worker;
     connect(worker, &VncWorker::finished, worker, &QObject::deleteLater);
     connect(worker, &VncWorker::finished, this, [this, worker](quint64) { if (vncWorker_ == worker) vncWorker_.clear(); });
+    connect(worker, &VncWorker::securityWarning, this, [this, worker](const QString& text) { if (vncWorker_ == worker) emit notice(text); });
     const auto current = [this, worker, generation] { return active_ && vncWorker_ == worker && connectionGeneration_ == generation; };
     const auto failInput = [this, worker](const QString& error) {
         connected_ = false; acceptingVncFrames_ = false; vncDesktop_->setInputEnabled(false);

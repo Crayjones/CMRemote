@@ -132,13 +132,14 @@ quint32 VncDesktopView::namedKeysym(const QKeyEvent& event) {
 #ifdef Q_OS_MACOS
         // Qt swaps Command/Control by default. Preserve physical semantics:
         // Command -> Super, physical Control -> Control; Option -> Alt.
-        return (QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta) ? 0xffe3 : 0xffeb) + quint32(right);
+        // Options > Remote Desktop can make Command send Control instead.
+        return (QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta) != DesktopView::commandAsControl() ? 0xffe3 : 0xffeb) + quint32(right);
 #else
         return right ? 0xffe4 : 0xffe3;
 #endif
     case Qt::Key_Meta:
 #ifdef Q_OS_MACOS
-        return (QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta) ? 0xffeb : 0xffe3) + quint32(right);
+        return (QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta) != DesktopView::commandAsControl() ? 0xffeb : 0xffe3) + quint32(right);
 #else
         return right ? 0xffec : 0xffeb;
 #endif

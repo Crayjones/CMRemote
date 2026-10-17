@@ -11,6 +11,7 @@
      <item><property name="text"><string>Appearance</string></property></item>
      <item><property name="text"><string>Tabs &amp; Panels</string></property></item>
      <item><property name="text"><string>Remote Desktop</string></property></item>
+     <item><property name="text"><string>Updates</string></property></item>
     </widget></item>
     <item><widget class="QStackedWidget" name="pages">
      <widget class="QWidget" name="appearancePage"><layout class="QVBoxLayout" name="appearanceLayout">
@@ -23,6 +24,7 @@
       <item><widget class="QLabel" name="panelsTitle"><property name="text"><string>Toolbars</string></property></widget></item>
       <item><widget class="QCheckBox" name="quickConnect"><property name="text"><string>Show Quick Connect toolbar</string></property></widget></item>
       <item><widget class="QCheckBox" name="lockToolbars"><property name="text"><string>Lock toolbar positions</string></property></widget></item>
+      <item><widget class="QCheckBox" name="showPanels"><property name="text"><string>Show connection panel tabs (View → Panel Tabs)</string></property></widget></item>
       <item><spacer name="panelsSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
      </layout></widget>
      <widget class="QWidget" name="rdpPage"><layout class="QVBoxLayout" name="rdpLayout">
@@ -31,7 +33,16 @@
       <item><widget class="QLabel" name="openh264Credit"><property name="text"><string>OpenH264 Video Codec provided by Cisco Systems, Inc.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
       <item><widget class="QLabel" name="openh264Status"><property name="text"><string/></property><property name="wordWrap"><bool>true</bool></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
       <item><widget class="QLabel" name="openh264Help"><property name="text"><string>H.264 makes video and animation smoother on slow connections. When it is off, remote desktops use other graphics formats.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="keyboardTitle"><property name="text"><string>Keyboard</string></property></widget></item>
+      <item><widget class="QCheckBox" name="commandAsControl"><property name="text"><string>Command key sends Control (Control key sends Windows)</string></property></widget></item>
+      <item><widget class="QLabel" name="commandAsControlHelp"><property name="text"><string>Applies to RDP and VNC desktops. When off, Control sends Control and Command sends the Windows/Super key.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
       <item><spacer name="rdpSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
+     </layout></widget>
+     <widget class="QWidget" name="updatesPage"><layout class="QVBoxLayout" name="updatesLayout">
+      <item><widget class="QLabel" name="updatesTitle"><property name="text"><string>Updates</string></property></widget></item>
+      <item><widget class="QCheckBox" name="autoUpdate"><property name="text"><string>Automatically download and install new versions</string></property></widget></item>
+      <item><widget class="QLabel" name="autoUpdateHelp"><property name="text"><string>CMRemote checks GitHub at startup and once a day. A verified update is downloaded in the background and installed when you restart or quit.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><spacer name="updatesSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
      </layout></widget>
     </widget></item>
    </layout></item>

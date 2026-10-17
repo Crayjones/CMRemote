@@ -451,7 +451,12 @@ private slots:
         window.setQuickConnectProtocol("rdp"); window.quickConnect("rdp.invalid", true);
         auto* rdp = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(rdp); const auto rdpId = rdp->id(); const auto rdpTarget = rdp->target();
         auto* desktop = rdp->findChild<DesktopView*>(); QVERIFY(desktop); QImage frame(32, 24, QImage::Format_RGB32); frame.fill(Qt::red); desktop->setFrame(frame);
-        window.findChild<QAction*>("actionOptions")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
+        // Options opens only the Options dialog, never Terminal Appearance.
+        if (auto* options = window.findChild<QAction*>("actionOptions"); options->isEnabled()) {
+            options->trigger(); QCoreApplication::processEvents(); QVERIFY(!window.findChild<TerminalAppearanceDialog*>());
+            if (auto* optionsDialog = window.findChild<QDialog*>("optionsDialog")) optionsDialog->reject();
+        }
+        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
         auto* dialog = window.findChild<TerminalAppearanceDialog*>(); window.findChild<QAction*>("actionTerminalAppearance")->trigger();
         QCOMPARE(window.findChildren<TerminalAppearanceDialog*>().size(), 1); QVERIFY(!QFile::exists(settings));
         dialog->findChild<QSpinBox*>("fontSize")->setValue(18); QCOMPARE(first->findChild<TerminalView*>()->appearance().fontSize, 12);

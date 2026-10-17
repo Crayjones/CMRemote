@@ -54,6 +54,8 @@ public:
     QMainWindow* sessionFullscreenWindow() const;
     // Where Check for Updates asks for the latest release (tests use a local file).
     void setUpdateSource(const QUrl& source);
+    // Packaged application only: check, download and install releases automatically.
+    void enableAutomaticUpdates(const QString& dataDirectory);
     DocumentId openConnectionFile(const QString& path, bool createNew = false);
     QList<DocumentId> connectionFiles() const { return documentOrder_; }
     DocumentId selectedDocument() const;
@@ -256,6 +258,18 @@ private:
     QRect applicationFullscreenGeometry_;
     void showOptions();
     void applyPreferences(PreferenceValues values);
+    PreferenceValues currentPreferences() const;
+    // View > Panel Tabs shows or hides the General/Panel N row in every window.
+    void applyPanelTabs();
+    bool commandAsControl_ = false, autoUpdate_ = true;
+    class AutoUpdater* updater_ = nullptr;
+    bool updatePrompted_ = false, relaunchAfterUpdate_ = false;
+    void promptUpdateInstall(const QString& version);
+    // macOS: Quick Connect sits in the title bar beside the window buttons.
+    void placeQuickConnectInTitleBar();
+    bool titleBarDrag(QObject* watched, QEvent* event);
+    bool quickConnectInTitleBar_ = false;
+    int titleBarHeight_ = 0;
     void setConfigMode(bool defaults, bool inheritance);
     ConnectionDefaults defaults_;
     bool preferencesReady_ = false;
@@ -263,7 +277,10 @@ private:
     class OpenH264Codec* openh264_ = nullptr;
     bool openh264Enabled_ = true;
     QPointer<QDialog> optionsDialog_;
-    void notification(const QString& text);
+    enum class Notice { Info, Warning, Error };
+    void notification(const QString& text, Notice level = Notice::Info);
+    // "RDP alice@host:3389 (Office PC)" for session notifications.
+    QString describeSession(const SessionPane* pane) const;
     void updateNotificationDetails();
     void configureMenus();
     void rebuildJumpMenu();

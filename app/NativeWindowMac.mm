@@ -38,3 +38,15 @@ void rmNativeFinishMinimize(QWidget* widget) {
     NSWindow* window = reinterpret_cast<NSView*>(widget->winId()).window;
     if (window && window.visible && !window.miniaturized && !(window.styleMask & NSWindowStyleMaskFullScreen)) [window miniaturize:nil];
 }
+
+// Quick Connect shares the title bar row: hide the title text and report where
+// the window buttons end (x) and how tall the title bar is.
+QSize rmNativeTitleBarInset(QWidget* widget) {
+    NSWindow* window = reinterpret_cast<NSView*>(widget->winId()).window;
+    if (!window) return {};
+    window.titleVisibility = NSWindowTitleHidden;
+    NSButton* zoom = [window standardWindowButton:NSWindowZoomButton];
+    const int x = zoom ? int(NSMaxX(zoom.frame)) + 12 : 80;
+    const int height = int(NSHeight(window.frame) - NSHeight(window.contentLayoutRect));
+    return QSize(x, height > 0 ? height : 28);
+}

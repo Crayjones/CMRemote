@@ -9,6 +9,9 @@ struct PreferenceValues {
     bool categorized = true, propertyHelp = true, quickConnect = true, lockToolbars = false;
     ConnectionDefaults defaults;
     bool openh264 = true; // use Cisco's separately downloaded H.264 decoder
+    bool showPanels = false;       // View > Panel Tabs: the General/Panel N row above session tabs
+    bool commandAsControl = false; // macOS remote desktops: Command sends Control (physical Control sends Windows/Super)
+    bool autoUpdate = true;        // check GitHub for releases and install them
 };
 struct PreferenceReply {
     PreferenceValues values;

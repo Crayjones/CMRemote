@@ -43,7 +43,7 @@ add_library(rust_core STATIC IMPORTED GLOBAL)
 set_target_properties(rust_core PROPERTIES IMPORTED_LOCATION "${RUST_LIBRARY}")
 file(MAKE_DIRECTORY "${CARGO_TARGET}/cxxbridge")
 add_library(rm_frontend STATIC
-    app/Branding.cpp app/Branding.h app/ui/branding.qrc app/UpdateCheck.cpp app/UpdateCheck.h app/OpenH264.cpp app/OpenH264.h
+    app/Branding.cpp app/Branding.h app/ui/branding.qrc app/UpdateCheck.cpp app/UpdateCheck.h app/AutoUpdate.cpp app/AutoUpdate.h app/OpenH264.cpp app/OpenH264.h
     app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp app/MainWindow.h app/ui/test.ui app/ui/preview-icons.qrc
     app/ProfileEditor.cpp app/ProfileEditor.h app/PropertyDelegate.cpp app/PropertyDelegate.h app/RdpTarget.cpp app/RdpTarget.h
     app/PointerCapture.cpp app/PointerCapture.h

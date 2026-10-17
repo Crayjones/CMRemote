@@ -13,8 +13,9 @@ inline constexpr auto LatestReleaseApi = "https://api.github.com/repos/Crayjones
 QString currentVersion();
 // Dotted numeric comparison; a leading "v" and any "-suffix" are ignored. Unparseable → nullopt.
 std::optional<int> compareVersions(const QString& left, const QString& right);
-struct Release { QString version, url; };
-// GitHub's "latest release" JSON: tag_name and html_url.
+struct Asset { QString name, url, sha256; }; // sha256: lowercase hex from GitHub's asset digest, if published
+struct Release { QString version, url; QList<Asset> assets; };
+// GitHub's "latest release" JSON: tag_name, html_url and assets (release downloads only).
 std::optional<Release> parseLatestRelease(const QByteArray& json);
 }
 

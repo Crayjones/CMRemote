@@ -1,5 +1,7 @@
 #include "MainWindow.h"
 #include "UpdateCheck.h"
+#include "QuickConnect.h"
+#include "AutoUpdate.h"
 #include <QTextDocument>
 #include "Appearance.h"
 #include "Branding.h"
@@ -757,7 +759,7 @@ private slots:
         QStringList top; for (auto* action : w.menuBar()->actions()) top << action->text().remove('&');
         QCOMPARE(top, QStringList({"File", "View", "Tools", "Help"}));
         QStringList order; for (auto* action : w.findChild<QMenu*>("menuView")->actions()) order << (action->isSeparator() ? "|" : action->text());
-        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
+        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "Panel Tabs", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
         auto* file = w.findChild<QMenu*>("menuFile");
         for (const auto* name : {"actionSaveAsConnection", "actionSaveFile", "actionSaveFileAs", "actionCloseFile"})
             QVERIFY(file->actions().contains(w.findChild<QAction*>(name)));
@@ -807,6 +809,43 @@ private slots:
         QVERIFY(release); QCOMPARE(release->version, QString("0.2.0"));
         // Only this project's release pages are offered as download links.
         QVERIFY(!Updates::parseLatestRelease("{\"tag_name\":\"v9.0.0\",\"html_url\":\"https://example.com/CMRemote\"}"));
+        // Assets: only this repository's downloads, with GitHub's SHA-256 digest.
+        const auto digest = QString(64, 'a');
+        const auto withAssets = Updates::parseLatestRelease(QString("{\"tag_name\":\"v0.3.0\",\"html_url\":\"https://github.com/Crayjones/CMRemote/releases/tag/v0.3.0\",\"assets\":["
+            "{\"name\":\"CMRemote-0.3.0-macos-arm64.dmg\",\"browser_download_url\":\"https://github.com/Crayjones/CMRemote/releases/download/v0.3.0/CMRemote-0.3.0-macos-arm64.dmg\",\"digest\":\"sha256:%1\"},"
+            "{\"name\":\"evil.dmg\",\"browser_download_url\":\"https://example.com/evil.dmg\"},"
+            "{\"name\":\"../x\",\"browser_download_url\":\"https://github.com/Crayjones/CMRemote/releases/download/v0.3.0/x\"}]}").arg(digest).toUtf8());
+        QVERIFY(withAssets); QCOMPARE(withAssets->assets.size(), 1); QCOMPARE(withAssets->assets.first().sha256, digest);
+        QCOMPARE(Updates::checksumFor(QByteArray(digest.toLatin1() + "  CMRemote-0.3.0-windows-x64-setup.exe\n"), "CMRemote-0.3.0-windows-x64-setup.exe"), digest);
+        QVERIFY(Updates::checksumFor("bad  CMRemote.exe\n", "CMRemote.exe").isEmpty());
+        // A development build cannot replace itself.
+        QVERIFY(!Updates::installerFor(withAssets->assets, "0.3.0"));
+    }
+    void quickConnectPortFollowsProtocolDefault() {
+        QCOMPARE(followDefaultPort("host:3389", "rdp", "ssh"), QString("host:22"));
+        QCOMPARE(followDefaultPort("user@host:22", "ssh", "vnc"), QString("user@host:5900"));
+        QCOMPARE(followDefaultPort("[::1]:5900", "vnc", "rdp"), QString("[::1]:3389"));
+        QCOMPARE(followDefaultPort("host:8080", "rdp", "ssh"), QString("host:8080"));
+        QCOMPARE(followDefaultPort("host", "rdp", "ssh"), QString("host"));
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* combo = w.findChild<QComboBox*>("quickConnectCombo"); combo->setCurrentText("server:3389");
+        w.setQuickConnectProtocol("ssh"); QCOMPARE(combo->currentText(), QString("server:22"));
+        w.setQuickConnectProtocol("vnc"); QCOMPARE(combo->currentText(), QString("server:5900"));
+    }
+    void panelTabsHiddenByDefaultAndToggle() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* action = w.findChild<QAction*>("actionViewPanels"); auto* groups = w.findChild<QTabWidget*>("groupTabs");
+        QVERIFY(action && action->isEnabled() && !action->isChecked()); QVERIFY(groups->tabBar()->isHidden());
+        action->trigger(); QVERIFY(!groups->tabBar()->isHidden());
+        action->trigger(); QVERIFY(groups->tabBar()->isHidden());
+        // Adding a panel shows the row so the new panel can be reached.
+        w.addPanel(); QVERIFY(action->isChecked()); QVERIFY(!groups->tabBar()->isHidden());
+    }
+    void quickConnectSessionsOfferSaveBesideCopyPaste() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        w.setQuickConnectProtocol("ssh"); w.quickConnect("save.invalid", true);
+        auto* view = w.findChild<TerminalView*>(); QVERIFY(view);
+        QVERIFY(w.findChild<QAction*>("actionSessionSaveAsConnection"));
     }
     void updateCheckReachesGitHub() {
         // Contacts api.github.com; run with RM_NETWORK_TESTS=1.

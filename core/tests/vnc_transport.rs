@@ -83,7 +83,8 @@ fn init(s: &mut TcpStream, width: u16, height: u16) {
     let format = bytes::<20>(s); assert_eq!(&format[..4], &[0; 4]); assert_eq!(&format[4..], &BGRA);
     assert_eq!(bytes::<2>(s), [2, 0]); let count = u16::from_be_bytes(bytes(s));
     let encodings: Vec<i32> = (0..count).map(|_| i32::from_be_bytes(bytes(s))).collect();
-    assert_eq!(encodings, [16, 1, 0, -239, -223]); // No Tight, resize, clipboard extensions.
+    // ZRLE, Tight, TRLE, CopyRect, Raw, LastRect; no JPEG, resize or clipboard extensions.
+    assert_eq!(encodings, [16, 7, 15, 1, 0, -224, -239, -223]);
     assert_eq!(bytes::<10>(s), [3, 0, 0, 0, 0, 0, (width >> 8) as u8, width as u8, (height >> 8) as u8, height as u8]);
 }
 fn handshake(s: &mut TcpStream) { security(s, 8, &[1], 1); init(s, 4, 3); }
@@ -357,7 +358,7 @@ fn invalid_graphics_fail_without_delivering_bad_mutations() {
         (-223, 0, 0, 8193, 1, vec![]),
         (-223, 0, 0, 4096, 4096, vec![]),
         (-239, 1, 0, 1, 1, vec![1, 2, 3, 0, 0x80]),
-        (7, 0, 0, 1, 1, vec![]), // Tight was not advertised.
+        (5, 0, 0, 1, 1, vec![]), // Hextile is not advertised.
         (16, 0, 0, 1, 1, u32::MAX.to_be_bytes().to_vec()),
     ] {
         let (port, server) = fixture(move |mut s| { handshake(&mut s); update(&mut s, 1); rect(&mut s, x, y, w, h, encoding); s.write_all(&payload).unwrap(); eof(&mut s); });

@@ -24,7 +24,8 @@ QLineEdit, QComboBox { background: white; color: #202020; border: 1px solid #aba
 QTabWidget::pane { border: 1px solid #ababab; }
 QTabBar::tab { background: #eeeeee; color: #202020; border: 1px solid #ababab; padding: 4px 12px; }
 QTabBar::tab:selected { background: #0078d7; color: white; }
-QTabWidget#sessionTabs QTabBar::tab:selected { background: #dadada; color: #202020; }
+QTabWidget#sessionTabs QTabBar::tab, QTabWidget#panelSessionTabs QTabBar::tab { background: #dadada; color: #505050; }
+QTabWidget#sessionTabs QTabBar::tab:selected, QTabWidget#panelSessionTabs QTabBar::tab:selected { background: #ffffff; color: #202020; border-bottom-color: #ffffff; }
 QWidget#sessionSurface { background: #191919; }
 QLabel#sessionMessage { color: #dddddd; background: transparent; }
 QWidget#configHelp, QWidget#notificationDetails { background: #f0f0f0; }
@@ -91,7 +92,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
     <property name="title"><string>&amp;View</string></property>
     <addaction name="actionAddPanel"/>
     <widget class="QMenu" name="menuConnectionPanels"><property name="title"><string>Connection Panels</string></property><addaction name="actionGeneralPanel"/></widget>
-    <addaction name="menuConnectionPanels"/><addaction name="separator"/>
+    <addaction name="menuConnectionPanels"/><addaction name="actionViewPanels"/><addaction name="separator"/>
     <addaction name="actionViewConnections"/><addaction name="actionViewConfig"/><addaction name="actionViewNotifications"/><addaction name="actionViewScreenshots"/>
     <addaction name="separator"/>
     <widget class="QMenu" name="menuJumpTo"><property name="title"><string>Jump To</string></property><addaction name="actionNextSession"/><addaction name="actionPreviousSession"/></widget>
@@ -261,6 +262,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   <action name="actionViewMultiSsh"><property name="text"><string>Multi SSH Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
   <action name="actionReconnectAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Reconnect all connections</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionAddPanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/InsertPanel_16x.png</normaloff>:/original/InsertPanel_16x.png</iconset></property><property name="text"><string>Add Connection Panel</string></property></action>
+  <action name="actionViewPanels"><property name="text"><string>Panel Tabs</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>false</bool></property></action>
   <action name="actionGeneralPanel"><property name="text"><string>General</string></property></action>
   <action name="actionResetLayout"><property name="text"><string>Reset layout</string></property></action>
   <action name="actionLockToolbars"><property name="text"><string>Lock toolbar positions</string></property><property name="checkable"><bool>true</bool></property></action>

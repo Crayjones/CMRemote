@@ -726,7 +726,8 @@ private slots:
         QTest::keyClick(combo, Qt::Key_Down); QTest::keyClick(combo, Qt::Key_Return);
         QTRY_COMPARE(gridValue(window, "protocol").toString(), QString("ssh")); QVERIFY(waitGridSaved(window)); QCOMPARE(window.writes(), writes + 1);
         const auto saved = storedXml(path)["profiles"].toArray().first().toObject()["overrides"].toObject();
-        QCOMPARE(gridValue(window, "port").toInt(), 3389); QCOMPARE(saved["port"].toInt(), 3389);
+        // A port left at RDP's default follows the protocol to SSH's.
+        QCOMPARE(gridValue(window, "port").toInt(), 22); QCOMPARE(saved["port"].toInt(), 22);
         QCOMPARE(saved["protocol"].toString(), QString("ssh"));
         auto* spin = qobject_cast<QSpinBox*>(gridEditor(window, "port")); QVERIFY(spin); QCOMPARE(spin->minimum(), 1); QCOMPARE(spin->maximum(), 65535);
         auto* line = spin->findChild<QLineEdit*>(); line->selectAll(); QTest::keyClicks(line, "2201"); QTest::keyClick(spin, Qt::Key_Return);

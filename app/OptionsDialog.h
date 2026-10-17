@@ -18,6 +18,6 @@ private:
     std::unique_ptr<Ui::OptionsDialog> ui_;
     ApplicationPreferences* store_;
     QPointer<OpenH264Codec> codec_;
-    ConnectionDefaults defaults_;
+    PreferenceValues values_;
     bool saving_ = false, saved_ = false;
 };

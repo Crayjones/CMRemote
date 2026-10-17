@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include <QDir>
 #include "VncAuthentication.h"
 #include "ConnectionCrypto.h"
 #include "ProfileEditor.h"
@@ -85,6 +86,7 @@ void MainWindow::initializeFiles() {
         if (autoSaveQueued_) QTimer::singleShot(0, this, &MainWindow::startAutoSave);
     });
     connect(files_, &DocumentService::locked, this, [this](DocumentId id) {
+        if (const auto doc = context(id); doc && !closeApproved_) notification("Locked " + QDir::toNativeSeparators(doc->status().path) + "; saved passwords need the file password again.");
         if (credentialAttempt_ && credentialAttempt_->document == id) cancelCredentials();
         if (pendingPassword_ && pendingPassword_->profile.document == id) {
             pendingPassword_.reset();
@@ -152,6 +154,7 @@ DocumentId MainWindow::openConnectionFile(const QString& path, bool createNew) {
         }
         const auto id = reply.status.id;
         const bool prompt = reply.result.ok && !reply.status.unlocked && !reply.canceled;
+        if (reply.result.ok) notification("Opened " + QDir::toNativeSeparators(reply.status.path) + (reply.status.unlocked ? "" : " (locked; enter the file password to use saved passwords)"));
         fileReply(std::move(reply)); emit documentReady();
         if (prompt) QTimer::singleShot(0, this, [this, id] { promptFileUnlock(id); });
     }, createNew);
@@ -252,7 +255,7 @@ void MainWindow::fileReply(DocumentReply reply, QString profile, std::function<v
         return;
     }
     if (reply.committed) {
-        lastError_.clear(); notification("Connection XML saved");
+        lastError_.clear(); notification("Saved " + QDir::toNativeSeparators(doc->status().path) + (profile.isEmpty() ? QString() : " (" + doc->profiles().value(profile).value("name").toString() + ")"));
         if (!automatic && !profile.isEmpty() && owningEditor) selectConnectionProfile({id, profile});
     }
     if (automatic && !doc->status().warning.isEmpty()) {
@@ -330,6 +333,7 @@ void MainWindow::processFileUnlocks() {
         files_->unlock(id, std::move(master), [this, id, request, current](DocumentReply reply) {
             if (!current()) { finishFileUnlock(id, false); return; }
             if (reply.result.ok && !reply.canceled && reply.status.unlocked) {
+                notification("Unlocked " + QDir::toNativeSeparators(reply.status.path) + "; it stays unlocked until you lock or close it.");
                 fileReply(std::move(reply), {}, [this, id] { finishFileUnlock(id, true); }); return;
             }
             request->error = reply.result.error;

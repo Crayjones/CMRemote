@@ -1,4 +1,6 @@
 #include "Views.h"
+#include <QCoreApplication>
+#include <atomic>
 #include <QFile>
 #include <QEnterEvent>
 #include <QPixmap>
@@ -352,6 +354,9 @@ quint32 DesktopView::scanCode(int key) {
     default:return 0;
     }
 }
+namespace { std::atomic<bool> commandSendsControl{false}; }
+void DesktopView::setCommandAsControl(bool enabled) { commandSendsControl = enabled; }
+bool DesktopView::commandAsControl() { return commandSendsControl; }
 QString DesktopView::captureChordText() {
 #ifdef Q_OS_MACOS
     return QStringLiteral("Control+Option");
@@ -413,7 +418,14 @@ void DesktopView::key(QKeyEvent* e, bool down) {
     captureChord(e, down);
     if (mock_) emit mockInput(QString("Key %1 %2").arg(e->key()).arg(down ? "down" : "up"));
     else {
-        const auto scan = scanCode(e->key());
+        auto scan = scanCode(e->key());
+#ifdef Q_OS_MACOS
+        // Qt reports Command as Key_Control and physical Control as Key_Meta. By
+        // default each sends the key it is labeled with: Control → Ctrl, Command → Windows.
+        if (!QCoreApplication::testAttribute(Qt::AA_MacDontSwapCtrlAndMeta) && !commandSendsControl) {
+            if (e->key() == Qt::Key_Control) scan = 0x15b; else if (e->key() == Qt::Key_Meta) scan = 0x1d;
+        }
+#endif
         if (scan) {
             if (e->isAutoRepeat() && !down) { e->accept(); return; }
             if (down) held_.insert(scan); else held_.remove(scan);
