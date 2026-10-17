@@ -3,6 +3,9 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/settings.h>
 #include <freerdp/config.h>
+#include <winpr/crypto.h>
+#include <winpr/ssl.h>
+#include <cstring>
 
 QString rdpSecurityConflict(const RdpOptions& o) {
     const auto& mode = o.securityProtocol;
@@ -112,4 +115,19 @@ QString rdpFailureText(quint32 error, const RdpOptions& o, bool certificateRejec
     default: hint = "Check the network, credentials and Security Protocol."; break;
     }
     return "RDP connection failed: " + hint + " (" + name + ")";
+}
+
+QString rdpLegacyCryptoFailure() {
+    if (!winpr_InitializeSSL(WINPR_SSL_INIT_DEFAULT)) return "OpenSSL initialization";
+    // RFC 1320 and the classic "Key"/"Plaintext" RC4 vector.
+    static const BYTE md4Abc[] = {0xa4, 0x48, 0x01, 0x7a, 0xaf, 0x21, 0xd8, 0x52, 0x5f, 0xc1, 0x0a, 0xe8, 0x7a, 0xa6, 0x72, 0x9d};
+    static const BYTE rc4Plaintext[] = {0xbb, 0xf3, 0x16, 0xe8, 0xd9, 0x40, 0xaf, 0x0a, 0xd3};
+    BYTE digest[WINPR_MD4_DIGEST_LENGTH] = {};
+    if (!winpr_Digest(WINPR_MD_MD4, "abc", 3, digest, sizeof digest) || std::memcmp(digest, md4Abc, sizeof digest) != 0)
+        return "MD4 (NTLM/NLA sign-in)";
+    BYTE cipher[sizeof rc4Plaintext] = {};
+    WINPR_RC4_CTX* rc4 = winpr_RC4_New("Key", 3);
+    const bool rc4Ok = rc4 && winpr_RC4_Update(rc4, 9, "Plaintext", cipher) && std::memcmp(cipher, rc4Plaintext, sizeof cipher) == 0;
+    winpr_RC4_Free(rc4);
+    return rc4Ok ? QString() : QString("RC4 (legacy RDP encryption)");
 }

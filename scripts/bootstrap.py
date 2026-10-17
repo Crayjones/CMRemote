@@ -152,6 +152,9 @@ def freerdp_options(prefix, host):
     if not audio: off += audio_options
     options = ['-D' + option + '=OFF' for option in off]
     if audio: options += ['-D' + option + '=ON' for option in audio_options]
+    # NTLM/NLA needs MD4 and legacy RDP encryption needs RC4. OpenSSL 3 keeps both in its legacy
+    # provider, which libcrypto looks for at the build machine's path; compile them into WinPR instead.
+    options += ['-DWITH_INTERNAL_MD4=ON', '-DWITH_INTERNAL_RC4=ON']
     options += ['-DWITH_CLIENT_COMMON=ON', '-DWITH_CLIENT_CHANNELS=ON', '-DBUILD_SHARED_LIBS=ON',
                 '-DOPENSSL_ROOT_DIR=' + str(prefix), '-DWITH_OPENH264=ON',
                 # The Cisco-provided decoder is downloaded by the app and loaded at runtime, never linked.
@@ -262,6 +265,10 @@ def validate_freerdp_sdk(prefix, build, options):
                  'WITH_MEDIA_FOUNDATION', 'WITH_MEDIACODEC', 'WITH_FFMPEG_HWACCEL'):
         if any(line.startswith('#define ' + name) for line in config):
             raise RuntimeError('Installed FreeRDP enabled an excluded decoder path: ' + name)
+    winpr = (prefix / 'include/winpr3/winpr/config.h').read_text().splitlines()
+    for name in ('WITH_INTERNAL_MD4', 'WITH_INTERNAL_RC4'):
+        if '#define ' + name not in winpr:
+            raise RuntimeError('Installed WinPR depends on the OpenSSL legacy provider: ' + name)
 
 
 def install_openh264(source, build, prefix, jobs, env, machine=None):

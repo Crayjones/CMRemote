@@ -3,6 +3,9 @@
 #include "Branding.h"
 #include "DataPaths.h"
 #include "UpdateCheck.h"
+#ifdef RM_WITH_RDP
+#include "RdpSecurity.h"
+#endif
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
@@ -25,6 +28,14 @@ int main(int argc,char** argv) {
     parser.addOption({"smoke","Show the window and exit after 500 ms (no network connections)."});
     parser.addOption({"demo","Seed an empty development profile file for manual UI checks."});
     parser.process(app);
+#ifdef RM_WITH_RDP
+    // Packaged-artifact check: RDP sign-in crypto must not depend on the build machine.
+    if (parser.isSet("smoke")) {
+        if (const QString failure = rdpLegacyCryptoFailure(); !failure.isEmpty()) {
+            std::cerr << "RDP crypto unavailable: " << failure.toStdString() << '\n'; return 3;
+        }
+    }
+#endif
     QString directory;
     if (parser.isSet("dev-root") && parser.value("dev-root").isEmpty()) { std::cerr << "--dev-root must not be empty\n"; return 2; }
     try { directory = applicationDataDirectory(parser.value("dev-root")); }
@@ -44,7 +55,12 @@ int main(int argc,char** argv) {
         if (parser.isSet("demo") && parser.isSet("dev-root"))
             QObject::connect(&window, &MainWindow::documentReady, &window, &MainWindow::seedDemo);
         window.show();
-        if (parser.isSet("smoke")) QTimer::singleShot(500,&app,&QApplication::quit);
+        if (parser.isSet("smoke")) {
+            // Close through MainWindow's shutdown path. QApplication::quit() goes via Cocoa's
+            // terminate on macOS, which never completes for an app launched in the background.
+            QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, [] { QCoreApplication::exit(0); });
+            QTimer::singleShot(500, &window, [&window] { window.close(); });
+        }
         std::cout << rm::core_version().c_str() << '\n';
         return app.exec();
     } catch (const rust::Error& error) {

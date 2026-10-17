@@ -233,6 +233,7 @@ V106: gateway_usage≠never → FreeRDP GatewayEnabled + host/port/usage/creds; 
 V107: RDP mouse capture explicit (Control+Option macOS / Ctrl+Alt chord pressed+released alone, or session menu) + released on chord, focus loss, window deactivate, hide, disconnect; captured → local cursor hidden/locked, raw deltas scaled to remote pixels; server INPUT_FLAG_MOUSE_RELATIVE → relative events, else virtual absolute pointer following server SetPosition; user-requested scoped exception to T36 input freeze
 V108: RDP DesktopView ⊥ input method (no macOS press-and-hold accent picker; held keys repeat as scancodes); VNC view keeps input method for composed text
 V109: RDP Sounds per profile (native RedirectSound BringToThisComputer/LeaveAtRemoteComputer/DoNotPlay ↔ local/remote/none; absent = local, new = local) → AudioPlayback (rdpsnd, client loader registers rdpdr) / RemoteConsoleAudio; bundled macOS FreeRDP builds rdpsnd+rdpdr+CoreAudio with drive/printer/serial/parallel/smartcard/audin off (no device redirection); Linux build audio off until a PulseAudio runtime is packaged → local degrades to no audio
+V110: bundled WinPR compiles MD4+RC4 in (WITH_INTERNAL_MD4/RC4) → NTLM/NLA + legacy RDP encryption ⊥ OpenSSL legacy provider on every platform; FreeRDP auto-detected host deps pinned off (WITH_OPUS); packaged `--smoke` fails (exit 3) on MD4/RC4 known-answer miss; macOS CI + release launch relocated .app copy w/ fresh HOME + empty OPENSSL_MODULES → every dyld image ∈ bundle ∪ macOS
 ```
 
 ## §T
@@ -339,6 +340,7 @@ B35|2026-10-11|user-reported RDP slowdown, cause unproven → requested exact ce
 B36|2026-10-12|QRhiWidget reparented to a dragged-out window, moved back, window deleted → ~DesktopView calls removeCleanupCallback on freed QRhi (Cocoa SIGSEGV); retain hidden window until pane destroyed|V94
 B37|2026-10-12|tab-bar event filter iterated panels during QTabWidget::removeTab while a page was transiently null → findChild on nullptr (SIGSEGV); filter non-mouse events first, skip null pages|V94
 B38|2026-10-14|RdpWorker disabled NetworkAutoDetect/Heartbeat/Multitransport (rdpdr not built) → no MCS message channel; KRdp sends connect-time message-channel PDUs anyway → FreeRDP STATE_RUN_FAILED at capability exchange, generic failure text; request message channel via SupportHeartbeatPdu after channel load; first fix left NetworkAutoDetect off → KRdp continuous RTT requests in active state failed session ~2.5s after logon (autodetect.c rejects requests when disabled); enable NetworkAutoDetect after channel load too|V102,V103
+B39|2026-10-17|macOS/Windows packages shipped no OpenSSL legacy provider; libcrypto MODULESDIR baked to build-machine path → MD4/RC4 worked on dev Macs only, NLA + RDP-security sign-in failed on users' machines (B6 fixed Linux only); also FreeRDP auto-enabled Opus via pkg-config past CMAKE_IGNORE_PREFIX_PATH → Homebrew header/link failures; macOS `--smoke` never exited (QApplication::quit via Cocoa terminate ignored for background launch) so no packaged launch check existed|V110
 ```
 
 ## §R
