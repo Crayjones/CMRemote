@@ -139,6 +139,9 @@ def freerdp_options(prefix, host):
         'WITH_CLIENT', 'WITH_SERVER', 'WITH_SAMPLE', 'BUILD_TESTING', 'WITH_X11', 'WITH_WAYLAND',
         'WITH_FFMPEG', 'WITH_VIDEO_FFMPEG', 'WITH_DSP_FFMPEG', 'WITH_FFMPEG_HWACCEL', 'WITH_SWSCALE',
         'WITH_MEDIA_FOUNDATION', 'WITH_MEDIACODEC',
+        # FreeRDP turns Opus on whenever pkg-config finds one, which bypasses CMAKE_IGNORE_PREFIX_PATH
+        # and links an unpinned host libopus (Homebrew's breaks the <opus/opus.h> include) into the SDK.
+        'WITH_OPUS',
         'WITH_CUPS', 'WITH_PULSE', 'WITH_ALSA', 'WITH_OSS', 'WITH_SNDIO',
         'WITH_PCSC', 'WITH_PKCS11', 'WITH_FUSE', 'WITH_KRB5', 'WITH_GSSAPI', 'WITH_WINPR_JSON',
         'WITH_AAD', 'WITH_MANPAGES', 'WITH_CCACHE', 'WITH_LIBUSB', 'WITH_WEBVIEW',
