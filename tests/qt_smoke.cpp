@@ -192,7 +192,7 @@ private slots:
         QCOMPARE(about->textFormat(), Qt::RichText);
         auto* aboutLabel = about->findChild<QLabel*>("qt_msgbox_label"); QVERIFY(aboutLabel && aboutLabel->openExternalLinks());
         QTextDocument aboutText; aboutText.setHtml(about->text());
-        QCOMPARE(aboutText.toPlainText(), "CMRemote — Qt + Rust remote connection manager.\nVersion " + Updates::currentVersion() + "\nhttps://github.com/Crayjones/CMRemote");
+        QCOMPARE(aboutText.toPlainText(), QString("CMRemote — Cross-platform Multi Remote\nhttps://github.com/Crayjones/CMRemote"));
         QVERIFY(Updates::compareVersions(Updates::currentVersion(), "0.0.1").has_value());
         QVERIFY(about->text().contains("href=\"https://github.com/Crayjones/CMRemote\""));
         const auto aboutImage = about->iconPixmap().toImage(); QVERIFY(!aboutImage.isNull());

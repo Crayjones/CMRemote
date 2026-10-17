@@ -89,11 +89,11 @@ xmlrepair: missing Id → retained source address + generated runtime UUID; expl
 devmode: dev-mode flag → in-project config/data (`?` exact name)
 env: `CARGO_HOME`, `RUSTUP_HOME`, `CARGO_TARGET_DIR` → project-local paths
 toolenv: env wrappers + project-local prefixes, PATH scoping only launched commands
-scripts: bootstrap/build/run/test/package/clean scripts → exact commands ∈ README
+scripts: bootstrap/build/run/test/package/clean scripts → exact commands ∈ `docs/development.md`; README → short quickstart
 linux: Docker compose + `.devcontainer` → ARM64 native, AMD64 separate config
 ui: tree double-click → labeled session tab; toolbar/menus → add/edit/connect/disconnect/delete
 bridge: Rust Core ↔ C++ via cxx → owned password-free data; existing RdpTarget APIs retained + nonsecret SshTarget/SessionInfo SSH metadata/temporary SSH registration; detached/load/prepare/finalize candidates, no disk/direct-save APIs or worker Core borrow. Authentication exception solely I.sshbackend; SessionTarget account equality includes protocol, SSH username literal/domain inactive
-shell: `app/ui/test.ui` → production MainWindow; standalone preview retained; root `test.ui` preserved
+shell: `app/ui/test.ui` → production MainWindow + standalone preview; obsolete root `test.ui` & `app/ui/MainWindow.ui` removed, Git history retained
 profileedit: profile/document cell commit → validate + serialized automatic save; Escape cancels cell; flush active input + await outcome before switch/connect/drag/close; failure → retained value + Retry/Revert/Cancel
 quickconnect: RDP/SSH selector, default RDP; validated protocol/host/port/username + nonsecret protocol settings → temporary session; profile document/file unchanged; SSH port22 + session-only Password/Private key choice/path, no URI credentials
 saveas: temporary target + name + parent → complete validated profile in one commit; running target unchanged

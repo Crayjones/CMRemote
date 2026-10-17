@@ -3,6 +3,9 @@
 .dev
 build
 dist
+/target/
+/confcon.xml
+/.DS_Store
 __pycache__
 # Builds consume only the curated vendor asset subset.
 mRemoteNG

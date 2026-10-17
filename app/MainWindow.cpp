@@ -132,8 +132,8 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     connect(ui_->actionExit, &QAction::triggered, this, &QWidget::close);
     connect(ui_->actionAbout, &QAction::triggered, this, [this] {
         const QString repository = Updates::Repository;
-        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "About CMRemote", "CMRemote — Qt + Rust remote connection manager.<br>"
-            "Version " + Updates::currentVersion() + "<br><a href=\"" + repository + "\">" + repository + "</a>", QMessageBox::Ok, this);
+        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "About CMRemote", "CMRemote — Cross-platform Multi Remote<br>"
+            "<a href=\"" + repository + "\">" + repository + "</a>", QMessageBox::Ok, this);
         dialog->setObjectName("aboutDialog");
         dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
         dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);

@@ -132,7 +132,7 @@ private slots:
         QCOMPARE(about->windowTitle(), QString("About CMRemote UI preview"));
 #endif
         QCOMPARE(about->textFormat(), Qt::PlainText);
-        QCOMPARE(about->text().section('\n', 0, 0), QString("CMRemote shell preview."));
+        QCOMPARE(about->text(), QString("CMRemote — Cross-platform Multi Remote\nhttps://github.com/Crayjones/CMRemote"));
         const auto aboutImage = about->iconPixmap().toImage(); QVERIFY(!aboutImage.isNull());
         const QImage aboutExpected(QString(":/branding/cmremote-%1.png").arg(aboutImage.width()));
         QVERIFY(!aboutExpected.isNull());

@@ -132,8 +132,8 @@ PreviewWindow::PreviewWindow(QWidget* parent)
     });
     connect(ui->actionExit, &QAction::triggered, this, &QWidget::close);
     connect(ui->actionAbout, &QAction::triggered, this, [this] {
-        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "About CMRemote UI preview", "CMRemote shell preview.\n"
-            "No networking, credentials, profile files or backend changes.", QMessageBox::Ok, this);
+        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "About CMRemote UI preview", "CMRemote — Cross-platform Multi Remote\n"
+            "https://github.com/Crayjones/CMRemote", QMessageBox::Ok, this);
         dialog->setObjectName("aboutDialog");
         dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
         dialog->setTextFormat(Qt::PlainText); dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
