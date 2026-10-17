@@ -21,6 +21,10 @@ bool requestRdpMessageChannel(rdp_settings* settings);
 bool applyRdpAudio(rdp_settings* settings, const QString& sound);
 bool rdpAudioPlaybackAvailable();
 
+// NTLM/NLA (MD4) and legacy RDP encryption (RC4) work with no OpenSSL legacy provider
+// installed. Empty when both pass known answers, otherwise the failing algorithm.
+QString rdpLegacyCryptoFailure();
+
 enum class RdpCertificateDecision { Reject, Session };
 // Callback policy for certificates FreeRDP could not verify itself (no prompt, nothing stored).
 RdpCertificateDecision rdpCertificateDecision(const QString& serverAuth);

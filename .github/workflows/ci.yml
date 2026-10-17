@@ -1,4 +1,5 @@
-# Builds and runs the full test suite (Rust, Python, Qt offscreen) in the Linux container.
+# Builds and runs the full test suite (Rust, Python, Qt offscreen) in the Linux container, and on
+# macOS also packages the app and checks the package runs with nothing from the build machine.
 name: CI
 
 on:
@@ -25,3 +26,20 @@ jobs:
         run: python3 scripts/docker.py image --arch amd64
       - name: Test
         run: python3 scripts/docker.py test --arch amd64
+
+  macos:
+    name: macOS tests and package
+    runs-on: macos-15
+    timeout-minutes: 240
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.4"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap the macOS SDK
+        run: ./scripts/bootstrap-macos.sh --jobs 4
+      - name: Test
+        run: python3 scripts/project.py test
+      - name: Package
+        run: python3 scripts/project.py package --release --artifact-name CMRemote-ci
+      - name: Check the package on a clean profile
+        run: python3 scripts/test-macos-package.py dist/macos/CMRemote-ci.app

@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QXmlStreamReader>
 #include <freerdp/error.h>
@@ -45,7 +46,13 @@ QJsonObject effective(const QByteArray& projection) {
 
 class RdpSecurityTest : public QObject {
     Q_OBJECT
+    QTemporaryDir noProviders;
 private slots:
+    void initTestCase() {
+        // Like a user's Mac/PC: no OpenSSL module directory from the build machine. Must precede SSL init.
+        QVERIFY(noProviders.isValid()); qputenv("OPENSSL_MODULES", noProviders.path().toLocal8Bit());
+    }
+    void legacyCryptoNeedsNoOpenSslProvider() { QCOMPARE(rdpLegacyCryptoFailure(), QString()); }
     void securityModesMapExclusiveFlags() {
         const struct { const char* mode; Flags expected; } cases[] = {
             {"nla", {false, false, true, false}}, {"ext", {false, false, false, true}},

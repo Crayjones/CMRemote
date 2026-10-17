@@ -88,6 +88,10 @@ jobs:
           RM_TARGET_ARCH: ${{ matrix.target }}
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
         run: python3 scripts/project.py package --release --artifact-name "$NAME"
+      - name: Check the package on a clean profile
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
+        run: python3 scripts/test-macos-package.py "dist/macos/$NAME.app"
       - name: Disk image
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
