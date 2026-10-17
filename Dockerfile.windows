@@ -1,0 +1,20 @@
+# Linux host for the Windows x86_64 cross build. The toolchain, Qt and native SDK
+# are pinned downloads installed by scripts/bootstrap-windows.py into .dev/windows.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55
+LABEL org.remotemanager.project="remotemanager"
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential perl make git curl ca-certificates python3 python3-venv pkg-config file nsis \
+    libglib2.0-0t64 libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libdbus-1-3 libxkbcommon0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/bootstrap-requirements.txt /opt/remotemanager/
+RUN python3 -m venv /opt/remotemanager/python && \
+    /opt/remotemanager/python/bin/pip install --no-cache-dir -r /opt/remotemanager/bootstrap-requirements.txt
+ENV PATH=/opt/remotemanager/python/bin:$PATH
+ARG LOCAL_UID=1001
+ARG LOCAL_GID=1001
+RUN if ! getent group "$LOCAL_GID" >/dev/null; then groupadd --gid "$LOCAL_GID" dev; fi && \
+    if ! getent passwd "$LOCAL_UID" >/dev/null; then useradd --create-home --uid "$LOCAL_UID" --gid "$LOCAL_GID" --shell /bin/bash dev; fi
+WORKDIR /workspace
+USER ${LOCAL_UID}:${LOCAL_GID}
+CMD ["sleep", "infinity"]

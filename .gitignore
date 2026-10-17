@@ -1,0 +1,12 @@
+.dev/
+build/
+dist/
+.DS_Store
+__pycache__/
+*.pyc
+.claude/
+# Cargo.lock is source-controlled; target output belongs under build/<platform>.
+/target/
+# Required upstream UI assets are retained in vendor/mremoteng-assets/.
+# Local connection profiles may carry real hostnames and encrypted secrets.
+/confcon.xml

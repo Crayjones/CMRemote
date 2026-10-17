@@ -1,0 +1,59 @@
+name: remotemanager-${RM_PROJECT_ID:-local}-${RM_ARCH:-arm64}
+services:
+  dev:
+    image: remotemanager-dev:${RM_PROJECT_ID:-local}-${RM_ARCH:-arm64}
+    platform: linux/${RM_ARCH:-arm64}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+      args:
+        LOCAL_UID: "${LOCAL_UID:-1001}"
+        LOCAL_GID: "${LOCAL_GID:-1001}"
+      labels:
+        org.remotemanager.project: remotemanager
+        org.remotemanager.instance: ${RM_PROJECT_ID:-local}
+    labels:
+      org.remotemanager.project: remotemanager
+      org.remotemanager.instance: ${RM_PROJECT_ID:-local}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      RM_SDK_ROOT: /opt/remotemanager/.dev/linux
+      QT_QPA_PLATFORM: offscreen
+      RM_ARCH: ${RM_ARCH:-arm64}
+      XDG_CACHE_HOME: /workspace/.dev/linux/cache
+      PYTHONDONTWRITEBYTECODE: "1"
+      LANG: C.UTF-8
+      VSCODE_AGENT_FOLDER: /workspace/.dev/linux/vscode-server
+    init: true
+    command: ["sleep", "infinity"]
+  release:
+    extends: dev
+    image: remotemanager-release:${RM_PROJECT_ID:-local}-${RM_ARCH:-arm64}
+    build: !reset null
+    # flatpak build-export validates icons inside bubblewrap, which needs user namespaces.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+  windows:
+    image: remotemanager-windows:${RM_PROJECT_ID:-local}-${RM_ARCH:-arm64}
+    platform: linux/${RM_ARCH:-arm64}
+    labels:
+      org.remotemanager.project: remotemanager
+      org.remotemanager.instance: ${RM_PROJECT_ID:-local}
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      RM_TARGET_PLATFORM: windows
+      QT_QPA_PLATFORM: offscreen
+      XDG_CACHE_HOME: /workspace/.dev/windows/cache
+      PYTHONDONTWRITEBYTECODE: "1"
+      LANG: C.UTF-8
+    init: true
+    command: ["sleep", "infinity"]

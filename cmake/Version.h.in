@@ -1,0 +1,3 @@
+#pragma once
+// Generated from project(RemoteManager VERSION ...) in CMakeLists.txt; the release workflow sets it.
+#define RM_VERSION "@PROJECT_VERSION@"

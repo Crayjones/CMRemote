@@ -1,0 +1,23 @@
+mRemoteNG assets-only reference subset
+
+Upstream: https://github.com/mRemoteNG/mRemoteNG.git
+Commit: 4ad1c794fe2389cc5ca0bb1d271f009f44f6e0e6
+
+Only the image files named in manifest.json are retained. Resources/ and Icons/
+files are byte-for-byte copies from that revision. reference/reconnect.png and
+reference/external-tools.png are exact decoded standalone byte arrays from the
+named mRemoteNG/UI/Window/ConnectionWindow.resx entries in the manifest. No .NET
+code, full .resx source, object deserialization or full upstream clone is required
+by the build or preview. The obsolete application logo is excluded; the
+Icons/mRemoteNG.ico connection-profile compatibility icon is intentionally kept.
+
+COPYING.txt and CREDITS.md are unmodified upstream files. COPYING.txt contains
+GPL v2. Aggregate CREDITS.md notices include the Silk Icon Set, copyright
+2005-2008 FAMFAMFAM, CC BY 2.5, and PuTTY, copyright 1997-2017 Simon Tatham, MIT.
+These aggregate notices are not a per-image license assignment. Components
+credited by upstream are not necessarily included in this subset.
+
+Per-image rights are unresolved. Aggregate upstream notices do not establish the license of each image. The images are redistributed with CMRemote under the terms of the upstream GPL v2 distribution, with its notices.
+CMRemote itself is licensed GPL-2.0-or-later; see LICENSE at the project root.
+This NOTICE.txt is local migration metadata;
+it is not an upstream notice or a replacement license.

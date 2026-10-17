@@ -1,0 +1,186 @@
+# Actions → Release → Run workflow. Sets the version, tags it, builds every
+# installer from that tag and publishes them as a GitHub release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, for example 0.2.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Oldest macOS the app supports: the prebuilt Qt 6.12 frameworks require 14.4.
+  MACOSX_DEPLOYMENT_TARGET: "14.4"
+
+jobs:
+  prepare:
+    name: Set version and tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Require the main branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run releases from main (this run used ${GITHUB_REF})."
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Update the version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          version=$(python3 scripts/set-version.py "$REQUESTED")
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists. Choose a new version."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Commit and tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet; then
+            git commit -am "Release $TAG"
+          fi
+          git tag -a "$TAG" -m "CMRemote $TAG"
+          git push origin HEAD:main "$TAG"
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: arm64
+          - arch: x64
+            target: amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Bootstrap the macOS SDK
+        run: ./scripts/bootstrap-macos.sh --jobs 4
+      - name: Bootstrap the Intel SDK
+        if: matrix.target == 'amd64'
+        run: ./scripts/bootstrap-macos.sh --jobs 4 --arch amd64
+      - name: Package
+        env:
+          RM_TARGET_ARCH: ${{ matrix.target }}
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
+        run: python3 scripts/project.py package --release --artifact-name "$NAME"
+      - name: Disk image
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
+        run: python3 scripts/release.py macos --arch ${{ matrix.arch }} --bundle "dist/macos/$NAME.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/macos/release/*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Allow the Flatpak sandbox
+        # flatpak build-export runs bubblewrap, which needs unprivileged user namespaces.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Build image
+        run: python3 scripts/docker.py image --arch amd64
+      - name: Package
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-linux-x86_64
+        run: python3 scripts/docker.py package --release --artifact-name "$NAME" --arch amd64
+      - name: AppImage and Flatpak
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-linux-x86_64
+        run: |
+          python3 scripts/docker.py release-image --arch amd64
+          python3 scripts/docker.py release --arch amd64 --package "dist/linux/amd64/$NAME"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            dist/linux/release/*.appimage
+            dist/linux/release/*.flatpak
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - name: Build image
+        run: python3 scripts/docker.py windows-image --arch amd64
+      - name: Bootstrap the Windows SDK
+        run: python3 scripts/docker.py windows --arch amd64 python3 scripts/bootstrap-windows.py --jobs 4
+      - name: Package
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-windows-x64
+        run: python3 scripts/docker.py windows --arch amd64 python3 scripts/project.py package --release --artifact-name "$NAME"
+      - name: Installer
+        env:
+          NAME: CMRemote-${{ needs.prepare.outputs.version }}-windows-x64
+        run: |
+          python3 scripts/docker.py windows --arch amd64 python3 scripts/release.py windows --package "dist/windows/$NAME"
+          cp "dist/windows/$NAME-windows.zip" "dist/windows/release/$NAME-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/windows/release/*-setup.exe
+            dist/windows/release/*-portable.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [prepare, macos, linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release create "$TAG" assets/* --title "CMRemote $VERSION" --generate-notes \
+            --notes-file .github/release-notes.md

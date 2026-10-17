@@ -1,0 +1,10 @@
+[workspace]
+members = ["core"]
+exclude = ["vendor/vnc-rs"]
+resolver = "2"
+
+# The app links the dev (debug) core. Optimize third-party crates, including the
+# vendored VNC decoder and zlib, so ZRLE/crypto run at release speed while the
+# workspace crate stays debuggable.
+[profile.dev.package."*"]
+opt-level = 3

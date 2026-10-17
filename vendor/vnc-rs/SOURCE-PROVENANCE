@@ -1,0 +1,11 @@
+Vendored package: vnc-rs 0.6.0 (library crate name: vnc)
+Published source: https://static.crates.io/crates/vnc-rs/vnc-rs-0.6.0.crate
+Archive SHA-256: 0b757c55558e81e08e60f1a3153ba5bcffe7196719bc885e7e620400b0d81a4d
+Upstream VCS revision: 41f974dd928bbe521ccc63faf73d9c5d0b230026
+Revision evidence: .cargo_vcs_info.json retained from published archive
+License expression: MIT OR Apache-2.0
+License files: LICENSE-MIT and LICENSE-APACHE retained verbatim
+Embedded DES notice: src/client/security/des.rs retained verbatim
+Baseline archive: ../vnc-rs-0.6.0.crate, retained byte-for-byte
+Local changes: PATCHES.md and patches/vnc-rs-0.6.0.patch
+Published manifests: Cargo.toml and Cargo.toml.orig retained verbatim

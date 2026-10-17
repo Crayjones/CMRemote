@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OptionsDialog</class>
+ <widget class="QDialog" name="OptionsDialog">
+  <property name="windowTitle"><string>Options</string></property>
+  <property name="minimumSize"><size><width>480</width><height>300</height></size></property>
+  <layout class="QVBoxLayout" name="layout">
+   <item><layout class="QHBoxLayout" name="pagesLayout">
+    <item><widget class="QListWidget" name="categories">
+     <property name="maximumSize"><size><width>150</width><height>16777215</height></size></property>
+     <item><property name="text"><string>Appearance</string></property></item>
+     <item><property name="text"><string>Tabs &amp; Panels</string></property></item>
+     <item><property name="text"><string>Remote Desktop</string></property></item>
+    </widget></item>
+    <item><widget class="QStackedWidget" name="pages">
+     <widget class="QWidget" name="appearancePage"><layout class="QVBoxLayout" name="appearanceLayout">
+      <item><widget class="QLabel" name="appearanceTitle"><property name="text"><string>Config appearance</string></property></widget></item>
+      <item><widget class="QCheckBox" name="categorized"><property name="text"><string>Group properties by category</string></property></widget></item>
+      <item><widget class="QCheckBox" name="propertyHelp"><property name="text"><string>Show property help</string></property></widget></item>
+      <item><spacer name="appearanceSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
+     </layout></widget>
+     <widget class="QWidget" name="panelsPage"><layout class="QVBoxLayout" name="panelsLayout">
+      <item><widget class="QLabel" name="panelsTitle"><property name="text"><string>Toolbars</string></property></widget></item>
+      <item><widget class="QCheckBox" name="quickConnect"><property name="text"><string>Show Quick Connect toolbar</string></property></widget></item>
+      <item><widget class="QCheckBox" name="lockToolbars"><property name="text"><string>Lock toolbar positions</string></property></widget></item>
+      <item><spacer name="panelsSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
+     </layout></widget>
+     <widget class="QWidget" name="rdpPage"><layout class="QVBoxLayout" name="rdpLayout">
+      <item><widget class="QLabel" name="rdpTitle"><property name="text"><string>Video</string></property></widget></item>
+      <item><widget class="QCheckBox" name="openh264"><property name="text"><string>Use H.264 video (downloads Cisco's OpenH264)</string></property></widget></item>
+      <item><widget class="QLabel" name="openh264Credit"><property name="text"><string>OpenH264 Video Codec provided by Cisco Systems, Inc.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="openh264Status"><property name="text"><string/></property><property name="wordWrap"><bool>true</bool></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
+      <item><widget class="QLabel" name="openh264Help"><property name="text"><string>H.264 makes video and animation smoother on slow connections. When it is off, remote desktops use other graphics formats.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><spacer name="rdpSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
+     </layout></widget>
+    </widget></item>
+   </layout></item>
+   <item><widget class="QLabel" name="error"><property name="text"><string/></property><property name="wordWrap"><bool>true</bool></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
+   <item><widget class="QDialogButtonBox" name="buttons"><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

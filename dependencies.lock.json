@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "versions": {
+    "rust": "1.99.0",
+    "cxx": "1.0.202",
+    "qt": "6.12.0",
+    "cmake": "4.4.4",
+    "ninja": "1.13.2",
+    "freerdp": "3.32.1",
+    "openssl": "3.5.9",
+    "zlib": "1.3.2",
+    "aqtinstall": "3.3.0",
+    "py7zr": "1.0.0",
+    "russh": "0.64.1",
+    "tokio": "1.48.0",
+    "ring": "0.17.14",
+    "libvterm": "0.3.3",
+    "vnc-rs": "0.6.0",
+    "libvncclient_planned": "0.9.15",
+    "sdl3": "3.2.26",
+    "sdl3_ttf": "3.2.2",
+    "freetype_comparator": "2.13.3",
+    "openh264": "2.6.0",
+    "appimagetool": "1.9.1",
+    "appimage_runtime": "20251108",
+    "flatpak_kde_runtime": "6.11",
+    "llvm_mingw": "20260602",
+    "nsis_ubuntu": "3.09"
+  },
+  "artifacts": {
+    "rust-notice-delegate-apache": {
+      "url": "https://raw.githubusercontent.com/kobzol/rust-delegate/b129d4cbf4cc499eff7743365dcb0fe5d8d2e820/LICENSE-APACHE",
+      "file": "rust-notice-delegate-apache.txt",
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1"
+    },
+    "rust-notice-delegate-mit": {
+      "url": "https://raw.githubusercontent.com/kobzol/rust-delegate/b129d4cbf4cc499eff7743365dcb0fe5d8d2e820/LICENSE-MIT",
+      "file": "rust-notice-delegate-mit.txt",
+      "sha256": "be7ee8aa49dc586023669a0c600a0536fce6a9f61264a53a67cdd842564ed899"
+    },
+    "rust-notice-pageant": {
+      "url": "https://raw.githubusercontent.com/warp-tech/russh/c0fe3b1d32c8f6b6f4218dd4761cf03b55a4dced/LICENSE.txt",
+      "file": "rust-notice-pageant.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "rust-notice-russh": {
+      "url": "https://raw.githubusercontent.com/warp-tech/russh/e5d80a07dc554480b6ea3b2e14adfc190407b627/LICENSE.txt",
+      "file": "rust-notice-russh.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "rust-notice-russh-cryptovec": {
+      "url": "https://raw.githubusercontent.com/warp-tech/russh/907c732562c5732aad6c140dba958eafddc41ba0/LICENSE.txt",
+      "file": "rust-notice-russh-cryptovec.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "rust-notice-russh-util": {
+      "url": "https://raw.githubusercontent.com/warp-tech/russh/3d09c20c52a542ffa327723d3a44cb1edd9b0ca4/LICENSE-2.0.txt",
+      "file": "rust-notice-russh-util.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    "freerdp": {
+      "url": "https://pub.freerdp.com/releases/freerdp-3.32.1.tar.gz",
+      "file": "freerdp.tar.gz",
+      "sha256": "3021cf8848efbd0064664e187cb61e6101e4e74a4d8ffb495d9f7715e22d67de"
+    },
+    "openssl": {
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+      "file": "openssl.tar.gz",
+      "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+    },
+    "zlib": {
+      "url": "https://zlib.net/zlib-1.3.2.tar.gz",
+      "file": "zlib.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+    },
+    "libvterm": {
+      "url": "https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz",
+      "file": "libvterm-0.3.3.tar.gz",
+      "sha256": "09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0"
+    },
+    "vnc-rs": {
+      "url": "https://static.crates.io/crates/vnc-rs/vnc-rs-0.6.0.crate",
+      "file": "vnc-rs-0.6.0.crate",
+      "sha256": "0b757c55558e81e08e60f1a3153ba5bcffe7196719bc885e7e620400b0d81a4d"
+    },
+    "russh": {
+      "url": "https://static.crates.io/crates/russh/russh-0.64.1.crate",
+      "file": "russh-0.64.1.crate",
+      "sha256": "ba61e87b9ec9a39a59a6bbed4c0b8ff7fb07073405b24a767a1f2c8560ac8f58"
+    },
+    "sdl3": {
+      "url": "https://github.com/libsdl-org/SDL/releases/download/release-3.2.26/SDL3-3.2.26.tar.gz",
+      "file": "SDL3-3.2.26.tar.gz",
+      "sha256": "dad488474a51a0b01d547cd2834893d6299328d2e30f479a3564088b5476bae2"
+    },
+    "sdl3_ttf": {
+      "url": "https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2.tar.gz",
+      "file": "SDL3_ttf-3.2.2.tar.gz",
+      "sha256": "63547d58d0185c833213885b635a2c0548201cc8f301e6587c0be1a67e1e045d"
+    },
+    "freetype_comparator": {
+      "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz",
+      "file": "freetype-2.13.3.tar.xz",
+      "sha256": "0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289"
+    },
+    "openh264": {
+      "url": "https://codeload.github.com/cisco/openh264/tar.gz/refs/tags/v2.6.0",
+      "file": "openh264-2.6.0.tar.gz",
+      "sha256": "558544ad358283a7ab2930d69a9ceddf913f4a51ee9bf1bfb9e377322af81a69"
+    },
+    "cxx": {
+      "url": "https://static.crates.io/crates/cxx/cxx-1.0.202.crate",
+      "file": "cxx.crate",
+      "sha256": "13f6de320895f42e6e081abb5c7983bedcf0b6d0ff9323de0d33f620c8ac1199"
+    },
+    "cxx-build": {
+      "url": "https://static.crates.io/crates/cxx-build/cxx-build-1.0.202.crate",
+      "file": "cxx-build.crate",
+      "sha256": "4fde53ca86b9704a943fef0f1e1d836239a6aedca5de3c65fa9f97ec0bd46d39"
+    },
+    "rust-manifest": {
+      "url": "https://static.rust-lang.org/dist/channel-rust-1.99.0.toml",
+      "file": "rust-1.99.0.toml",
+      "sha256": "ce6dddc886364f8d786514771212cebe9b731ba82d6b859951c6b0ccc516b6a2"
+    },
+    "cmake-linux-arm64": {
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-linux-aarch64.tar.gz",
+      "file": "cmake-4.4.4-linux-aarch64.tar.gz",
+      "sha256": "a1b6cc63636a0e55c63257cf3315a8a5f129e42fade25db1afea4ff8ab06f25e"
+    },
+    "cmake-linux-amd64": {
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-linux-x86_64.tar.gz",
+      "file": "cmake-4.4.4-linux-x86_64.tar.gz",
+      "sha256": "e5bb807f7728cb60cd8b27ebc97a2edb469b68655f21e844a600c3575b76f5bb"
+    },
+    "cmake-macos": {
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-macos-universal.tar.gz",
+      "file": "cmake-4.4.4-macos-universal.tar.gz",
+      "sha256": "4b7b73704b1db9b374e5c9ab8e17ac6148b817b6396ee75cd94a852cbac9d305"
+    },
+    "ninja-linux-arm64": {
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux-aarch64.zip",
+      "file": "ninja-linux-aarch64.zip",
+      "sha256": "fd2cacc8050a7f12a16a2e48f9e06fca5c14fc4c2bee2babb67b58be17a607fc"
+    },
+    "ninja-linux-amd64": {
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip",
+      "file": "ninja-linux.zip",
+      "sha256": "5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6"
+    },
+    "ninja-macos": {
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-mac.zip",
+      "file": "ninja-mac.zip",
+      "sha256": "c99048673aa765960a99cf10c6ddb9f1fad506099ff0a0e137ad8960a88f321b"
+    },
+    "rustup-macos-arm64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-apple-darwin/rustup-init",
+      "file": "rustup-init-macos-arm64",
+      "sha256": "20ef5516c31b1ac2290084199ba77dbbcaa1406c45c1d978ca68558ef5964ef5"
+    },
+    "rustup-macos-amd64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-apple-darwin/rustup-init",
+      "file": "rustup-init-macos-amd64",
+      "sha256": "9c331076f62b4d0edeae63d9d1c9442d5fe39b37b05025ec8d41c5ed35486496"
+    },
+    "rustup-linux-arm64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/aarch64-unknown-linux-gnu/rustup-init",
+      "file": "rustup-init-linux-arm64",
+      "sha256": "e3853c5a252fca15252d07cb23a1bdd9377a8c6f3efa01531109281ae47f841c"
+    },
+    "rustup-linux-amd64": {
+      "url": "https://static.rust-lang.org/rustup/archive/1.28.2/x86_64-unknown-linux-gnu/rustup-init",
+      "file": "rustup-init-linux-amd64",
+      "sha256": "20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
+    },
+    "qt-metadata-macos": {
+      "url": "https://download.qt.io/online/qtsdkrepository/mac_x64/desktop/qt6_6120/qt6_6120/Updates.xml",
+      "file": "qt-mac_x64-updates.xml",
+      "sha256": "0932ba7a2c1f2b9978cb6199527dd4abb85a95791ce8afc72b7a1cf53943466c"
+    },
+    "qtbase-macos": {
+      "url": "https://download.qt.io/online/qtsdkrepository/mac_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.clang_64/6.12.0-0-202609280346qtbase-MacOS-MacOS_26-Clang-MacOS-MacOS_26-X86_64-ARM64.7z",
+      "file": "qtbase-macos.7z",
+      "sha256": "1e0df66ed17ae97997971ff481983c5c0b7497a52ef52f699725701401fd80ee"
+    },
+    "qtshadertools-macos": {
+      "url": "https://download.qt.io/online/qtsdkrepository/mac_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.addons.qtshadertools.clang_64/6.12.0-0-202609280346qtshadertools-MacOS-MacOS_26-Clang-MacOS-MacOS_26-X86_64-ARM64.7z",
+      "file": "qtshadertools-macos.7z",
+      "sha256": "19999f9c72562126a31114ee07112422b9c6b4a31f04df794eba7227bc0f1292"
+    },
+    "qt-metadata-linux-arm64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_arm64/desktop/qt6_6120/qt6_6120/Updates.xml",
+      "file": "qt-linux_arm64-updates.xml",
+      "sha256": "9ad3f6beb1ac93db544946ddd544bd14fbe90ffae27953f70edcde1f59a8111c"
+    },
+    "qtbase-linux-arm64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_arm64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_arm64/6.12.0-0-202609280346qtbase-Linux-Ubuntu_24_04-GCC-Linux-Ubuntu_24_04-AARCH64.7z",
+      "file": "qtbase-linux-arm64.7z",
+      "sha256": "d73c10b46bfb81b7bd15e143c7d5b87d5f21ab6180b305709d67b2b356b4d38a"
+    },
+    "qtwayland-linux-arm64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_arm64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_arm64/6.12.0-0-202609280346qtwayland-Linux-Ubuntu_24_04-GCC-Linux-Ubuntu_24_04-AARCH64.7z",
+      "file": "qtwayland-linux-arm64.7z",
+      "sha256": "0ad298a6a1391a8c6a81ef8957a7810750d1dc27f9cbb12056576267600131e0"
+    },
+    "icu-linux-arm64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_arm64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_arm64/6.12.0-0-202609280346icu-linux-Debian11.6-arm64.7z",
+      "file": "icu-linux-arm64.7z",
+      "sha256": "7f0650e312f06949999e60fa20609650f39f120412c61d930ec88002991fdb4e"
+    },
+    "qtshadertools-linux-arm64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_arm64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.addons.qtshadertools.linux_gcc_arm64/6.12.0-0-202609280346qtshadertools-Linux-Ubuntu_24_04-GCC-Linux-Ubuntu_24_04-AARCH64.7z",
+      "file": "qtshadertools-linux-arm64.7z",
+      "sha256": "68c8b1c94857c08a1dbec359d25ce2e2f643976810494e24295fbc63edb8b40e"
+    },
+    "qt-metadata-linux-amd64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_6120/qt6_6120/Updates.xml",
+      "file": "qt-linux_x64-updates.xml",
+      "sha256": "615f617ad82e9c9b50e339ce19eb340901919ea29386a93843be236cb77ca5a7"
+    },
+    "qtbase-linux-amd64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_64/6.12.0-0-202609280346qtbase-Linux-RHEL_9_6-GCC-Linux-RHEL_9_6-X86_64.7z",
+      "file": "qtbase-linux-amd64.7z",
+      "sha256": "943023b929d0c08eafe7341700b5ed7601284410b7afd6093f950be291d1d7cd"
+    },
+    "qtwayland-linux-amd64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_64/6.12.0-0-202609280346qtwayland-Linux-RHEL_9_6-GCC-Linux-RHEL_9_6-X86_64.7z",
+      "file": "qtwayland-linux-amd64.7z",
+      "sha256": "14c0dc4c8147cf9f7f64909b27ae5c9ab2aaa8ad6625bc2248c693c2a327ab5b"
+    },
+    "icu-linux-amd64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.linux_gcc_64/6.12.0-0-202609280346icu-linux-Rhel8.6-x86_64.7z",
+      "file": "icu-linux-amd64.7z",
+      "sha256": "1fdbcd67b1760f3a3f031c64637a9f19992aed2f35aa615e12a468f8c655d4da"
+    },
+    "qtshadertools-linux-amd64": {
+      "url": "https://download.qt.io/online/qtsdkrepository/linux_x64/desktop/qt6_6120/qt6_6120/qt.qt6.6120.addons.qtshadertools.linux_gcc_64/6.12.0-0-202609280346qtshadertools-Linux-RHEL_9_6-GCC-Linux-RHEL_9_6-X86_64.7z",
+      "file": "qtshadertools-linux-amd64.7z",
+      "sha256": "66892450a2baf559b230778f34f879db76d93fdc58b4241522a5d495643f00a5"
+    },
+    "appimagetool-linux-amd64": {
+      "url": "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
+      "file": "appimagetool-1.9.1-x86_64.AppImage",
+      "sha256": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+    },
+    "appimage-runtime-linux-amd64": {
+      "url": "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+      "file": "appimage-runtime-20251108-x86_64",
+      "sha256": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
+    },
+    "qt-metadata-windows": {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6120/qt6_6120_llvm_mingw/Updates.xml",
+      "file": "qt-windows_llvm_mingw-updates.xml",
+      "sha256": "144fda3deda0e14031890b719aa396d8e8e0e20823adcd0ded2569f52e1f62b4"
+    },
+    "qtbase-windows": {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6120/qt6_6120_llvm_mingw/qt.qt6.6120.win64_llvm_mingw/6.12.0-0-202609280346qtbase-Windows-Windows_11_24H2-Clang-Windows-Windows_11_24H2-X86_64.7z",
+      "file": "qtbase-windows.7z",
+      "sha256": "391aa3976b33577f4f953958d58c5112aad1c2c760039c49dc178cb0bd1a7db6"
+    },
+    "qtshadertools-windows": {
+      "url": "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt6_6120/qt6_6120_llvm_mingw/qt.qt6.6120.addons.qtshadertools.win64_llvm_mingw/6.12.0-0-202609280346qtshadertools-Windows-Windows_11_24H2-Clang-Windows-Windows_11_24H2-X86_64.7z",
+      "file": "qtshadertools-windows.7z",
+      "sha256": "5ccf292854e7fc1bcd6a3bbd9f44d1654abab159b850c5e1371d1c2d08adf424"
+    },
+    "llvm-mingw-linux-arm64": {
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-aarch64.tar.xz",
+      "file": "llvm-mingw-20260602-ucrt-ubuntu-22.04-aarch64.tar.xz",
+      "sha256": "e71b61c968f65f94ed3878ca22ab663d7854d91c053c1b8a824ac2f1c9a18503"
+    },
+    "llvm-mingw-linux-amd64": {
+      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz",
+      "file": "llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz",
+      "sha256": "9d191203f9768ead60662d3ae53cdf28e0a28b1e6d44b7f329b9202cb2add337"
+    }
+  },
+  "vendored_rust": {
+    "vnc-rs": {
+      "version": "0.6.0",
+      "license": "MIT OR Apache-2.0",
+      "path": "vendor/vnc-rs",
+      "artifact": "vnc-rs",
+      "archive": "vendor/vnc-rs-0.6.0.crate",
+      "provenance": "SOURCE-PROVENANCE",
+      "patch_notes": "PATCHES.md"
+    }
+  }
+}

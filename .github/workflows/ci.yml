@@ -1,0 +1,27 @@
+# Builds and runs the full test suite (Rust, Python, Qt offscreen) in the Linux container.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: python3 scripts/docker.py image --arch amd64
+      - name: Test
+        run: python3 scripts/docker.py test --arch amd64

@@ -1,0 +1,722 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "url": "https://github.com/mRemoteNG/mRemoteNG.git",
+    "commit": "4ad1c794fe2389cc5ca0bb1d271f009f44f6e0e6"
+  },
+  "licensing_warning": "Per-image rights are unresolved. Aggregate upstream notices do not establish the license of each image. The images are redistributed with CMRemote under the terms of the upstream GPL v2 distribution, with its notices.",
+  "assets": [
+    {
+      "source": "mRemoteNG/Icons/Admin.ico",
+      "destination": "Icons/Admin.ico",
+      "aliases": [
+        ":/connection-icons/Admin.ico"
+      ],
+      "sha256": "c6c432cab16d01bd15e22f69fa0d0cb49e6d7789a4f31149367450406df38f42"
+    },
+    {
+      "source": "mRemoteNG/Icons/Anti Virus.ico",
+      "destination": "Icons/Anti Virus.ico",
+      "aliases": [
+        ":/connection-icons/Anti Virus.ico"
+      ],
+      "sha256": "875195ff7cd4660fd86e7b1620fc1e8027c44e2dcb541d76c6ef423c8d0b682f"
+    },
+    {
+      "source": "mRemoteNG/Icons/Apple.ico",
+      "destination": "Icons/Apple.ico",
+      "aliases": [
+        ":/connection-icons/Apple.ico"
+      ],
+      "sha256": "ffdb2feeb9e943fb8bc5c898977b05c7c98fecf4292fc40ff51e4a2fa6e23f69"
+    },
+    {
+      "source": "mRemoteNG/Icons/Backup.ico",
+      "destination": "Icons/Backup.ico",
+      "aliases": [
+        ":/connection-icons/Backup.ico"
+      ],
+      "sha256": "2ca2db2507d534b30b8f08966d853a8384f7d444dcb5f532492ad3b57a3e815c"
+    },
+    {
+      "source": "mRemoteNG/Icons/Build Server.ico",
+      "destination": "Icons/Build Server.ico",
+      "aliases": [
+        ":/connection-icons/Build Server.ico"
+      ],
+      "sha256": "fed26728bff88f7ca87505ce8e8fb790c264d7c8b9b1cab65b1318cd09e5c6ee"
+    },
+    {
+      "source": "mRemoteNG/Icons/Console.ico",
+      "destination": "Icons/Console.ico",
+      "aliases": [
+        ":/connection-icons/Console.ico"
+      ],
+      "sha256": "84d2d27a109bf5851ca54eb9b75944638bb28ca2bc5b5d1c2b9c0c08798c259b"
+    },
+    {
+      "source": "mRemoteNG/Icons/Database.ico",
+      "destination": "Icons/Database.ico",
+      "aliases": [
+        ":/connection-icons/Database.ico"
+      ],
+      "sha256": "263cd657118e3e8b52d1cdae342cf102a18b7c0cec8395578c4c2b7a57b919fc"
+    },
+    {
+      "source": "mRemoteNG/Icons/Domain Controller.ico",
+      "destination": "Icons/Domain Controller.ico",
+      "aliases": [
+        ":/connection-icons/Domain Controller.ico"
+      ],
+      "sha256": "8258c6e5ebe6b1bbd48bae5af2641eb5aed27530d6916d239d4fa2ff8af1cc29"
+    },
+    {
+      "source": "mRemoteNG/Icons/ESX.ico",
+      "destination": "Icons/ESX.ico",
+      "aliases": [
+        ":/connection-icons/ESX.ico"
+      ],
+      "sha256": "636b835f7997b246ed086b2e2465c1faf9d4db9111442181b70ed3db493bee65"
+    },
+    {
+      "source": "mRemoteNG/Icons/Fax.ico",
+      "destination": "Icons/Fax.ico",
+      "aliases": [
+        ":/connection-icons/Fax.ico"
+      ],
+      "sha256": "a658d2cfa8b95822d9fd0988ec2e5ac70b0dde1d54c4da068fa014c34e451d4b"
+    },
+    {
+      "source": "mRemoteNG/Icons/File Server.ico",
+      "destination": "Icons/File Server.ico",
+      "aliases": [
+        ":/connection-icons/File Server.ico"
+      ],
+      "sha256": "d835416330876f087ef27d4be7c60de030eae1fbf1cc6b5d9c5367cd4eb3061b"
+    },
+    {
+      "source": "mRemoteNG/Icons/Finance.ico",
+      "destination": "Icons/Finance.ico",
+      "aliases": [
+        ":/connection-icons/Finance.ico"
+      ],
+      "sha256": "03ac319df6c3856869ec81db21a36a0961335d791c096e3d16ff52a55af0c17f"
+    },
+    {
+      "source": "mRemoteNG/Icons/Firewall.ico",
+      "destination": "Icons/Firewall.ico",
+      "aliases": [
+        ":/connection-icons/Firewall.ico"
+      ],
+      "sha256": "380e37a4631c930bccaaeeba0e33f8db4bd4c703d1e81cc2110626a6583d810c"
+    },
+    {
+      "source": "mRemoteNG/Icons/Infrastructure.ico",
+      "destination": "Icons/Infrastructure.ico",
+      "aliases": [
+        ":/connection-icons/Infrastructure.ico"
+      ],
+      "sha256": "e654bde878144d4d421c69e68ca3affbe64514db09610406511040ac587d38d6"
+    },
+    {
+      "source": "mRemoteNG/Icons/Linux.ico",
+      "destination": "Icons/Linux.ico",
+      "aliases": [
+        ":/connection-icons/Linux.ico"
+      ],
+      "sha256": "7b2874d535d028c8eb3c11e93947e2fc50319b4d510fa15e6df5f1bcb7c1b573"
+    },
+    {
+      "source": "mRemoteNG/Icons/Log.ico",
+      "destination": "Icons/Log.ico",
+      "aliases": [
+        ":/connection-icons/Log.ico"
+      ],
+      "sha256": "bdf3c225c2806e60ade295432bd606f5fa23d78ad87a9f1913b3d2f15539fac1"
+    },
+    {
+      "source": "mRemoteNG/Icons/Mail Server.ico",
+      "destination": "Icons/Mail Server.ico",
+      "aliases": [
+        ":/connection-icons/Mail Server.ico"
+      ],
+      "sha256": "b5c5a034eefe5cd96867cd0d7e3dfa8bd7e423006f835219975bc4019b7dca54"
+    },
+    {
+      "source": "mRemoteNG/Icons/PowerShell.ico",
+      "destination": "Icons/PowerShell.ico",
+      "aliases": [
+        ":/connection-icons/PowerShell.ico"
+      ],
+      "sha256": "ed4c01c0d0f198a05071ff96ed0428a3b2a78b108bdad9070e639d3edb212456"
+    },
+    {
+      "source": "mRemoteNG/Icons/Production.ico",
+      "destination": "Icons/Production.ico",
+      "aliases": [
+        ":/connection-icons/Production.ico"
+      ],
+      "sha256": "53ec0f31571a2bdac6f218e515d8cb49567a635d05de99df5b4c908c53e9a002"
+    },
+    {
+      "source": "mRemoteNG/Icons/PuTTY.ico",
+      "destination": "Icons/PuTTY.ico",
+      "aliases": [
+        ":/connection-icons/PuTTY.ico"
+      ],
+      "sha256": "bdf608e6aac76acc3daffc73ebd8328d516c62bb7857c2850979ec378c2cd294"
+    },
+    {
+      "source": "mRemoteNG/Icons/RaspberryPi.ico",
+      "destination": "Icons/RaspberryPi.ico",
+      "aliases": [
+        ":/connection-icons/RaspberryPi.ico"
+      ],
+      "sha256": "e1bcd2753a82739d68cc9c510586dd7709bddf3eaf3c8caf4f97272ff2904f8f"
+    },
+    {
+      "source": "mRemoteNG/Icons/Remote Desktop.ico",
+      "destination": "Icons/Remote Desktop.ico",
+      "aliases": [
+        ":/connection-icons/Remote Desktop.ico"
+      ],
+      "sha256": "d3316286142f7f2431c05dfe217dbb7f256b829d458d6adf1983b3aeeeb1fc7e"
+    },
+    {
+      "source": "mRemoteNG/Icons/Router.ico",
+      "destination": "Icons/Router.ico",
+      "aliases": [
+        ":/connection-icons/Router.ico"
+      ],
+      "sha256": "cf1b593c64a8b629b9317a64f739976130f4851b5fdcbd62997e492bb531220c"
+    },
+    {
+      "source": "mRemoteNG/Icons/SSH.ico",
+      "destination": "Icons/SSH.ico",
+      "aliases": [
+        ":/connection-icons/SSH.ico"
+      ],
+      "sha256": "f17acc33baea6d5e3c31fb380e8f5fc5d785e08b1014ccfd4a3d698a3a34a62c"
+    },
+    {
+      "source": "mRemoteNG/Icons/SharePoint.ico",
+      "destination": "Icons/SharePoint.ico",
+      "aliases": [
+        ":/connection-icons/SharePoint.ico"
+      ],
+      "sha256": "44b14eb9e11239ebb2f1adc3b50f9022e1d16e3eee680b8c13d810409b40310a"
+    },
+    {
+      "source": "mRemoteNG/Icons/Staging.ico",
+      "destination": "Icons/Staging.ico",
+      "aliases": [
+        ":/connection-icons/Staging.ico"
+      ],
+      "sha256": "591f4275f744811d23d2fa69c51f5c3254ae03c6eeda71441cb429912bd226ec"
+    },
+    {
+      "source": "mRemoteNG/Icons/Switch.ico",
+      "destination": "Icons/Switch.ico",
+      "aliases": [
+        ":/connection-icons/Switch.ico"
+      ],
+      "sha256": "2cbcf2e8f45a5d38976870f8f6f096e004e0ce3c55b8abcb51789ec5a9b8ca85"
+    },
+    {
+      "source": "mRemoteNG/Icons/Tel.ico",
+      "destination": "Icons/Tel.ico",
+      "aliases": [
+        ":/connection-icons/Tel.ico"
+      ],
+      "sha256": "1eb79a3ab5d6b677c74b1ea7de3c2810342baa6db69af1a398671e3407da3c27"
+    },
+    {
+      "source": "mRemoteNG/Icons/Telnet.ico",
+      "destination": "Icons/Telnet.ico",
+      "aliases": [
+        ":/connection-icons/Telnet.ico"
+      ],
+      "sha256": "34e3dbb5724abab8497e3c04a28eead9f928f842897b3ce87ad25a7ca0309ee1"
+    },
+    {
+      "source": "mRemoteNG/Icons/Terminal Server.ico",
+      "destination": "Icons/Terminal Server.ico",
+      "aliases": [
+        ":/connection-icons/Terminal Server.ico"
+      ],
+      "sha256": "f55742ee90024204af8d684ace17cbe0c1f3a330a5e8378f5e61430b74186bc1"
+    },
+    {
+      "source": "mRemoteNG/Icons/Test Server.ico",
+      "destination": "Icons/Test Server.ico",
+      "aliases": [
+        ":/connection-icons/Test Server.ico"
+      ],
+      "sha256": "d14f687368d31e087e0a4cd43014ee9450ea82157f783817c43175ba61dcc872"
+    },
+    {
+      "source": "mRemoteNG/Icons/Virtual Machine.ico",
+      "destination": "Icons/Virtual Machine.ico",
+      "aliases": [
+        ":/connection-icons/Virtual Machine.ico"
+      ],
+      "sha256": "738180f259701849929d36a53ff479285bfb7cb2dca2ebe31e45695c9fb01d04"
+    },
+    {
+      "source": "mRemoteNG/Icons/WSL.ico",
+      "destination": "Icons/WSL.ico",
+      "aliases": [
+        ":/connection-icons/WSL.ico"
+      ],
+      "sha256": "7b2874d535d028c8eb3c11e93947e2fc50319b4d510fa15e6df5f1bcb7c1b573"
+    },
+    {
+      "source": "mRemoteNG/Icons/Web Server.ico",
+      "destination": "Icons/Web Server.ico",
+      "aliases": [
+        ":/connection-icons/Web Server.ico"
+      ],
+      "sha256": "9dcd7875fee2ab126295146f0a234451820be8fec1c6419534c04b441a2d6070"
+    },
+    {
+      "source": "mRemoteNG/Icons/WiFi.ico",
+      "destination": "Icons/WiFi.ico",
+      "aliases": [
+        ":/connection-icons/WiFi.ico"
+      ],
+      "sha256": "15351a47642e0cf94fd9b7630a3038e6d8329acc6056690693d0cc12afe804c7"
+    },
+    {
+      "source": "mRemoteNG/Icons/Windows.ico",
+      "destination": "Icons/Windows.ico",
+      "aliases": [
+        ":/connection-icons/Windows.ico"
+      ],
+      "sha256": "5b2abe0b9ac31670a66c7604266a2a0dc691c7f54e294cb8bf121e7279e9ba94"
+    },
+    {
+      "source": "mRemoteNG/Icons/Workstation.ico",
+      "destination": "Icons/Workstation.ico",
+      "aliases": [
+        ":/connection-icons/Workstation.ico"
+      ],
+      "sha256": "87f7730a37db5b0b48e3616dbd2026f2cf705f91929a167e79f02861089eb8df"
+    },
+    {
+      "source": "mRemoteNG/Icons/mRemote.ico",
+      "destination": "Icons/mRemote.ico",
+      "aliases": [
+        ":/connection-icons/mRemote.ico"
+      ],
+      "sha256": "d0df0c3a5b64ffc95241aefb0789b65e249635c9349745517dfd4ae451a34b42"
+    },
+    {
+      "source": "mRemoteNG/Icons/mRemoteNG.ico",
+      "destination": "Icons/mRemoteNG.ico",
+      "aliases": [
+        ":/original/Connection.ico",
+        ":/connection-icons/mRemoteNG.ico"
+      ],
+      "sha256": "cc55aae7c3ef8440826293f3a6ceeabf3425cd9927b0185ac6af2ab8fc00a1e1"
+    },
+    {
+      "source": "mRemoteNG/Resources/ASPWebSite_16x.png",
+      "destination": "Resources/ASPWebSite_16x.png",
+      "aliases": [
+        ":/original/ASPWebSite_16x.png"
+      ],
+      "sha256": "345a3cb1eaf0f804a32fd240d7138ee67d11e9f9fb3a860d63e60d6ddb35e763"
+    },
+    {
+      "source": "mRemoteNG/Resources/AddFolder_16x.png",
+      "destination": "Resources/AddFolder_16x.png",
+      "aliases": [
+        ":/original/AddFolder_16x.png"
+      ],
+      "sha256": "8c64bf452436aaff83e5e0ab5f6e714dcf64f417e63f77b129d3db58a0f21ad1"
+    },
+    {
+      "source": "mRemoteNG/Resources/AddItem_16x.png",
+      "destination": "Resources/AddItem_16x.png",
+      "aliases": [
+        ":/original/AddItem_16x.png"
+      ],
+      "sha256": "a09843b1ca015a74f00c4e5231c214fac9f4188bdf3f9720a5b1a305489d0472"
+    },
+    {
+      "source": "mRemoteNG/Resources/Add_16x.png",
+      "destination": "Resources/Add_16x.png",
+      "aliases": [
+        ":/original/Add_16x.png"
+      ],
+      "sha256": "81c01a6aa1e3d41571956640306a3a25952ea0b6949d7f99decb82b290970ff6"
+    },
+    {
+      "source": "mRemoteNG/Resources/CloseSolution_16x.png",
+      "destination": "Resources/CloseSolution_16x.png",
+      "aliases": [
+        ":/original/CloseSolution_16x.png"
+      ],
+      "sha256": "0db9511770e281706b4ead23d738118500729f1be551f44cf06255bf797ee6db"
+    },
+    {
+      "source": "mRemoteNG/Resources/Close_16x.png",
+      "destination": "Resources/Close_16x.png",
+      "aliases": [
+        ":/original/Close_16x.png"
+      ],
+      "sha256": "93c6efc87b07501cdfc6d0842c094ba78b51bf1b1dbe5f74da6c9196a7b63352"
+    },
+    {
+      "source": "mRemoteNG/Resources/CollapseAll_16x.png",
+      "destination": "Resources/CollapseAll_16x.png",
+      "aliases": [
+        ":/original/CollapseAll_16x.png"
+      ],
+      "sha256": "12ff7763d3041a299ad4a198dae83a9bb44525b8c755a14876f256d4d66690e4"
+    },
+    {
+      "source": "mRemoteNG/Resources/Console_16x.png",
+      "destination": "Resources/Console_16x.png",
+      "aliases": [
+        ":/original/Console_16x.png"
+      ],
+      "sha256": "4d5126f1ec3d60013cfc28334f3a3ad70425f4770b163ed6d808f49c00c27f6f"
+    },
+    {
+      "source": "mRemoteNG/Resources/Copy_16x.png",
+      "destination": "Resources/Copy_16x.png",
+      "aliases": [
+        ":/original/Copy_16x.png"
+      ],
+      "sha256": "a3c1b936a799f8f2a766c085e1af9386bd75225723b0c775c6afd97e766e1b26"
+    },
+    {
+      "source": "mRemoteNG/Resources/ExpandAll_16x.png",
+      "destination": "Resources/ExpandAll_16x.png",
+      "aliases": [
+        ":/original/ExpandAll_16x.png"
+      ],
+      "sha256": "a4ad3dc075adf707e90dcbd42ae8064057dee7030fc9091174837160e301376b"
+    },
+    {
+      "source": "mRemoteNG/Resources/ExtendedProperty_16x.png",
+      "destination": "Resources/ExtendedProperty_16x.png",
+      "aliases": [
+        ":/original/ExtendedProperty_16x.png"
+      ],
+      "sha256": "b02d93ea49770386155a05738e7d644411668558fe56639c90f383c678ff167f"
+    },
+    {
+      "source": "mRemoteNG/Resources/F1Help_16x.png",
+      "destination": "Resources/F1Help_16x.png",
+      "aliases": [
+        ":/original/F1Help_16x.png"
+      ],
+      "sha256": "781138901f417e2958b32236e91ac7da031471c831fc287cc341c532091e5efc"
+    },
+    {
+      "source": "mRemoteNG/Resources/Favorite_16x.png",
+      "destination": "Resources/Favorite_16x.png",
+      "aliases": [
+        ":/original/Favorite_16x.png"
+      ],
+      "sha256": "243412e6c9b218144793bc6690aef8a00e9fb5ffc791d72092ce2bfc0627aa8e"
+    },
+    {
+      "source": "mRemoteNG/Resources/FolderClosed_16x.png",
+      "destination": "Resources/FolderClosed_16x.png",
+      "aliases": [
+        ":/original/FolderClosed_16x.png"
+      ],
+      "sha256": "16bc64574e3d1c9941dec789bf76d1c30612dafed00f3abd531a7e8b9915318d"
+    },
+    {
+      "source": "mRemoteNG/Resources/FullScreen_16x.png",
+      "destination": "Resources/FullScreen_16x.png",
+      "aliases": [
+        ":/original/FullScreen_16x.png"
+      ],
+      "sha256": "8d0b89df5b5e1c72cedb9ed82ac2a7a4bfdaaecf84891414469b89231217c802"
+    },
+    {
+      "source": "mRemoteNG/Resources/GlyphDown_16x.png",
+      "destination": "Resources/GlyphDown_16x.png",
+      "aliases": [
+        ":/original/GlyphDown_16x.png"
+      ],
+      "sha256": "39490a75ca5f07e7d09636fa9b32f8d4829f42f393e87eb3129a00ed6d501d41"
+    },
+    {
+      "source": "mRemoteNG/Resources/GlyphUp_16x.png",
+      "destination": "Resources/GlyphUp_16x.png",
+      "aliases": [
+        ":/original/GlyphUp_16x.png"
+      ],
+      "sha256": "9684685e12985f9549d5b7565aeb95b1ff48aeca77b6f62f19c080c4eb59826b"
+    },
+    {
+      "source": "mRemoteNG/Resources/HostStatus_Check.png",
+      "destination": "Resources/HostStatus_Check.png",
+      "aliases": [
+        ":/original/HostStatus_Check.png"
+      ],
+      "sha256": "75044cabbc62f0622647350e533627088a27d7720c75e15b4e934c0a14520537"
+    },
+    {
+      "source": "mRemoteNG/Resources/InsertPanel_16x.png",
+      "destination": "Resources/InsertPanel_16x.png",
+      "aliases": [
+        ":/original/InsertPanel_16x.png"
+      ],
+      "sha256": "dd61df91bc04757dbc48094849f9bd48e4a565e6e57953439e788559bd617ad5"
+    },
+    {
+      "source": "mRemoteNG/Resources/Message_16x.png",
+      "destination": "Resources/Message_16x.png",
+      "aliases": [
+        ":/original/Message_16x.png"
+      ],
+      "sha256": "b3260b926bd6f1ca03d495635b869b712e2f4b0595cd7db56d067825f34ff88e"
+    },
+    {
+      "source": "mRemoteNG/Resources/Monitor_16x.png",
+      "destination": "Resources/Monitor_16x.png",
+      "aliases": [
+        ":/original/Monitor_16x.png"
+      ],
+      "sha256": "930fcd243b6be1fb56294621a86d912cb9f13bc54ea727b5a6e30e516b4b9ec2"
+    },
+    {
+      "source": "mRemoteNG/Resources/NewFile_16x.png",
+      "destination": "Resources/NewFile_16x.png",
+      "aliases": [
+        ":/original/NewFile_16x.png"
+      ],
+      "sha256": "11645a5c8b6ef63e8d482e48e144ac85b7dc61148e681f5800367b2e98f6bbaf"
+    },
+    {
+      "source": "mRemoteNG/Resources/OpenFile_16x.png",
+      "destination": "Resources/OpenFile_16x.png",
+      "aliases": [
+        ":/original/OpenFile_16x.png"
+      ],
+      "sha256": "1177e0215beb6211ee495cee1bae590178c157abc66a05a3934c140a74e9e414"
+    },
+    {
+      "source": "mRemoteNG/Resources/Panel_16x.png",
+      "destination": "Resources/Panel_16x.png",
+      "aliases": [
+        ":/original/Panel_16x.png"
+      ],
+      "sha256": "84e7885d71c825f0235644b0107061328bbd209a96363ffcafb64da65c7fbf3b"
+    },
+    {
+      "source": "mRemoteNG/Resources/Property_16x.png",
+      "destination": "Resources/Property_16x.png",
+      "aliases": [
+        ":/original/Property_16x.png"
+      ],
+      "sha256": "ecf57a86bcea3c3821333069aabf34f0751c73d8da2b681ad49b2fa17f38f4e0"
+    },
+    {
+      "source": "mRemoteNG/Resources/PuttyConfig.png",
+      "destination": "Resources/PuttyConfig.png",
+      "aliases": [
+        ":/original/PuttyConfig.png"
+      ],
+      "sha256": "fcdfe85a64194652079cbb86021b8af399e1217f6c8f12fb61be2480fa6a5b85"
+    },
+    {
+      "source": "mRemoteNG/Resources/PuttySessions.png",
+      "destination": "Resources/PuttySessions.png",
+      "aliases": [
+        ":/original/PuttySessions.png"
+      ],
+      "sha256": "4024280fad7146f44e6cfbed0cf355f7f8245afe472e204ce29b255d4c9abf7c"
+    },
+    {
+      "source": "mRemoteNG/Resources/Refresh_16x.png",
+      "destination": "Resources/Refresh_16x.png",
+      "aliases": [
+        ":/original/Refresh_16x.png"
+      ],
+      "sha256": "e0fd05663c6ac806a8ad1c65a9a5684ef4162684fab4805ad63775cb69861727"
+    },
+    {
+      "source": "mRemoteNG/Resources/Remove_16x.png",
+      "destination": "Resources/Remove_16x.png",
+      "aliases": [
+        ":/original/Remove_16x.png"
+      ],
+      "sha256": "e8aff33a42ba35db1adedef656875ca3e6302cb920096e1e8f46936318d46d25"
+    },
+    {
+      "source": "mRemoteNG/Resources/Rename_16x.png",
+      "destination": "Resources/Rename_16x.png",
+      "aliases": [
+        ":/original/Rename_16x.png"
+      ],
+      "sha256": "f33b4b9fd0234386fec853fdfc98aeafd0a160abc04accfbd7995fba78270d0f"
+    },
+    {
+      "source": "mRemoteNG/Resources/Resize_16x.png",
+      "destination": "Resources/Resize_16x.png",
+      "aliases": [
+        ":/original/Resize_16x.png"
+      ],
+      "sha256": "172f4b79c89c612b885bd37b9d7c263b8337048bf9a104282e958f82060c0fda"
+    },
+    {
+      "source": "mRemoteNG/Resources/RunUpdate_16x.png",
+      "destination": "Resources/RunUpdate_16x.png",
+      "aliases": [
+        ":/original/RunUpdate_16x.png"
+      ],
+      "sha256": "24c319117c98613620effc7cf81f35125c82ae9f5ec34666ddfae9d2ca6f13e4"
+    },
+    {
+      "source": "mRemoteNG/Resources/Run_16x.png",
+      "destination": "Resources/Run_16x.png",
+      "aliases": [
+        ":/original/Run_16x.png"
+      ],
+      "sha256": "08a73f23959366d867f061fb53e845b8be7661a256c0995063994f827526aa64"
+    },
+    {
+      "source": "mRemoteNG/Resources/SchemaObjectProperty_16x.png",
+      "destination": "Resources/SchemaObjectProperty_16x.png",
+      "aliases": [
+        ":/original/SchemaObjectProperty_16x.png"
+      ],
+      "sha256": "9986e7e3d9c682f390cb466767e4d74d5cc8f66d903dd758580f25e0fc3de2f3"
+    },
+    {
+      "source": "mRemoteNG/Resources/Schema_16x.png",
+      "destination": "Resources/Schema_16x.png",
+      "aliases": [
+        ":/original/Schema_16x.png"
+      ],
+      "sha256": "d9bb8f166bd7c5f9ecf8b48a465df7ad755df6dd0f22a8f86ab68c0c3a6d280c"
+    },
+    {
+      "source": "mRemoteNG/Resources/Search_16x.png",
+      "destination": "Resources/Search_16x.png",
+      "aliases": [
+        ":/original/Search_16x.png"
+      ],
+      "sha256": "9e006f92fd52350581c84388e5ea7f4bc8308f581a4180f1331c82014469d9df"
+    },
+    {
+      "source": "mRemoteNG/Resources/Settings_16x.png",
+      "destination": "Resources/Settings_16x.png",
+      "aliases": [
+        ":/original/Settings_16x.png"
+      ],
+      "sha256": "75d45e25ff5da3f8da5e012dcd5c5a70cae0de7096d787f72711278fb30fbe62"
+    },
+    {
+      "source": "mRemoteNG/Resources/SortAscending_16x.png",
+      "destination": "Resources/SortAscending_16x.png",
+      "aliases": [
+        ":/original/SortAscending_16x.png"
+      ],
+      "sha256": "39a76d339ae3c3ef0610755fe9e088a98c40d34629a70f94afe6ee69c0331f13"
+    },
+    {
+      "source": "mRemoteNG/Resources/SortDescending_16x.png",
+      "destination": "Resources/SortDescending_16x.png",
+      "aliases": [
+        ":/original/SortDescending_16x.png"
+      ],
+      "sha256": "f42c091cbbf786c4784307b2a24014bb0478bfa58bd4409d2f0eb6003d4d1515"
+    },
+    {
+      "source": "mRemoteNG/Resources/StatusInformation_16x.png",
+      "destination": "Resources/StatusInformation_16x.png",
+      "aliases": [
+        ":/original/StatusInformation_16x.png"
+      ],
+      "sha256": "4e8f611097668631c74aabce8b98a61ba88ae5f0f0e153d98b3b8cfbf69aa1d9"
+    },
+    {
+      "source": "mRemoteNG/Resources/Stop_16x.png",
+      "destination": "Resources/Stop_16x.png",
+      "aliases": [
+        ":/original/Stop_16x.png"
+      ],
+      "sha256": "cc67be47a2a51bd2c60f10815dff0f6519d05edd9dd17374aa9330ce1fe7592c"
+    },
+    {
+      "source": "mRemoteNG/Resources/SyncArrow_16x.png",
+      "destination": "Resources/SyncArrow_16x.png",
+      "aliases": [
+        ":/original/SyncArrow_16x.png"
+      ],
+      "sha256": "e1608d55f636a20cc11ad53b0ef48ce35a4940771bf57c64d58cb703214126e2"
+    },
+    {
+      "source": "mRemoteNG/Resources/ToggleOfficeKeyboardScheme_16x.png",
+      "destination": "Resources/ToggleOfficeKeyboardScheme_16x.png",
+      "aliases": [
+        ":/original/ToggleOfficeKeyboardScheme_16x.png"
+      ],
+      "sha256": "a51efa639a53bf9f0c677dd7e31374c36810efa7f5bb7d9e71e6c3aa1b55db33"
+    },
+    {
+      "source": "mRemoteNG/Resources/UIAboutBox_16x.png",
+      "destination": "Resources/UIAboutBox_16x.png",
+      "aliases": [
+        ":/original/UIAboutBox_16x.png"
+      ],
+      "sha256": "23dc3e36a6da53c3f7d1fb7799bdca12f696e7fc7a58965cd579408ee06d68c7"
+    },
+    {
+      "source": "mRemoteNG/Resources/UniqueKeyError_16x.png",
+      "destination": "Resources/UniqueKeyError_16x.png",
+      "aliases": [
+        ":/original/UniqueKeyError_16x.png"
+      ],
+      "sha256": "c2a38edcdee1501366c07590fbb1a030d16f50abbb3df145cced97411cc0e08e"
+    },
+    {
+      "source": "mRemoteNG/Resources/ViewDownBySchema_16x.png",
+      "destination": "Resources/ViewDownBySchema_16x.png",
+      "aliases": [
+        ":/original/ViewDownBySchema_16x.png"
+      ],
+      "sha256": "a4320b2c48692cbe530414808521202881700d1febc57e52b10b56529e5ea266"
+    },
+    {
+      "source": "mRemoteNG/UI/Window/ConnectionWindow.resx",
+      "resource_entry": "cmenTabExternalApps.Image",
+      "destination": "reference/external-tools.png",
+      "sha256": "584da7a6b80acc821c2114c6c6c1d12afa356267ea2803127e8eafbd07ce395d",
+      "aliases": []
+    },
+    {
+      "source": "mRemoteNG/UI/Window/ConnectionWindow.resx",
+      "resource_entry": "cmenTabReconnect.Image",
+      "destination": "reference/reconnect.png",
+      "sha256": "6afca24436ad4786aa5f07da4871b492c50eb9738ba9910e66eef1a2315e0681",
+      "aliases": []
+    }
+  ],
+  "notices": [
+    {
+      "source": "COPYING.txt",
+      "destination": "COPYING.txt",
+      "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f"
+    },
+    {
+      "source": "CREDITS.md",
+      "destination": "CREDITS.md",
+      "sha256": "d68e2c31e38d3ec12302d6e0d094753c4d1a5f418d280557a93256d7c81dd1c2"
+    },
+    {
+      "source": null,
+      "destination": "NOTICE.txt",
+      "sha256": "3e38c4a232578569b9e709efd379638b20985f035fe796144a6d1073badf056f"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+[package]
+name = "remotemanager-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+build = "build.rs"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+cxx = "=1.0.202"
+vnc-rs = { version = "=0.6.0", path = "../vendor/vnc-rs" }
+russh = { version = "=0.64.1", default-features = false, features = ["ring", "rsa"] }
+tokio = { version = "=1.48.0", features = ["rt", "net", "time", "sync", "macros"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+uuid = { version = "=1.27.0", features = ["v4", "serde"] }
+# Pure-Rust bzip2 for Cisco OpenH264 downloads; symbols stay Rust-private.
+libbz2-rs-sys = { version = "=0.2.5", default-features = false, features = ["std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.190"
+
+[build-dependencies]
+cxx-build = "=1.0.202"

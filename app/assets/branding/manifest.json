@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "source_name": "cmremote Wireless Monogram Icon.png",
+  "source_sha256": "cec053a2e3b4297c26a6cd97acce309a7919da14a1ad48b6cef7df6391f5f70a",
+  "composition": "App icons: supplied body recomposed on the macOS icon grid (transparent 1024 canvas, 824 px superellipse, drop shadow). Favicon: original square image, resize only.",
+  "generator": "python3 scripts/branding.py generate (macOS swift CoreGraphics, sips, iconutil)",
+  "files": {
+    "cmremote-1024.png": "309ca8e4d80e5b506b6431880408e44a1137d0c505b97fe3c44cf1e0d1280240",
+    "cmremote-128.png": "36052ccf0298b57f5190c6bb5e3848660387111a4bb42a79ebf0b64699ddefcd",
+    "cmremote-16.png": "9b3d7c1133906672c59fcddaabd139b5ff64957365a9413ea4ebdee621241c99",
+    "cmremote-24.png": "53fbc907e7a97ed33a41b3968f914fcc825099dbe8e465ad2b683ca5750473b8",
+    "cmremote-256.png": "954b344a4fa6dfd6398aba08bf5e9434e1ba0acd5af1944b6cfb59aeb89aa2fa",
+    "cmremote-32.png": "63b7b852e90c5546f01df12612c216d4132dbf2a2c2f6a85b5827b82769fed67",
+    "cmremote-48.png": "5b96191e27ba8514db759c453aad4181a505102d84b9a378135f337d430f7d40",
+    "cmremote-512.png": "454d552063ba22b84d58cdb4c43fb25f5311c196b265d0d6543da3b3294e2bae",
+    "cmremote-64.png": "e7ed080c508bfcc79c89b2db900ba4a360722ad2723a894c8d049dbb3cfbc05a",
+    "cmremote.icns": "d8e5f280e0abbf5ca314c88992e76cc24ae9482f35d49f8817bdbada2a0e2a0c",
+    "cmremote.ico": "7d196d93478dce0a0d698e2f164793677481023a2b02df2783e789a471fe87d6",
+    "favicon-16.png": "ebcc7d24cba0fd0c28d1f2aa78c9a142c2d75f4cce7c2fed9ad95aaeca1cc6d2",
+    "favicon-32.png": "be773162b571eb4f3e455b241303d752c628a8bba18af965875e1901b5ad550e",
+    "favicon-48.png": "f1cef45ae1aa7364a9fcbaa8b4b8ae76a4fd0886eba71784d8587805ecc37995",
+    "favicon.ico": "6bc628a1ac0e4a7c84630b3220f314305e378515814b749d908d80cc86bbe2df",
+    "source.png": "cec053a2e3b4297c26a6cd97acce309a7919da14a1ad48b6cef7df6391f5f70a"
+  }
+}

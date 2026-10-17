@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CMRemote
+GenericName=Remote connection manager
+Comment=Manage RDP, SSH and VNC connections
+Exec=RemoteManager
+Icon=cmremote
+Terminal=false
+Categories=Network;RemoteAccess;
+StartupNotify=true
+StartupWMClass=RemoteManager

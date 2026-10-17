@@ -1,0 +1,10 @@
+# Installer tooling layered on the dev image, so release-only changes never rebuild the SDK.
+ARG BASE
+FROM ${BASE}
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends flatpak desktop-file-utils appstream file \
+    && rm -rf /var/lib/apt/lists/*
+ARG LOCAL_UID=1001
+ARG LOCAL_GID=1001
+USER ${LOCAL_UID}:${LOCAL_GID}

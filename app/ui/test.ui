@@ -1,0 +1,357 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>1129</width><height>571</height></rect></property>
+  <property name="minimumSize"><size><width>640</width><height>480</height></size></property>
+  <property name="font"><font><family>Arial</family><pointsize>9</pointsize></font></property>
+  <property name="windowTitle"><string>CMRemote — Qt UI preview</string></property>
+  <property name="windowIcon"><iconset resource="branding.qrc"><normaloff>:/branding/cmremote-256.png</normaloff>:/branding/cmremote-256.png</iconset></property>
+  <property name="dockNestingEnabled"><bool>true</bool></property>
+  <property name="styleSheet"><string notr="true">QMainWindow { background: #f0f0f0; }
+QMainWindow::separator { background: #dedede; width: 4px; height: 4px; }
+QDockWidget { border: 1px solid #b5b5b5; color: white; }
+QDockWidget::title { background: #0078d7; color: white; padding: 3px 5px; }
+QToolBar { background: #f0f0f0; border: none; spacing: 1px; padding: 1px; }
+QToolButton { padding: 2px; }
+QMenuBar { background: #f0f0f0; padding: 1px; }
+QMenuBar::item { padding: 3px 8px; }
+QMenuBar::item:selected { background: #cce8ff; }
+QTreeWidget, QListWidget, QPlainTextEdit { background: white; color: #202020; border: none; }
+QTreeWidget::item, QListWidget::item { min-height: 19px; }
+QTreeWidget::item:selected, QListWidget::item:selected { background: #0078d7; color: white; }
+QLineEdit, QComboBox { background: white; color: #202020; border: 1px solid #ababab; padding: 2px; }
+QTabWidget::pane { border: 1px solid #ababab; }
+QTabBar::tab { background: #eeeeee; color: #202020; border: 1px solid #ababab; padding: 4px 12px; }
+QTabBar::tab:selected { background: #0078d7; color: white; }
+QTabWidget#sessionTabs QTabBar::tab:selected { background: #dadada; color: #202020; }
+QWidget#sessionSurface { background: #191919; }
+QLabel#sessionMessage { color: #dddddd; background: transparent; }
+QWidget#configHelp, QWidget#notificationDetails { background: #f0f0f0; }
+QLabel#configHelpTitle { font-weight: bold; }
+QLabel#notificationDate { color: #666666; font-style: italic; }</string></property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="documentLayout">
+    <property name="spacing"><number>0</number></property>
+    <property name="leftMargin"><number>0</number></property>
+    <property name="topMargin"><number>0</number></property>
+    <property name="rightMargin"><number>0</number></property>
+    <property name="bottomMargin"><number>0</number></property>
+    <item><widget class="QTabWidget" name="groupTabs">
+     <property name="documentMode"><bool>true</bool></property>
+     <property name="movable"><bool>true</bool></property>
+     <widget class="QWidget" name="generalPanel">
+      <attribute name="title"><string>General</string></attribute>
+      <attribute name="icon"><iconset resource="branding.qrc"><normaloff>:/branding/cmremote-16.png</normaloff>:/branding/cmremote-16.png</iconset></attribute>
+      <layout class="QVBoxLayout" name="generalLayout">
+       <property name="spacing"><number>0</number></property>
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+       <item><widget class="QTabWidget" name="sessionTabs">
+        <property name="documentMode"><bool>true</bool></property>
+        <property name="tabsClosable"><bool>true</bool></property>
+        <property name="movable"><bool>true</bool></property>
+        <widget class="QWidget" name="serverTab">
+         <attribute name="title"><string>server01</string></attribute>
+         <attribute name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Connection.ico</normaloff>:/original/Connection.ico</iconset></attribute>
+         <layout class="QVBoxLayout" name="serverLayout">
+          <property name="leftMargin"><number>0</number></property>
+          <property name="topMargin"><number>0</number></property>
+          <property name="rightMargin"><number>0</number></property>
+          <property name="bottomMargin"><number>0</number></property>
+          <item><widget class="QWidget" name="sessionSurface">
+           <layout class="QVBoxLayout" name="sessionSurfaceLayout">
+            <item><widget class="QLabel" name="sessionMessage">
+             <property name="text"><string>server01 · RDP&#10;&#10;UI preview only — no network connection&#10;&#10;The embedded session view will occupy this area.</string></property>
+             <property name="textFormat"><enum>Qt::PlainText</enum></property>
+             <property name="alignment"><set>Qt::AlignCenter</set></property>
+             <property name="wordWrap"><bool>true</bool></property>
+            </widget></item>
+           </layout>
+          </widget></item>
+         </layout>
+        </widget>
+       </widget></item>
+      </layout>
+     </widget>
+    </widget></item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <widget class="QMenu" name="menuFile">
+    <property name="title"><string>&amp;File</string></property>
+    <addaction name="actionAddConnection"/><addaction name="actionAddFolder"/><addaction name="separator"/>
+    <addaction name="actionNewFile"/><addaction name="actionOpenFile"/>
+    <addaction name="separator"/><addaction name="actionSaveAsConnection"/>
+    <addaction name="separator"/><addaction name="actionOptions"/><addaction name="separator"/><addaction name="actionExit"/>
+   </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title"><string>&amp;View</string></property>
+    <addaction name="actionAddPanel"/>
+    <widget class="QMenu" name="menuConnectionPanels"><property name="title"><string>Connection Panels</string></property><addaction name="actionGeneralPanel"/></widget>
+    <addaction name="menuConnectionPanels"/><addaction name="separator"/>
+    <addaction name="actionViewConnections"/><addaction name="actionViewConfig"/><addaction name="actionViewNotifications"/><addaction name="actionViewScreenshots"/>
+    <addaction name="separator"/>
+    <widget class="QMenu" name="menuJumpTo"><property name="title"><string>Jump To</string></property><addaction name="actionNextSession"/><addaction name="actionPreviousSession"/></widget>
+    <addaction name="menuJumpTo"/><addaction name="actionResetLayout"/><addaction name="actionLockToolbars"/>
+    <addaction name="separator"/><addaction name="actionViewQuickConnect"/><addaction name="actionViewExternalTools"/><addaction name="actionViewMultiSsh"/>
+    <addaction name="separator"/><addaction name="actionFullscreen"/>
+   </widget>
+   <widget class="QMenu" name="menuTools"><property name="title"><string>&amp;Tools</string></property><addaction name="actionUnlockPasswords"/><addaction name="actionLockPasswords"/><addaction name="actionChangeMaster"/><addaction name="separator"/><addaction name="actionDifferentCredentials"/><addaction name="actionReconnectAll"/><addaction name="separator"/><addaction name="actionTerminalAppearance"/><addaction name="separator"/><addaction name="actionExternalTools"/></widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title"><string>&amp;Help</string></property>
+    <addaction name="actionHelpContents"/><addaction name="separator"/><addaction name="actionWebsite"/><addaction name="actionSupportForum"/>
+    <addaction name="actionChat"/><addaction name="actionCommunity"/><addaction name="actionReportIssue"/><addaction name="separator"/>
+    <addaction name="actionCheckUpdates"/><addaction name="separator"/><addaction name="actionDonate"/><addaction name="separator"/><addaction name="actionAbout"/>
+   </widget>
+   <addaction name="menuFile"/><addaction name="menuView"/><addaction name="menuTools"/><addaction name="menuHelp"/>
+  </widget>
+  <widget class="QToolBar" name="quickConnectToolbar">
+   <property name="windowTitle"><string>Quick connect</string></property>
+   <property name="iconSize"><size><width>16</width><height>16</height></size></property>
+   <attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute>
+   <widget class="QWidget" name="quickConnectControls">
+    <property name="geometry"><rect><x>12</x><y>0</y><width>450</width><height>28</height></rect></property>
+    <layout class="QHBoxLayout" name="quickConnectLayout">
+     <property name="spacing"><number>4</number></property>
+     <property name="leftMargin"><number>2</number></property>
+     <property name="topMargin"><number>1</number></property>
+     <property name="rightMargin"><number>2</number></property>
+     <property name="bottomMargin"><number>1</number></property>
+     <item><widget class="QLabel" name="quickConnectLabel"><property name="text"><string>Connect:</string></property><property name="buddy"><cstring>quickConnectCombo</cstring></property></widget></item>
+     <item><widget class="QComboBox" name="quickConnectCombo">
+      <property name="minimumSize"><size><width>200</width><height>0</height></size></property>
+      <property name="editable"><bool>true</bool></property>
+      <property name="insertPolicy"><enum>QComboBox::NoInsert</enum></property>
+      <property name="toolTip"><string>Open a local preview tab; no networking</string></property>
+     </widget></item>
+     <item><widget class="QToolButton" name="quickConnectButton"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Run_16x.png</normaloff>:/original/Run_16x.png</iconset></property>
+      <property name="text"><string>RDP</string></property>
+      <property name="toolTip"><string>Preview session / choose protocol</string></property>
+      <property name="popupMode"><enum>QToolButton::MenuButtonPopup</enum></property>
+      <property name="toolButtonStyle"><enum>Qt::ToolButtonTextBesideIcon</enum></property>
+     </widget></item>
+     <item><widget class="QToolButton" name="savedConnectionsButton"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ASPWebSite_16x.png</normaloff>:/original/ASPWebSite_16x.png</iconset></property>
+      <property name="text"><string>Connections</string></property>
+      <property name="toolTip"><string>Saved preview connections</string></property>
+      <property name="popupMode"><enum>QToolButton::InstantPopup</enum></property>
+     </widget></item>
+    </layout>
+   </widget>
+  </widget>
+  <widget class="QToolBar" name="multiSshToolbar"><property name="windowTitle"><string>Multi SSH</string></property><attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute></widget>
+  <widget class="QToolBar" name="externalToolsToolbar"><property name="windowTitle"><string>External tools</string></property><attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute><addaction name="actionExternalTools"/></widget>
+  <widget class="QDockWidget" name="connectionsDock">
+   <property name="windowTitle"><string>Connections</string></property>
+   <property name="minimumSize"><size><width>226</width><height>130</height></size></property>
+   <attribute name="dockWidgetArea"><number>1</number></attribute>
+   <widget class="QWidget" name="connectionsContents">
+    <layout class="QVBoxLayout" name="connectionsLayout">
+     <property name="spacing"><number>0</number></property>
+     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+     <item><widget class="QToolBar" name="connectionsToolbar">
+      <property name="iconSize"><size><width>16</width><height>16</height></size></property>
+      <property name="movable"><bool>false</bool></property>
+      <addaction name="actionAddConnection"/><addaction name="actionAddFolder"/>
+      <addaction name="actionExpandAll"/><addaction name="actionSort"/>
+     </widget></item>
+     <item><widget class="ConnectionTree" name="connectionTree">
+      <property name="headerHidden"><bool>true</bool></property>
+      <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
+      <property name="indentation"><number>16</number></property>
+      <column><property name="text"><string>Connections</string></property></column>
+      <item><property name="text"><string>Connections</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ASPWebSite_16x.png</normaloff>:/original/ASPWebSite_16x.png</iconset></property>
+       <item><property name="text"><string>server01</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Connection.ico</normaloff>:/original/Connection.ico</iconset></property></item>
+      </item>
+      <item><property name="text"><string>PuTTY Saved Sessions</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/PuttySessions.png</normaloff>:/original/PuttySessions.png</iconset></property></item>
+     </widget></item>
+     <item><widget class="QLineEdit" name="searchEdit"><property name="placeholderText"><string>Search</string></property><property name="clearButtonEnabled"><bool>true</bool></property></widget></item>
+    </layout>
+   </widget>
+  </widget>
+  <widget class="QDockWidget" name="configDock">
+   <property name="windowTitle"><string>Config</string></property>
+   <property name="minimumSize"><size><width>226</width><height>180</height></size></property>
+   <attribute name="dockWidgetArea"><number>1</number></attribute>
+   <widget class="QWidget" name="configContents">
+    <layout class="QVBoxLayout" name="configLayout">
+     <property name="spacing"><number>0</number></property>
+     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+     <item><widget class="QToolBar" name="configToolbar">
+      <property name="iconSize"><size><width>16</width><height>16</height></size></property>
+      <property name="movable"><bool>false</bool></property>
+      <addaction name="actionCategorized"/><addaction name="actionAlphabetical"/><addaction name="separator"/>
+      <addaction name="actionProperties"/><addaction name="actionInheritance"/><addaction name="actionDefaultProperties"/><addaction name="actionDefaultInheritance"/><addaction name="separator"/><addaction name="actionConnectionIcon"/><addaction name="actionHostStatus"/>
+     </widget></item>
+     <item><widget class="QSplitter" name="configSplitter">
+      <property name="orientation"><enum>Qt::Vertical</enum></property>
+      <property name="childrenCollapsible"><bool>false</bool></property>
+      <widget class="QTreeWidget" name="configTree">
+       <property name="headerHidden"><bool>true</bool></property><property name="rootIsDecorated"><bool>true</bool></property>
+       <property name="indentation"><number>13</number></property>
+       <column><property name="text"><string>Property</string></property></column><column><property name="text"><string>Value</string></property></column>
+       <item><property name="text"><string>Display</string></property>
+        <item><property name="text"><string>Name</string></property><property name="text"><string>Connections</string></property></item>
+        <item><property name="text"><string>Password protection</string></property><property name="text"><string>No</string></property></item>
+       </item>
+      </widget>
+      <widget class="QWidget" name="configHelp">
+       <property name="minimumSize"><size><width>0</width><height>60</height></size></property>
+       <layout class="QVBoxLayout" name="configHelpLayout">
+        <property name="spacing"><number>2</number></property>
+        <property name="leftMargin"><number>5</number></property><property name="topMargin"><number>5</number></property>
+        <property name="rightMargin"><number>5</number></property><property name="bottomMargin"><number>5</number></property>
+        <item><widget class="QLabel" name="configHelpTitle"><property name="text"><string>Name</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
+        <item><widget class="QLabel" name="configHelpText"><property name="text"><string>This is the name displayed in the connections tree.</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property><property name="wordWrap"><bool>true</bool></property><property name="alignment"><set>Qt::AlignLeft|Qt::AlignTop</set></property></widget></item>
+        <item><spacer name="configHelpSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
+       </layout>
+      </widget>
+     </widget></item>
+    </layout>
+   </widget>
+  </widget>
+  <widget class="QDockWidget" name="notificationsDock">
+   <property name="windowTitle"><string>Notifications</string></property>
+   <property name="visible"><bool>false</bool></property>
+   <property name="minimumSize"><size><width>0</width><height>95</height></size></property>
+   <attribute name="dockWidgetArea"><number>8</number></attribute>
+   <widget class="QWidget" name="notificationsContents">
+    <layout class="QVBoxLayout" name="notificationsLayout">
+     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+     <item><widget class="QSplitter" name="notificationSplitter">
+      <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      <widget class="QWidget" name="notificationDetails">
+       <layout class="QVBoxLayout" name="notificationDetailsLayout">
+        <property name="spacing"><number>2</number></property>
+        <property name="leftMargin"><number>5</number></property><property name="topMargin"><number>3</number></property>
+        <property name="rightMargin"><number>5</number></property><property name="bottomMargin"><number>3</number></property>
+        <item><layout class="QHBoxLayout" name="notificationHeadingLayout">
+         <item><widget class="QLabel" name="notificationIcon"><property name="pixmap"><pixmap resource="preview-icons.qrc">:/original/StatusInformation_16x.png</pixmap></property></widget></item>
+         <item><widget class="QLabel" name="notificationDate"><property name="text"><string>UI preview</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
+        </layout></item>
+        <item><widget class="QPlainTextEdit" name="notificationText"><property name="readOnly"><bool>true</bool></property><property name="plainText"><string>No network sessions. Changes stay in memory.</string></property></widget></item>
+       </layout>
+      </widget>
+      <widget class="QListWidget" name="notificationsList"><property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property><item><property name="text"><string>Qt preview loaded — no network sessions or profile file access.</string></property></item></widget>
+     </widget></item>
+    </layout>
+   </widget>
+  </widget>
+  <action name="actionNewFile"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/NewFile_16x.png</normaloff>:/original/NewFile_16x.png</iconset></property><property name="text"><string>New connection file</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionOpenFile"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/OpenFile_16x.png</normaloff>:/original/OpenFile_16x.png</iconset></property><property name="text"><string>Open connection file…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionSaveFile"><property name="text"><string>Save connection file</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionSaveAsConnection"><property name="text"><string>Save as connection…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionSaveFileAs"><property name="text"><string>Save connection file as…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionTerminalAppearance"><property name="text"><string>Terminal Appearance…</string></property></action>
+  <action name="actionOptions"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Settings_16x.png</normaloff>:/original/Settings_16x.png</iconset></property><property name="menuRole"><enum>QAction::PreferencesRole</enum></property><property name="text"><string>Options…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionExit"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/CloseSolution_16x.png</normaloff>:/original/CloseSolution_16x.png</iconset></property><property name="menuRole"><enum>QAction::QuitRole</enum></property><property name="text"><string>Exit</string></property></action>
+  <action name="actionNextSession"><property name="text"><string>Next session</string></property></action>
+  <action name="actionPreviousSession"><property name="text"><string>Previous session</string></property></action>
+  <action name="actionViewConnections"><property name="text"><string>Connections</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionViewConfig"><property name="menuRole"><enum>QAction::NoRole</enum></property><property name="text"><string>Config</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionViewNotifications"><property name="text"><string>Notifications</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>false</bool></property></action>
+  <action name="actionViewScreenshots"><property name="text"><string>Screenshots</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Screenshot capture is not implemented</string></property></action>
+  <action name="actionViewQuickConnect"><property name="text"><string>Quick Connect Toolbar</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionViewExternalTools"><property name="text"><string>External Tools Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionViewMultiSsh"><property name="text"><string>Multi SSH Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionReconnectAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Reconnect all connections</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionAddPanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/InsertPanel_16x.png</normaloff>:/original/InsertPanel_16x.png</iconset></property><property name="text"><string>Add Connection Panel</string></property></action>
+  <action name="actionGeneralPanel"><property name="text"><string>General</string></property></action>
+  <action name="actionResetLayout"><property name="text"><string>Reset layout</string></property></action>
+  <action name="actionLockToolbars"><property name="text"><string>Lock toolbar positions</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionFullscreen"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/FullScreen_16x.png</normaloff>:/original/FullScreen_16x.png</iconset></property><property name="text"><string>Full Screen</string></property><property name="checkable"><bool>true</bool></property><property name="shortcut"><string>F11</string></property></action>
+  <action name="actionExternalTools"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Console_16x.png</normaloff>:/original/Console_16x.png</iconset></property><property name="text"><string>External tools…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionHelpContents"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/F1Help_16x.png</normaloff>:/original/F1Help_16x.png</iconset></property><property name="text"><string>Help contents</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionWebsite"><property name="text"><string>Website</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionSupportForum"><property name="text"><string>Support forum</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionChat"><property name="text"><string>Chat</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionCommunity"><property name="text"><string>Community</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionReportIssue"><property name="text"><string>Report issue</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionCheckUpdates"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/RunUpdate_16x.png</normaloff>:/original/RunUpdate_16x.png</iconset></property><property name="text"><string>Check for updates</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionDonate"><property name="text"><string>Donate</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionAbout"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/UIAboutBox_16x.png</normaloff>:/original/UIAboutBox_16x.png</iconset></property><property name="menuRole"><enum>QAction::AboutRole</enum></property><property name="text"><string>About CMRemote</string></property></action>
+  <action name="actionAddConnection"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/AddItem_16x.png</normaloff>:/original/AddItem_16x.png</iconset></property><property name="text"><string>New connection</string></property></action>
+  <action name="actionAddFolder"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/AddFolder_16x.png</normaloff>:/original/AddFolder_16x.png</iconset></property><property name="text"><string>New folder</string></property></action>
+  <action name="actionAddRoot"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ASPWebSite_16x.png</normaloff>:/original/ASPWebSite_16x.png</iconset></property><property name="text"><string>New root</string></property></action>
+  <action name="actionExpandAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ExpandAll_16x.png</normaloff>:/original/ExpandAll_16x.png</iconset></property><property name="text"><string>Expand all</string></property></action>
+  <action name="actionCollapseAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/CollapseAll_16x.png</normaloff>:/original/CollapseAll_16x.png</iconset></property><property name="text"><string>Collapse all folders</string></property></action>
+  <action name="actionSort"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SortAscending_16x.png</normaloff>:/original/SortAscending_16x.png</iconset></property><property name="text"><string>Sort</string></property></action>
+  <action name="actionFavorites"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Favorite_16x.png</normaloff>:/original/Favorite_16x.png</iconset></property><property name="text"><string>Favorites</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionCategorized"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SchemaObjectProperty_16x.png</normaloff>:/original/SchemaObjectProperty_16x.png</iconset></property><property name="text"><string>Categorized</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionAlphabetical"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SortAscending_16x.png</normaloff>:/original/SortAscending_16x.png</iconset></property><property name="text"><string>Alphabetical</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionProperties"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Property_16x.png</normaloff>:/original/Property_16x.png</iconset></property><property name="text"><string>Properties</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionInheritance"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Schema_16x.png</normaloff>:/original/Schema_16x.png</iconset></property><property name="text"><string>Inheritance</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionDefaultProperties"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ExtendedProperty_16x.png</normaloff>:/original/ExtendedProperty_16x.png</iconset></property><property name="text"><string>Default properties</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionDefaultInheritance"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ViewDownBySchema_16x.png</normaloff>:/original/ViewDownBySchema_16x.png</iconset></property><property name="text"><string>Default inheritance</string></property><property name="checkable"><bool>true</bool></property></action>
+  <action name="actionTreeExternalTools"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Console_16x.png</normaloff>:/original/Console_16x.png</iconset></property><property name="text"><string>External applications</string></property></action>
+  <action name="actionTreeConnect"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Run_16x.png</normaloff>:/original/Run_16x.png</iconset></property><property name="text"><string>Connect</string></property></action>
+  <action name="actionUnlockPasswords"><property name="text"><string>Unlock passwords…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionLockPasswords"><property name="text"><string>Lock passwords</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionChangeMaster"><property name="text"><string>Change master passphrase…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionDifferentCredentials"><property name="text"><string>Connect with different credentials…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionConnectOptions"><property name="text"><string>Connect (with options)</string></property></action>
+  <action name="actionConsoleSession"><property name="text"><string>Connect to console session</string></property></action>
+  <action name="actionNoConsoleSession"><property name="text"><string>Don't connect to console session</string></property></action>
+  <action name="actionConnectFullscreen"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/FullScreen_16x.png</normaloff>:/original/FullScreen_16x.png</iconset></property><property name="text"><string>Connect in fullscreen mode</string></property></action>
+  <action name="actionNoCredentials"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/UniqueKeyError_16x.png</normaloff>:/original/UniqueKeyError_16x.png</iconset></property><property name="text"><string>Connect without credentials</string></property></action>
+  <action name="actionChoosePanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Panel_16x.png</normaloff>:/original/Panel_16x.png</iconset></property><property name="text"><string>Choose panel before connecting</string></property></action>
+  <action name="actionConnectViewOnly"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Monitor_16x.png</normaloff>:/original/Monitor_16x.png</iconset></property><property name="text"><string>Connect in view-only mode</string></property></action>
+  <action name="actionTreeDisconnect"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Stop_16x.png</normaloff>:/original/Stop_16x.png</iconset></property><property name="text"><string>Disconnect</string></property></action>
+  <action name="actionTreeDuplicate"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Copy_16x.png</normaloff>:/original/Copy_16x.png</iconset></property><property name="text"><string>Duplicate</string></property></action>
+  <action name="actionTreeRename"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Rename_16x.png</normaloff>:/original/Rename_16x.png</iconset></property><property name="text"><string>Rename</string></property></action>
+  <action name="actionTreeDelete"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Close_16x.png</normaloff>:/original/Close_16x.png</iconset></property><property name="text"><string>Delete…</string></property></action>
+  <action name="actionCopyHostname"><property name="text"><string>Copy hostname</string></property></action>
+  <action name="actionWakeOnLan"><property name="text"><string>Wake up (Wake-on-LAN)</string></property></action>
+  <action name="actionClearCredentials"><property name="text"><string>Clear credentials</string></property></action>
+  <action name="actionTreeInheritance"><property name="text"><string>Inheritance</string></property></action>
+  <action name="actionApplyInheritance"><property name="text"><string>Apply inheritance to children</string></property></action>
+  <action name="actionApplyDefaultInheritance"><property name="text"><string>Apply default inheritance</string></property></action>
+  <action name="actionImport"><property name="text"><string>Import</string></property></action>
+  <action name="actionImportFile"><property name="text"><string>Import from file…</string></property></action>
+  <action name="actionImportRdm"><property name="text"><string>Import from Remote Desktop Manager</string></property></action>
+  <action name="actionImportAd"><property name="text"><string>Import from Active Directory…</string></property></action>
+  <action name="actionImportPutty"><property name="text"><string>Import from PuTTY…</string></property></action>
+  <action name="actionExport"><property name="text"><string>Export to File…</string></property></action>
+  <action name="actionTreeSort"><property name="text"><string>Sort</string></property></action>
+  <action name="actionSortAscending"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SortAscending_16x.png</normaloff>:/original/SortAscending_16x.png</iconset></property><property name="text"><string>Ascending (A–Z)</string></property></action>
+  <action name="actionSortDescending"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SortDescending_16x.png</normaloff>:/original/SortDescending_16x.png</iconset></property><property name="text"><string>Descending (Z–A)</string></property></action>
+  <action name="actionMoveUp"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/GlyphUp_16x.png</normaloff>:/original/GlyphUp_16x.png</iconset></property><property name="text"><string>Move up</string></property></action>
+  <action name="actionMoveDown"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/GlyphDown_16x.png</normaloff>:/original/GlyphDown_16x.png</iconset></property><property name="text"><string>Move down</string></property></action>
+  <action name="actionTabReconnect"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Reconnect</string></property></action>
+  <action name="actionTabDisconnect"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Remove_16x.png</normaloff>:/original/Remove_16x.png</iconset></property><property name="text"><string>Disconnect</string></property><property name="toolTip"><string>Close this local preview tab</string></property></action>
+  <action name="actionTabMinimize"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/GlyphDown_16x.png</normaloff>:/original/GlyphDown_16x.png</iconset></property><property name="text"><string>Minimize tab</string></property></action>
+  <action name="actionTabDisconnectOthers"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Remove_16x.png</normaloff>:/original/Remove_16x.png</iconset></property><property name="text"><string>Disconnect other tabs</string></property></action>
+  <action name="actionTabDisconnectRight"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Remove_16x.png</normaloff>:/original/Remove_16x.png</iconset></property><property name="text"><string>Disconnect tabs to the right</string></property></action>
+  <action name="actionTabRename"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Rename_16x.png</normaloff>:/original/Rename_16x.png</iconset></property><property name="text"><string>Rename tab</string></property></action>
+  <action name="actionTabDuplicate"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Add_16x.png</normaloff>:/original/Add_16x.png</iconset></property><property name="text"><string>Duplicate tab</string></property></action>
+  <action name="actionTabFullscreen"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/FullScreen_16x.png</normaloff>:/original/FullScreen_16x.png</iconset></property><property name="text"><string>Fullscreen (RDP)</string></property></action>
+  <action name="actionTabSmartSize"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Resize_16x.png</normaloff>:/original/Resize_16x.png</iconset></property><property name="text"><string>SmartSize (RDP/VNC)</string></property></action>
+  <action name="actionTabViewOnly"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Monitor_16x.png</normaloff>:/original/Monitor_16x.png</iconset></property><property name="text"><string>View only</string></property></action>
+  <action name="actionTabChat"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Message_16x.png</normaloff>:/original/Message_16x.png</iconset></property><property name="text"><string>Start chat (VNC)</string></property></action>
+  <action name="actionTabRefresh"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Refresh screen (VNC)</string></property></action>
+  <action name="actionTabTransfer"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/SyncArrow_16x.png</normaloff>:/original/SyncArrow_16x.png</iconset></property><property name="text"><string>Transfer file (SSH)</string></property></action>
+  <action name="actionSpecialKeys"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ToggleOfficeKeyboardScheme_16x.png</normaloff>:/original/ToggleOfficeKeyboardScheme_16x.png</iconset></property><property name="text"><string>Send special keys (VNC)</string></property></action>
+  <action name="actionCtrlAltDel"><property name="text"><string>Ctrl+Alt+Del</string></property></action>
+  <action name="actionCtrlEsc"><property name="text"><string>Ctrl+Esc</string></property></action>
+  <action name="actionPuttySettings"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/PuttyConfig.png</normaloff>:/original/PuttyConfig.png</iconset></property><property name="text"><string>PuTTY settings</string></property></action>
+  <action name="actionTabExternalTools"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Console_16x.png</normaloff>:/original/Console_16x.png</iconset></property><property name="text"><string>External applications</string></property></action>
+  <action name="actionPanelRename"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Rename_16x.png</normaloff>:/original/Rename_16x.png</iconset></property><property name="text"><string>Rename</string></property></action>
+  <action name="actionPanelSendTo"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Monitor_16x.png</normaloff>:/original/Monitor_16x.png</iconset></property><property name="text"><string>Send to</string></property></action>
+  <action name="actionPanelClose"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Close_16x.png</normaloff>:/original/Close_16x.png</iconset></property><property name="text"><string>Close</string></property></action>
+  <action name="actionPropertyReset"><property name="text"><string>Reset</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Preview properties are read-only</string></property></action>
+  <action name="actionShowHelp"><property name="text"><string>Show Help Text</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionNotificationCopy"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Copy_16x.png</normaloff>:/original/Copy_16x.png</iconset></property><property name="text"><string>Copy</string></property></action>
+  <action name="actionNotificationDelete"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Close_16x.png</normaloff>:/original/Close_16x.png</iconset></property><property name="text"><string>Delete</string></property></action>
+  <action name="actionShowToolText"><property name="text"><string>Show Text</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
+  <action name="actionHostStatus"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/HostStatus_Check.png</normaloff>:/original/HostStatus_Check.png</iconset></property><property name="text"><string>Check host status</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Host ping is disabled in the preview</string></property></action>
+  <action name="actionConnectionIcon"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Monitor_16x.png</normaloff>:/original/Monitor_16x.png</iconset></property><property name="text"><string>Connection icon</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Icon picker is not connected to profiles</string></property></action>
+ </widget>
+ <customwidgets><customwidget><class>ConnectionTree</class><extends>QTreeWidget</extends><header>ConnectionTree.h</header></customwidget></customwidgets>
+ <resources><include location="preview-icons.qrc"/><include location="branding.qrc"/></resources>
+ <connections/>
+</ui>

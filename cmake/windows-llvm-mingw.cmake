@@ -1,0 +1,28 @@
+# Cross toolchain: Linux host -> Windows x86_64 (UCRT) with the pinned llvm-mingw.
+# Selected through scripts/env.py when RM_TARGET_PLATFORM=windows; never on a native host.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+if(NOT DEFINED ENV{RM_LLVM_MINGW})
+    message(FATAL_ERROR "RM_LLVM_MINGW is unset; use scripts/env.py with RM_TARGET_PLATFORM=windows")
+endif()
+set(_triple x86_64-w64-mingw32)
+set(_bin "$ENV{RM_LLVM_MINGW}/bin")
+set(CMAKE_C_COMPILER "${_bin}/${_triple}-clang")
+set(CMAKE_CXX_COMPILER "${_bin}/${_triple}-clang++")
+set(CMAKE_RC_COMPILER "${_bin}/${_triple}-windres")
+set(CMAKE_AR "${_bin}/llvm-ar" CACHE FILEPATH "")
+set(CMAKE_RANLIB "${_bin}/llvm-ranlib" CACHE FILEPATH "")
+# Target libraries come only from the project SDK; host programs come from PATH.
+set(CMAKE_FIND_ROOT_PATH "$ENV{RM_LLVM_MINGW}/${_triple}")
+if(DEFINED ENV{RM_FIND_ROOTS})
+    string(REPLACE ":" ";" _roots "$ENV{RM_FIND_ROOTS}")
+    list(APPEND CMAKE_FIND_ROOT_PATH ${_roots})
+endif()
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+# Qt's moc/rcc/uic/qsb run from the matching Linux host build.
+if(DEFINED ENV{RM_QT_HOST_PATH})
+    set(QT_HOST_PATH "$ENV{RM_QT_HOST_PATH}" CACHE PATH "")
+endif()

@@ -1,0 +1,14 @@
+<RCC>
+ <qresource prefix="/branding">
+  <file alias="source.png">../assets/branding/source.png</file>
+  <file alias="cmremote-16.png">../assets/branding/cmremote-16.png</file>
+  <file alias="cmremote-24.png">../assets/branding/cmremote-24.png</file>
+  <file alias="cmremote-32.png">../assets/branding/cmremote-32.png</file>
+  <file alias="cmremote-48.png">../assets/branding/cmremote-48.png</file>
+  <file alias="cmremote-64.png">../assets/branding/cmremote-64.png</file>
+  <file alias="cmremote-128.png">../assets/branding/cmremote-128.png</file>
+  <file alias="cmremote-256.png">../assets/branding/cmremote-256.png</file>
+  <file alias="cmremote-512.png">../assets/branding/cmremote-512.png</file>
+  <file alias="cmremote-1024.png">../assets/branding/cmremote-1024.png</file>
+ </qresource>
+</RCC>

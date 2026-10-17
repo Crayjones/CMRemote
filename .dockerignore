@@ -1,0 +1,9 @@
+.git
+.claude
+.dev
+build
+dist
+__pycache__
+# Builds consume only the curated vendor asset subset.
+mRemoteNG
+app/ui/old-form-ui

@@ -1,0 +1,224 @@
+diff -ruN a/src/client/auth.rs b/src/client/auth.rs
+--- a/src/client/auth.rs	2006-07-23 20:21:28
++++ b/src/client/auth.rs	2026-10-12 00:49:03
+@@ -133,6 +133,10 @@
+     key: [u8; 8],
+ }
+ 
++impl Drop for AuthHelper {
++    fn drop(&mut self) { self.key.fill(0); self.challenge.fill(0); }
++}
++
+ impl AuthHelper {
+     pub(super) async fn read<S>(reader: &mut S, credential: &str) -> Result<Self, VncError>
+     where
+diff -ruN a/src/client/connection/output.rs b/src/client/connection/output.rs
+--- a/src/client/connection/output.rs	2006-07-23 20:21:28
++++ b/src/client/connection/output.rs	2026-10-12 00:59:17
+@@ -12,7 +12,7 @@
+         VncError::IoError(error) => error.to_string(),
+         error => error.to_string(),
+     };
+-    tracing::error!("Error occurs during the decoding {:?}", error);
++    tracing::error!("VNC decoder failed");
+     tokio::select! {
+         biased;
+         _ = stop => {},
+diff -ruN a/src/client/connection.rs b/src/client/connection.rs
+--- a/src/client/connection.rs	2006-07-23 20:21:28
++++ b/src/client/connection.rs	2026-10-12 00:59:17
+@@ -19,8 +19,8 @@
+ use tracing::*;
+ 
+ use crate::{codec, PixelFormat, Rect, VncEncoding, VncError, VncEvent, X11Event};
+-const NETWORK_CHANNEL_SIZE: usize = 4096;
+-const INPUT_CHANNEL_SIZE: usize = 4096;
++const NETWORK_CHANNEL_SIZE: usize = 16;
++const INPUT_CHANNEL_SIZE: usize = 16;
+ const OUTPUT_CHANNEL_SIZE: usize = 2;
+ 
+ mod output;
+@@ -80,7 +80,6 @@
+ }
+ 
+ struct VncInner {
+-    name: String,
+     screen: Arc<AtomicU32>,
+     desktop: Arc<DesktopState>,
+     input_ch: Sender<ClientMsg>,
+@@ -112,7 +111,7 @@
+         send_client_init(&mut stream, shared).await?;
+ 
+         trace!("server init msg");
+-        let (name, (width, height)) =
++        let (_name, (width, height)) =
+             read_server_init(&mut stream, &mut pixel_format, &|e| async {
+                 output_ch_tx.send(e).await?;
+                 Ok(())
+@@ -184,9 +183,8 @@
+             trace!("Net Connection thread stops");
+         });
+ 
+-        info!("VNC Client {name} starts");
++        info!("VNC client starts");
+         Ok(Self {
+-            name,
+             screen,
+             desktop,
+             input_ch: input_ch_tx,
+@@ -285,7 +283,7 @@
+ 
+ impl Drop for VncInner {
+     fn drop(&mut self) {
+-        info!("VNC Client {} stops", self.name);
++        info!("VNC client stops");
+         let _ = self.close();
+     }
+ }
+@@ -494,7 +492,7 @@
+     // main decoding loop
+     loop {
+         let server_msg = ServerMsg::read(stream).await?;
+-        trace!("Server message got: {:?}", server_msg);
++        trace!("VNC server message received");
+         match server_msg {
+             ServerMsg::FramebufferUpdate(rect_num) => {
+                 let mut updates = crate::desktop::UpdateBatch::default();
+@@ -592,6 +590,9 @@
+                     desktop.observe(&update);
+                     output_func(VncEvent::DesktopUpdate(update)).await?;
+                 }
++                // Includes zero-rectangle updates; consumers can pace exactly one
++                // outstanding request without treating a static desktop as failure.
++                output_func(VncEvent::UpdateComplete).await?;
+             }
+             // SetColorMapEntries,
+             ServerMsg::Bell => {
+diff -ruN a/src/client/connector.rs b/src/client/connector.rs
+--- a/src/client/connector.rs	2006-07-23 20:21:28
++++ b/src/client/connector.rs	2026-10-12 17:06:22
+@@ -9,6 +9,26 @@
+ 
+ use crate::{PixelFormat, VncEncoding, VncError, VncVersion};
+ 
++/// Exact session-authorized security mechanism; never silently downgrade.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum AuthenticationPolicy {
++    RequireVncAuth,
++    ExplicitNone,
++    /// Select None when the server offers it (no credential is sent), otherwise
++    /// VncAuth. The credential callback is only polled when VncAuth is selected.
++    NoneIfOffered,
++}
++
++// The upstream callback returns String. Keep that transient copy scoped and
++// wipe it best-effort on both completion and cancellation (not locked memory).
++struct Credential(Vec<u8>);
++impl Credential {
++    fn text(&self) -> &str { std::str::from_utf8(&self.0).expect("String is UTF-8") }
++}
++impl Drop for Credential {
++    fn drop(&mut self) { self.0.fill(0); }
++}
++
+ pub enum VncState<S, F>
+ where
+     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+@@ -57,7 +77,16 @@
+                         return Err(VncError::ConnectError);
+                     }
+ 
+-                    if security_types.contains(&SecurityType::None) {
++                    let selected = match connector.authentication_policy {
++                        AuthenticationPolicy::RequireVncAuth => SecurityType::VncAuth,
++                        AuthenticationPolicy::ExplicitNone => SecurityType::None,
++                        AuthenticationPolicy::NoneIfOffered if security_types.contains(&SecurityType::None) => SecurityType::None,
++                        AuthenticationPolicy::NoneIfOffered => SecurityType::VncAuth,
++                    };
++                    if !security_types.contains(&selected) {
++                        return Err(VncError::ConnectError);
++                    }
++                    if selected == SecurityType::None {
+                         match connector.rfb_version {
+                             VncVersion::RFB33 => {
+                                 // If the security-type is 1, for no authentication, the server does not
+@@ -119,26 +148,28 @@
+                             return Err(VncError::NoPassword);
+                         }
+ 
+-                        let credential = (connector.auth_methond.take().unwrap()).await?;
++                        let credential = Credential((connector.auth_methond.take().unwrap()).await?.into_bytes());
+ 
+                         // auth
+-                        let auth = AuthHelper::read(&mut connector.stream, &credential).await?;
++                        let auth = AuthHelper::read(&mut connector.stream, credential.text()).await?;
++                        drop(credential);
+                         auth.write(&mut connector.stream).await?;
+                         let result = auth.finish(&mut connector.stream).await?;
+                         if let AuthResult::Failed = result {
+-                            if connector.rfb_version != VncVersion::RFB38 {
+-                                // In VNC Authentication (Section 7.2.2), if the authentication fails,
+-                                // the server sends the SecurityResult message, but does not send an
+-                                // error message before closing the connection.
+-                                return Err(VncError::WrongPassword);
+-                            } else {
+-                                let err_msg = crate::limits::string(
++                            if connector.rfb_version == VncVersion::RFB38 {
++                                // RFB 3.8 follows with a bounded reason string. Read and
++                                // discard it: rejection is reported as WrongPassword and
++                                // server-supplied text never reaches application errors.
++                                crate::limits::string(
+                                     &mut connector.stream,
+                                     crate::limits::MAX_NAME,
+                                 )
+                                 .await?;
+-                                return Err(VncError::General(err_msg));
+                             }
++                            // In VNC Authentication (Section 7.2.2), if the authentication fails,
++                            // the server sends the SecurityResult message, but does not send an
++                            // error message before closing the connection (before RFB 3.8).
++                            return Err(VncError::WrongPassword);
+                         }
+                     }
+                     info!("auth done, client connected");
+@@ -175,6 +206,7 @@
+ {
+     stream: S,
+     auth_methond: Option<F>,
++    authentication_policy: AuthenticationPolicy,
+     rfb_version: VncVersion,
+     allow_shared: bool,
+     pixel_format: Option<PixelFormat>,
+@@ -217,6 +249,7 @@
+         Self {
+             stream,
+             auth_methond: None,
++            authentication_policy: AuthenticationPolicy::RequireVncAuth,
+             allow_shared: true,
+             rfb_version: VncVersion::RFB38,
+             pixel_format: None,
+@@ -265,6 +298,12 @@
+     ///
+     pub fn set_auth_method(mut self, auth_callback: F) -> Self {
+         self.auth_methond = Some(auth_callback);
++        self
++    }
++
++    /// Select exactly the session-authorized mechanism. None requires an explicit opt-in.
++    pub fn set_authentication_policy(mut self, policy: AuthenticationPolicy) -> Self {
++        self.authentication_policy = policy;
+         self
+     }
+ 
+diff -ruN a/src/event.rs b/src/event.rs
+--- a/src/event.rs	2006-07-23 20:21:28
++++ b/src/event.rs	2026-10-12 00:49:03
+@@ -74,6 +74,8 @@
+     /// According to [RFC6143, section-7.8.1](https://www.rfc-editor.org/rfc/rfc6143.html#section-7.8.1)
+     ///
+     SetCursor(Rect, ImageData),
++    /// The entire framebuffer update was decoded, including an empty update.
++    UpdateComplete,
+     /// Just ring a bell
+     ///
+     Bell,
