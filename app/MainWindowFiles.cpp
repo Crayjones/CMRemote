@@ -292,7 +292,10 @@ void MainWindow::unlockConnectionFile(DocumentId id, Secret master) {
     fileUnlocks_.remove(id); unlockQueue_.removeAll(id);
     if (unlockingFile_ == id) unlockingFile_ = {};
     auto dialog = fileDialogs_.take(id); if (dialog) dialog->reject();
-    files_->unlock(id, std::move(master), [this, id](DocumentReply reply) { fileReply(std::move(reply), {}, [this, id] { reviewFilePasswords(id); }); });
+    files_->unlock(id, std::move(master), [this, id](DocumentReply reply) {
+        // A prompt queued while this unlock ran (e.g. from opening the file) is satisfied by it.
+        fileReply(std::move(reply), {}, [this, id] { if (fileUnlocks_.contains(id)) finishFileUnlock(id, true); else reviewFilePasswords(id); });
+    });
 }
 void MainWindow::promptFileUnlock(DocumentId id, std::function<void()> next) {
     const auto doc = context(id); if (!doc || closeApproved_ || !doc->status().warning.isEmpty()) return;

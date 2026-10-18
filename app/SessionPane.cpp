@@ -30,7 +30,8 @@ SessionPane::SessionPane(const rm::SessionInfo& info, QString profile, QWidget* 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(0);
     status_ = new QLabel(info.mock ? "MOCK — no network connection" : target_.protocol.toUpper() + " — connecting", this);
-    status_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    // Long status text is clipped instead of widening the pane and squeezing the docks.
+    status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
     status_->setObjectName("sessionStatus"); layout->addWidget(status_);
     idle_ = new IdleTimeout(this); idle_->setObjectName("rdpIdleTimeout");
     captureHint_ = new QLabel(this); captureHint_->setObjectName("sessionCaptureHint");

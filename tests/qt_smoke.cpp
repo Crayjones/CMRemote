@@ -713,7 +713,7 @@ private slots:
         auto* pane = w.findChild<SessionPane*>(); QVERIFY(pane);
         auto* connections = w.findChild<QDockWidget*>("connectionsDock"); auto* config = w.findChild<QDockWidget*>("configDock");
         const auto width = w.width(); const auto dockWidth = connections->width();
-        pane->event("state", QString(2048, 'x')); QTest::qWait(80);
+        pane->event("state", QString(2048, 'x')); QVERIFY(pane->minimumSizeHint().width() < 700); QTest::qWait(80);
         QCOMPARE(w.width(), width); QCOMPARE(connections->width(), dockWidth); QVERIFY(config->isVisible());
         QVERIFY(pane->minimumSizeHint().width() < 700);
     }
