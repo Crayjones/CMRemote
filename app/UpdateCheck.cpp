@@ -1,5 +1,6 @@
 #include "UpdateCheck.h"
 #include "Version.h"
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
@@ -31,11 +32,27 @@ std::optional<Release> parseLatestRelease(const QByteArray& json) {
     const auto tag = object.value("tag_name").toString(), url = object.value("html_url").toString();
     if (!parts(tag) || !url.startsWith(QString(Repository) + "/")) return std::nullopt;
     auto version = tag.trimmed(); if (version.startsWith('v', Qt::CaseInsensitive)) version.remove(0, 1);
-    return Release{version, url};
+    Release release{version, url, {}};
+    static const QRegularExpression digest("^sha256:([0-9a-fA-F]{64})$");
+    const QString downloads = QString(Repository) + "/releases/download/";
+    for (const auto& value : object.value("assets").toArray()) {
+        const auto asset = value.toObject();
+        const auto name = asset.value("name").toString(), link = asset.value("browser_download_url").toString();
+        // Only this repository's release downloads; a name never names a directory.
+        if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.startsWith('.') || !link.startsWith(downloads)) continue;
+        const auto match = digest.match(asset.value("digest").toString());
+        release.assets.append({name, link, match.hasMatch() ? match.captured(1).toLower() : QString(), qMax<qint64>(0, asset.value("size").toInteger())});
+    }
+    return release;
 }
 }
 
-UpdateChecker::UpdateChecker(QObject* parent, QUrl source) : QObject(parent), source_(std::move(source)), network_(new QNetworkAccessManager(this)) {}
+UpdateChecker::UpdateChecker(QObject* parent, QUrl source, QNetworkAccessManager* network)
+    : QObject(parent), source_(std::move(source)), network_(network ? network : new QNetworkAccessManager(this)) {}
+UpdateChecker::~UpdateChecker() {
+    // Abandon the request, also when the manager is shared and outlives this checker.
+    if (reply_) { reply_->disconnect(this); reply_->abort(); reply_->deleteLater(); }
+}
 void UpdateChecker::check() {
     if (reply_) return;
     QNetworkRequest request(source_);

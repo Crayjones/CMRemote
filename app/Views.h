@@ -10,6 +10,8 @@
 #include "DesktopUpdate.h"
 #include "RemoteCursor.h"
 #include <QCursor>
+#include <QAction>
+#include <QPointer>
 
 class QRhiBuffer;
 class QRhiGraphicsPipeline;
@@ -37,6 +39,10 @@ public:
     quint64 presentedRevision() const { return presentedRevision_; }
     bool rendererAvailable() const { return rendererError_.isEmpty(); }
     static quint32 scanCode(int qtKey);
+    // macOS: Command sends Control and physical Control sends Windows/Super, instead
+    // of each key sending what it is labeled. Applies to every remote desktop view.
+    static void setCommandAsControl(bool enabled);
+    static bool commandAsControl();
     // Mouse capture (relative mouse for games). Toggle chord: Control+Option on
     // macOS, Ctrl+Alt elsewhere, pressed and released without another key.
     void setPointerCaptureAllowed(bool allowed);
@@ -153,6 +159,8 @@ public:
     void selectCells(QPoint start, QPoint end);
     bool copySelection();
     bool pasteClipboard();
+    // Extra context-menu entries after Copy/Paste/Select All (e.g. Save as connection).
+    void setContextActions(const QList<QAction*>& actions) { contextActions_.clear(); for (auto* action : actions) contextActions_.append(action); }
 signals:
     void mockInput(QString description);
     void viewportChanged(QSize size);
@@ -195,6 +203,7 @@ private:
     QString selectionText() const;
     bool selected(int line, int column) const;
     QString report_;
+    QList<QPointer<QAction>> contextActions_;
     TerminalScreen* screen_ = nullptr;
     QScrollBar* scroll_ = nullptr;
     QTimer* pasteTimer_ = nullptr;

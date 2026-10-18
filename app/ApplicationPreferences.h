@@ -9,6 +9,15 @@ struct PreferenceValues {
     bool categorized = true, propertyHelp = true, quickConnect = true, lockToolbars = false;
     ConnectionDefaults defaults;
     bool openh264 = true; // use Cisco's separately downloaded H.264 decoder
+    bool showPanels = false;       // View > Panel Tabs: the General/Panel N row above session tabs
+    bool commandAsControl = false; // macOS remote desktops: Command sends Control (physical Control sends Windows/Super)
+    bool autoUpdate = true;        // check GitHub for releases and install them
+    QString theme = "light";       // "system", "light" or "dark"
+    bool operator==(const PreferenceValues& o) const {
+        return categorized == o.categorized && propertyHelp == o.propertyHelp && quickConnect == o.quickConnect && lockToolbars == o.lockToolbars &&
+            defaults == o.defaults && openh264 == o.openh264 && showPanels == o.showPanels && commandAsControl == o.commandAsControl &&
+            autoUpdate == o.autoUpdate && theme == o.theme;
+    }
 };
 struct PreferenceReply {
     PreferenceValues values;

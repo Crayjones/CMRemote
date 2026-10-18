@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace {
+int defaultPort(const QString& protocol) { return protocol == "ssh" ? 22 : protocol == "vnc" ? 5900 : 3389; }
 struct Field { const char* key; const char* label; const char* category; const char* type; const char* help; bool inherited; const char* protocol = nullptr; };
 const std::vector<Field> documentFields{
     {"name", "Name", "Display", "", "", false},
@@ -28,7 +29,7 @@ const std::vector<Field> fields = {
     {"domain", "Domain", "Connection", "text", "RDP account domain, at most 256 UTF-8 bytes. Empty preserves qualified usernames or UPNs. Preserved but inactive for SSH and VNC; never joined to the SSH username.", true, "rdp"},
     {"ssh_auth", "SSH authentication", "Connection", "choice", "Choose whether to sign in with a password or a private key.", true, "ssh"},
     {"ssh_key_path", "SSH key file", "Connection", "text", "Enter the path to your private key file.", true, "ssh"},
-    {"protocol", "Protocol", "Protocol", "choice", "RDP connects through embedded FreeRDP; SSH uses an embedded terminal. VNC uses an embedded desktop with negotiated Raw/ZRLE/CopyRect and aspect-fit scaling; the server controls its resolution. Classic VNC traffic is unencrypted. VNC uses the saved Password when the server requires one, asks otherwise, and connects without a password when the server allows it. TLS/vendor authentication, proxies, clipboard and advanced commands are unsupported.", true},
+    {"protocol", "Protocol", "Protocol", "choice", "RDP connects through embedded FreeRDP; SSH uses an embedded terminal. VNC uses an embedded desktop with negotiated ZRLE/Tight/TRLE/CopyRect/Raw and aspect-fit scaling; the server controls its resolution. Classic VNC traffic is unencrypted; outside your local network use a VPN or SSH tunnel (a public address is flagged in Notifications). VNC uses the saved Password when the server requires one, asks otherwise, and connects without a password when the server allows it. TLS/vendor authentication, proxies, clipboard and advanced commands are unsupported.", true},
     {"port", "Port", "Protocol", "port", "TCP port, 1–65535. Inherits the parent override or protocol default.", true},
     {"console_session", "Use console session", "Protocol", "bool", "Request the server's console/admin session. The server may ignore this preference.", true, "rdp"},
     {"security_protocol", "Security Protocol", "Protocol", "choice", "Choose the RDP security negotiation; Automatic lets the server choose and NLA requires Use CredSSP.", true, "rdp"},
@@ -241,8 +242,11 @@ void ProfileEditor::edited(const QString& key, const QVariant& value) {
             }
         } else if (inheritance_) defaults.inheritance[key] = value.toBool();
         else {
-            if (defaults.effective().value(key) == QJsonValue::fromVariant(value)) { render(); return; }
+            const auto previous = defaults.effective().value(key);
+            if (previous == QJsonValue::fromVariant(value)) { render(); return; }
             defaults.values[key] = QJsonValue::fromVariant(value); defaults.inheritance[key] = false;
+            if (key == "protocol" && defaults.values.contains("port") && defaults.values.value("port").toInt() == defaultPort(previous.toString()))
+                defaults.values["port"] = defaultPort(value.toString());
         }
         if (draft_ == defaults.json()) return;
         draft_ = defaults.json(); effective_ = defaults.effective(); valid_ = ConnectionDefaults::parse(draft_).has_value();
@@ -281,6 +285,11 @@ void ProfileEditor::edited(const QString& key, const QVariant& value) {
             const auto current = !overrides.contains(key) || overrides.value(key).isNull() ? effective_.value(key) : overrides.value(key);
             if (current == QJsonValue::fromVariant(value)) { render(); return; }
             overrides[key] = QJsonValue::fromVariant(value);
+            // A port still at the old protocol's default follows the new one (RDP 3389 → SSH 22).
+            // A port that only comes from the protocol default already follows it.
+            if (key == "protocol" && effective_.value("port").toInt() == defaultPort(current.toString()) &&
+                effective_.value("sources").toObject().value("port").toString() != "default")
+                overrides["port"] = defaultPort(value.toString());
         }
         draft_["overrides"] = overrides;
     }

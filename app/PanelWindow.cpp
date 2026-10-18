@@ -1,4 +1,5 @@
 #include "PanelWindow.h"
+#include "ThemeIcons.h"
 #include "Branding.h"
 #include "SessionFullscreenController.h"
 #include <QCloseEvent>
@@ -19,7 +20,7 @@ PanelWindow::PanelWindow(int number, QWidget* parent) : QMainWindow(parent) {
     // The shell's menu bar lives in the main window, so this window offers
     // its own actions from the panel bar corner.
     auto* button = new QToolButton(groups_); button->setObjectName("panelWindowMenuButton"); button->setAutoRaise(true);
-    button->setIcon(QIcon(":/original/Panel_16x.png")); button->setToolTip("Window options"); button->setPopupMode(QToolButton::InstantPopup);
+    button->setIcon(ThemeIcons::themed(QIcon(":/original/Panel_16x.png"))); button->setToolTip("Window options"); button->setPopupMode(QToolButton::InstantPopup);
     auto* menu = new QMenu(button); menu->setObjectName("panelWindowMenu");
     auto* panel = menu->addAction("New panel"); panel->setObjectName("actionWindowNewPanel");
     connect(panel, &QAction::triggered, this, [this] { emit newPanelRequested(this); });

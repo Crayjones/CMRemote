@@ -47,7 +47,6 @@ void clearReply(DocumentReply& reply) {
 }
 struct DocumentService::Slot {
     DocumentStatus status;
-    QTimer* idle = nullptr;
     bool opening = true;
     std::atomic<quint64> generation{0};
     std::mutex commit;
@@ -126,7 +125,7 @@ DocumentService::DocumentService(QObject* parent) : QObject(parent), state_(std:
     connect(&workerThread_, &QThread::finished, worker_, &QObject::deleteLater); workerThread_.start();
 }
 DocumentService::~DocumentService() {
-    for (auto& slot : slots_) { slot->invalidate(); slot->idle->stop(); }
+    for (auto& slot : slots_) slot->invalidate();
     auto state = state_;
     QMetaObject::invokeMethod(worker_, [state] { state->documents.clear(); QThread::currentThread()->quit(); }, Qt::QueuedConnection);
     workerThread_.wait();
@@ -138,7 +137,7 @@ std::optional<DocumentStatus> DocumentService::status(DocumentId id) const {
 void DocumentService::lock(DocumentId id) {
     Q_ASSERT(QThread::currentThread() == thread());
     const auto slot = slots_.value(id); if (!slot) return;
-    slot->invalidate(); slot->idle->stop(); slot->status.unlocked = false; slot->status.compatibilityMaster = false; slot->status.generation = slot->generation.load();
+    slot->invalidate(); slot->status.unlocked = false; slot->status.compatibilityMaster = false; slot->status.generation = slot->generation.load();
     auto state = state_; QMetaObject::invokeMethod(worker_, [state, id] {
         if (const auto doc = state->documents.value(id)) doc->lock();
     }, Qt::QueuedConnection);
@@ -147,12 +146,6 @@ void DocumentService::lock(DocumentId id) {
 void DocumentService::acknowledgeWarning(DocumentId id) {
     Q_ASSERT(QThread::currentThread() == thread());
     if (const auto slot = slots_.value(id)) { slot->status.warning.clear(); emit stateChanged(id); }
-}
-void DocumentService::setIdleInterval(DocumentId id, int milliseconds) {
-    Q_ASSERT(QThread::currentThread() == thread());
-    if (const auto slot = slots_.value(id)) {
-        slot->idle->setInterval(qMax(1, milliseconds)); if (slot->status.unlocked && !slot->status.busy) slot->idle->start();
-    }
 }
 void DocumentService::execute(DocumentId id, QString reservation, Operation operation, Completion complete) {
     Q_ASSERT(QThread::currentThread() == thread());
@@ -163,7 +156,7 @@ void DocumentService::execute(DocumentId id, QString reservation, Operation oper
         auto owned = std::make_shared<DocumentReply>(std::move(reply));
         QMetaObject::invokeMethod(this, [owned, complete = std::move(complete)]() mutable { complete(std::move(*owned)); }, Qt::QueuedConnection); return;
     }
-    slot->status.busy = true; slot->idle->stop();
+    slot->status.busy = true;
     const auto generation = slot->generation.load(); const bool opening = slot->opening;
     auto state = state_; QPointer<DocumentService> owner(this);
     QMetaObject::invokeMethod(worker_, [state, slot, id, generation, opening, owner, reservation = std::move(reservation), operation = std::move(operation), complete = std::move(complete)]() mutable {
@@ -202,9 +195,9 @@ void DocumentService::execute(DocumentId id, QString reservation, Operation oper
             }
             const bool remove = reply->closed || (opening && !reply->result.ok && !reply->committed);
             if (remove) {
-                owner->slots_.remove(id); slot->idle->deleteLater();
+                owner->slots_.remove(id);
                 QMetaObject::invokeMethod(owner->worker_, [state, id] { state->documents.remove(id); }, Qt::QueuedConnection);
-            } else if (slot->status.unlocked) slot->idle->start();
+            }
             emit owner->operationThread(id, const_cast<QThread*>(performedOn)); if (!owner) return;
             emit owner->stateChanged(id); if (!owner) return;
             DocumentReply delivered;
@@ -228,9 +221,9 @@ void DocumentService::execute(DocumentId id, QString reservation, Operation oper
 }
 DocumentId DocumentService::createSlot(QString path) {
     Q_ASSERT(QThread::currentThread() == thread());
+    // An unlocked file stays unlocked until the user locks or closes it; there is no idle relock.
     const auto id = DocumentId::create(); auto slot = std::make_shared<Slot>(); slot->status.id = id; slot->status.path = std::move(path);
-    slot->idle = new QTimer(this); slot->idle->setSingleShot(true); slot->idle->setInterval(15 * 60 * 1000);
-    connect(slot->idle, &QTimer::timeout, this, [this, id] { lock(id); }); slots_.insert(id, slot); return id;
+    slots_.insert(id, slot); return id;
 }
 DocumentId DocumentService::open(QString path, Completion complete, bool createNew) {
     const auto id = createSlot(path);
@@ -468,7 +461,7 @@ void DocumentService::exportFile(DocumentId id, QString path, ExportOptions opti
 void DocumentService::close(DocumentId id, Completion complete) {
     const auto slot = slots_.value(id);
     if (slot && !slot->status.busy && slot->status.warning.isEmpty()) {
-        slot->invalidate(); slot->idle->stop(); slot->status.unlocked = false; slot->status.compatibilityMaster = false; slot->status.generation = slot->generation.load();
+        slot->invalidate(); slot->status.unlocked = false; slot->status.compatibilityMaster = false; slot->status.generation = slot->generation.load();
     }
     execute(id, {}, [](State& state, DocumentReply& reply, const auto&) {
         state.documents.remove(reply.status.id); reply.closed = true; reply.result.ok = true;

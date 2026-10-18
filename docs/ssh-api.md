@@ -120,7 +120,7 @@ Selection/scrolling do not access the clipboard or send input. Copy remains avai
 
 ## Terminal Appearance
 
-**Tools → Terminal Appearance…**, the Preferences-role Options action, and SSH terminal/tab context menus open the same Qt Widgets dialog. Its real TerminalView preview contains only hardcoded synthetic text and uses a no-access clipboard endpoint; it never mirrors a connected terminal.
+The **Terminal** page of the Preferences-role Settings dialog edits it; **Terminal Settings…** in SSH terminal/tab context menus opens that page. Its real TerminalView preview contains only hardcoded synthetic text and uses a no-access clipboard endpoint; it never mirrors a connected terminal.
 
 Preferences are app-wide: fixed-width font family, size 6–48 pt, default text/background, selection/cursor colors, all 16 ANSI colors, cursor shape/blink and bold-color behavior. **Classic (PuTTY-inspired)** uses intensity 187 for normal primaries instead of libvterm's 224. **Tomorrow Night**, **libvterm original** and custom edits are available. Presets change colors only and are recognized by exact color equality, without a persisted preset-name field. This is a declared palette, not pixel-identical PuTTY behavior or PuTTY settings import.
 

@@ -75,7 +75,26 @@ def stage_ui_notices(destination, host, env=None):
             shutil.copy2(spdx, destination / relative / 'qt-sbom' / spdx.name)
 
 
-def stage_branding(destination, host, source, build):
+def project_version():
+    match = re.search(r'project\(RemoteManager VERSION (\d+\.\d+\.\d+)', (ROOT / 'CMakeLists.txt').read_text())
+    if not match: raise RuntimeError('CMakeLists.txt has no project version')
+    return match.group(1)
+
+
+def package_architecture(host, target):
+    """Architecture as published release names spell it (and app/AutoUpdate.cpp expects)."""
+    if target not in ('arm64', 'amd64'): raise RuntimeError('Unknown target architecture: ' + str(target))
+    if target == 'arm64': return 'arm64'
+    return 'x86_64' if host == 'linux' else 'x64'
+
+
+UPDATE_CHANNELS = ('github',)
+
+
+def stage_branding(destination, host, source, build, architecture=None, update_channel=None):
+    """Branding assets and build-info.json. update_channel marks a published GitHub release
+    package: only those may replace themselves with a newer release (app/AutoUpdate.cpp)."""
+    if update_channel is not None and update_channel not in UPDATE_CHANNELS: raise RuntimeError('Unknown update channel: ' + update_channel)
     from branding import SIZES, verify
     assets = ROOT / 'app/assets/branding'
     manifest = verify(assets)
@@ -89,6 +108,7 @@ def stage_branding(destination, host, source, build):
         if (resources / 'cmremote.icns').read_bytes() != (assets / 'cmremote.icns').read_bytes():
             raise RuntimeError('Bundle icon differs from the current branding assets')
         executable = source / 'Contents/MacOS/RemoteManager'
+        identifier = info.get('CFBundleIdentifier')
     elif host == 'windows':
         executable = source
         resources.mkdir(parents=True, exist_ok=True)
@@ -111,7 +131,12 @@ def stage_branding(destination, host, source, build):
                 branding_source_sha256=manifest['source_sha256'],
                 branding_manifest_sha256=hashlib.sha256((assets / 'manifest.json').read_bytes()).hexdigest(),
                 dependency_lock_sha256=hashlib.sha256((ROOT / 'dependencies.lock.json').read_bytes()).hexdigest(),
-                dependency_versions=lock['versions'])
+                dependency_versions=lock['versions'], version=project_version())
+    if architecture: info['architecture'] = architecture
+    if host == 'macos' and identifier: info['bundle_identifier'] = identifier
+    if update_channel:
+        if not architecture or (host == 'macos' and not identifier): raise RuntimeError('A release package needs its architecture and identity')
+        info['update_channel'] = update_channel
     (resources / 'build-info.json').write_text(json.dumps(info, indent=2) + '\n')
 
 
@@ -220,10 +245,13 @@ def relocate_macho_bundle(bundle, env):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--artifact-name', default='RemoteManager', help='Use a separate contained artifact without replacing an existing one')
+    parser.add_argument('--update-channel', choices=UPDATE_CHANNELS, help='Mark a published release package (the Release workflow only)')
     args = parser.parse_args()
     if not re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]{0,63}', args.artifact_name): parser.error('Invalid artifact name')
     env = environment()
     host = env['RM_PLATFORM']
+    import platform
+    architecture = package_architecture(host, env.get('RM_TARGET_ARCH') or ('arm64' if platform.machine() in ('arm64', 'aarch64') else 'amd64'))
     build = Path(env.get('RM_APP_BUILD_DIR', str(Path(env['RM_BUILD_DIR']) / 'app')))
     dist = ROOT / 'dist' / host
     if host == 'linux': dist /= Path(env['RM_BUILD_DIR']).name
@@ -242,7 +270,7 @@ def main():
         stage_decoder_notice(native, destination, host)
         stage_ssh_notices(native, destination, host, env)
         stage_ui_notices(destination, host, env)
-        stage_branding(destination, host, source, build)
+        stage_branding(destination, host, source, build, architecture, args.update_channel)
         reject_bundled_openh264(destination)
         subprocess.run([str(qt / 'bin/macdeployqt'), str(destination), '-always-overwrite',
                         '-libpath=' + str(native / 'lib'), '-codesign=-'], env=env, check=True)
@@ -255,7 +283,7 @@ def main():
         stage_decoder_notice(native, destination, host)
         stage_ssh_notices(native, destination, host, env)
         stage_ui_notices(destination, host, env)
-        stage_branding(destination, host, source, build)
+        stage_branding(destination, host, source, build, architecture, args.update_channel)
         reject_bundled_openh264(destination)
         shutil.make_archive(str(archive).removesuffix('.zip'), 'zip', dist, destination.name)
     else:
@@ -309,7 +337,7 @@ def main():
         stage_decoder_notice(native, destination, host)
         stage_ssh_notices(native, destination, host, env)
         stage_ui_notices(destination, host, env)
-        stage_branding(destination, host, source, build)
+        stage_branding(destination, host, source, build, architecture, args.update_channel)
         reject_bundled_openh264(destination)
         (destination / 'DESKTOP.txt').write_text('Run ./RemoteManager from any directory.\nOptional Linux menu entry: python3 install-desktop.py\nThe installer writes only your user desktop entry; rerun it after moving this package.\nThe share/applications desktop entry is a system-install template, not a relocatable shortcut.\n')
         shutil.make_archive(str(archive).removesuffix('.tar.gz'), 'gztar', dist, destination.name)

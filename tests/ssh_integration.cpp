@@ -6,7 +6,8 @@
 #include "SshTransferDialog.h"
 #include "SshWorker.h"
 #include "TerminalScreen.h"
-#include "TerminalAppearanceDialog.h"
+#include "OptionsDialog.h"
+#include "TerminalAppearancePage.h"
 #include "Views.h"
 #include "ConnectionXml.h"
 #include "ClipboardDriver.h"
@@ -198,10 +199,10 @@ private slots:
         command(view, "stty size > /home/sshfixture/stty"); const auto cells = view->screen()->cells();
         QTRY_COMPARE(oracle("/stty").value("text").toString().trimmed(), QString("%1 %2").arg(cells.height()).arg(cells.width()));
         const auto session = pane->id(); const auto target = pane->target(); const int authenticated = authCount();
-        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        auto* appearance = window.findChild<TerminalAppearanceDialog*>(); appearance->findChild<QSpinBox*>("fontSize")->setValue(18);
-        appearance->findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Ok)->click();
-        QTRY_COMPARE(view->appearance().fontSize, 18); QTRY_VERIFY(!window.findChild<TerminalAppearanceDialog*>());
+        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        auto* appearance = window.findChild<OptionsDialog*>(); appearance->findChild<QSpinBox*>("fontSize")->setValue(18);
+        appearance->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Ok)->click();
+        QTRY_COMPARE(view->appearance().fontSize, 18); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
         QVERIFY(view->screen()->cells().width() < cells.width()); QVERIFY(view->screen()->cells().height() < cells.height());
         QCOMPARE(pane->id(), session); QVERIFY(pane->target() == target); QCOMPARE(authCount(), authenticated); QTest::qWait(250);
         command(view, "stty size > /home/sshfixture/stty"); const auto fontCells = view->screen()->cells();
@@ -350,10 +351,10 @@ private slots:
         command(view, "stty size > /home/sshfixture/stty"); QTRY_COMPARE(oracle("/stty").value("text").toString().trimmed(), QString("%1 %2").arg(cells.height()).arg(cells.width()));
         QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier); QCOMPARE(contents(path), xmlBytes); QCOMPARE(contents(settings), settingBytes); QCOMPARE(contents(trust), trustBytes);
         QCOMPARE(pane->id(), session); QVERIFY(pane->target() == target); QCOMPARE(authCount(), authenticated);
-        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        auto* dialog = window.findChild<TerminalAppearanceDialog*>(); dialog->findChild<QSpinBox*>("fontSize")->setValue(16);
-        dialog->findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Ok)->click(); QTRY_COMPARE(view->appearance().fontSize, 17); QCOMPARE(otherView->appearance().fontSize, 16);
-        QTRY_VERIFY(!window.findChild<TerminalAppearanceDialog*>()); const auto applied = contents(settings);
+        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        auto* dialog = window.findChild<OptionsDialog*>(); dialog->findChild<QSpinBox*>("fontSize")->setValue(16);
+        dialog->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Ok)->click(); QTRY_COMPARE(view->appearance().fontSize, 17); QCOMPARE(otherView->appearance().fontSize, 16);
+        QTRY_VERIFY(!window.findChild<OptionsDialog*>()); const auto applied = contents(settings);
         const auto point = tabs->tabBar()->tabRect(tabs->indexOf(pane)).center();
         QContextMenuEvent context(QContextMenuEvent::Mouse, point, tabs->tabBar()->mapToGlobal(point)); QApplication::sendEvent(tabs->tabBar(), &context);
         auto* menu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu); auto* different = menu->findChild<QAction*>("actionDifferentCredentials"); QVERIFY(different && different->isEnabled()); different->trigger(); menu->close();

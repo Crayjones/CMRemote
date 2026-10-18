@@ -80,6 +80,26 @@ class BrandingAssets(unittest.TestCase):
             self.assertEqual(info['branding_source_sha256'], branding.SOURCE_SHA256)
             self.assertEqual(info['dependency_versions'], json.loads((ROOT / 'dependencies.lock.json').read_text())['versions'])
             self.assertNotIn(str(ROOT), json.dumps(info))
+            self.assertEqual(info['version'], package.project_version())
+            # Only the Release workflow marks a package as one that replaces itself.
+            self.assertNotIn('update_channel', info)
+
+    def test_release_package_identity_for_self_update(self):
+        branding = module('branding'); package = self.package()
+        self.assertEqual([package.package_architecture(h, a) for h, a in (('macos', 'arm64'), ('macos', 'amd64'), ('linux', 'amd64'), ('windows', 'amd64'))],
+                         ['arm64', 'x64', 'x86_64', 'x64'])
+        with self.workspace() as directory:
+            destination = Path(directory) / 'artifact'
+            source = Path(directory) / 'built-executable'; source.write_bytes(b'release fixture')
+            with patch.dict('sys.modules', {'branding': branding}):
+                with self.assertRaisesRegex(RuntimeError, 'Unknown update channel'):
+                    package.stage_branding(destination, 'linux', source, ROOT / 'build/linux/arm64/app', 'x86_64', 'nightly')
+                with self.assertRaisesRegex(RuntimeError, 'architecture and identity'):
+                    package.stage_branding(destination, 'linux', source, ROOT / 'build/linux/arm64/app', None, 'github')
+                package.stage_branding(destination, 'linux', source, ROOT / 'build/linux/arm64/app', 'x86_64', 'github')
+            info = json.loads((destination / 'share/build-info.json').read_text())
+            self.assertEqual((info['product'], info['version'], info['architecture'], info['update_channel']),
+                             ('CMRemote', package.project_version(), 'x86_64', 'github'))
 
     def test_mac_stage_rejects_old_bundle_metadata_and_old_icons(self):
         branding = module('branding'); package = self.package()
@@ -97,7 +117,15 @@ class BrandingAssets(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'Bundle icon'): package.stage_branding(destination, 'macos', destination, ROOT / 'build/macos/app')
                 shutil.copy2(branding.ASSETS / 'cmremote.icns', resources / 'cmremote.icns')
                 package.stage_branding(destination, 'macos', destination, ROOT / 'build/macos/app')
+                # A release bundle records the identifier the updater requires of its replacement.
+                with self.assertRaisesRegex(RuntimeError, 'architecture and identity'):
+                    package.stage_branding(destination, 'macos', destination, ROOT / 'build/macos/app', 'arm64', 'github')
+                info_path.write_bytes(plistlib.dumps(dict(info, CFBundleIdentifier='org.remotemanager.RemoteManager')))
+                package.stage_branding(destination, 'macos', destination, ROOT / 'build/macos/app', 'arm64', 'github')
             self.assertTrue((resources / 'build-info.json').is_file())
+            identity = json.loads((resources / 'build-info.json').read_text())
+            self.assertEqual((identity['bundle_identifier'], identity['architecture'], identity['update_channel']),
+                             ('org.remotemanager.RemoteManager', 'arm64', 'github'))
 
     def test_upstream_notices_are_staged_without_unused_images_or_source(self):
         package = self.package()

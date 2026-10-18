@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "ThemeIcons.h"
+#include <QDir>
 #include "VncAuthentication.h"
 #include "ConnectionCrypto.h"
 #include "ProfileEditor.h"
@@ -85,6 +87,7 @@ void MainWindow::initializeFiles() {
         if (autoSaveQueued_) QTimer::singleShot(0, this, &MainWindow::startAutoSave);
     });
     connect(files_, &DocumentService::locked, this, [this](DocumentId id) {
+        if (const auto doc = context(id); doc && !closeApproved_) notification("Locked " + QDir::toNativeSeparators(doc->status().path) + "; saved passwords need the file password again.");
         if (credentialAttempt_ && credentialAttempt_->document == id) cancelCredentials();
         if (pendingPassword_ && pendingPassword_->profile.document == id) {
             pendingPassword_.reset();
@@ -152,6 +155,7 @@ DocumentId MainWindow::openConnectionFile(const QString& path, bool createNew) {
         }
         const auto id = reply.status.id;
         const bool prompt = reply.result.ok && !reply.status.unlocked && !reply.canceled;
+        if (reply.result.ok) notification("Opened " + QDir::toNativeSeparators(reply.status.path) + (reply.status.unlocked ? "" : " (locked; enter the file password to use saved passwords)"));
         fileReply(std::move(reply)); emit documentReady();
         if (prompt) QTimer::singleShot(0, this, [this, id] { promptFileUnlock(id); });
     }, createNew);
@@ -185,7 +189,7 @@ void MainWindow::rebuildFiles() {
         if (!root) {
             root = new QTreeWidgetItem(ui_->connectionTree, DocumentItem);
             root->setData(0, Qt::UserRole, QVariant::fromValue(DocumentRootReference{id}));
-            root->setIcon(0, QIcon(":/original/ASPWebSite_16x.png")); root->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            root->setIcon(0, ThemeIcons::themed(QIcon(":/original/ASPWebSite_16x.png"))); root->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         }
         root->setText(0, "Connections — " + QFileInfo(status.path).fileName() + suffix); root->setToolTip(0, status.path);
         root->setExpanded(doc->rootExpanded());
@@ -252,7 +256,7 @@ void MainWindow::fileReply(DocumentReply reply, QString profile, std::function<v
         return;
     }
     if (reply.committed) {
-        lastError_.clear(); notification("Connection XML saved");
+        lastError_.clear(); notification("Saved " + QDir::toNativeSeparators(doc->status().path) + (profile.isEmpty() ? QString() : " (" + doc->profiles().value(profile).value("name").toString() + ")"));
         if (!automatic && !profile.isEmpty() && owningEditor) selectConnectionProfile({id, profile});
     }
     if (automatic && !doc->status().warning.isEmpty()) {
@@ -271,7 +275,8 @@ void MainWindow::fileReply(DocumentReply reply, QString profile, std::function<v
     }
     if (closeRequested_) QTimer::singleShot(0, this, [this] { close(); });
 }
-void MainWindow::writeFileProfile(rm::ProfileChange change, const QString& input, std::function<void()> next, bool inheritPassword) {
+void MainWindow::writeFileProfile(rm::ProfileChange change, const QString& input, std::function<void()> next, bool inheritPassword,
+                                  std::shared_ptr<Secret> password, std::optional<SessionTarget> account) {
     const auto id = editorDocument_; const auto doc = context(id); const bool automatic = autoSaveInFlight_;
     if (!doc || !doc->canWrite()) { if (automatic) autoSaveFailed("Unlock this connection file before saving."); else fail("Unlock this connection file before saving."); return; }
     try {
@@ -279,7 +284,10 @@ void MainWindow::writeFileProfile(rm::ProfileChange change, const QString& input
         auto complete = [this, profile = candidate.profile, next = std::move(next), automatic](DocumentReply reply) mutable {
             fileReply(std::move(reply), profile, std::move(next), automatic);
         };
-        if (inheritPassword)
+        if (password && account)
+            files_->editPassword({id, candidate.profile}, candidate.projection, {PasswordEdit::Kind::Set, password->clone(), false},
+                                 {{candidate.profile, *account}}, {}, candidate.reservation, std::move(complete));
+        else if (inheritPassword)
             files_->editPassword({id, candidate.profile}, candidate.projection, {PasswordEdit::Kind::Inheritance, {}, true}, {}, {}, candidate.reservation, std::move(complete));
         else files_->save(id, candidate.projection, candidate.reservation, std::move(complete));
     } catch (const std::exception&) { if (automatic) autoSaveFailed("Cannot prepare this file's profile edit."); else fail("Cannot prepare this file's profile edit."); }
@@ -289,7 +297,10 @@ void MainWindow::unlockConnectionFile(DocumentId id, Secret master) {
     fileUnlocks_.remove(id); unlockQueue_.removeAll(id);
     if (unlockingFile_ == id) unlockingFile_ = {};
     auto dialog = fileDialogs_.take(id); if (dialog) dialog->reject();
-    files_->unlock(id, std::move(master), [this, id](DocumentReply reply) { fileReply(std::move(reply), {}, [this, id] { reviewFilePasswords(id); }); });
+    files_->unlock(id, std::move(master), [this, id](DocumentReply reply) {
+        // A prompt queued while this unlock ran (e.g. from opening the file) is satisfied by it.
+        fileReply(std::move(reply), {}, [this, id] { if (fileUnlocks_.contains(id)) finishFileUnlock(id, true); else reviewFilePasswords(id); });
+    });
 }
 void MainWindow::promptFileUnlock(DocumentId id, std::function<void()> next) {
     const auto doc = context(id); if (!doc || closeApproved_ || !doc->status().warning.isEmpty()) return;
@@ -330,6 +341,7 @@ void MainWindow::processFileUnlocks() {
         files_->unlock(id, std::move(master), [this, id, request, current](DocumentReply reply) {
             if (!current()) { finishFileUnlock(id, false); return; }
             if (reply.result.ok && !reply.canceled && reply.status.unlocked) {
+                notification("Unlocked " + QDir::toNativeSeparators(reply.status.path) + "; it stays unlocked until you lock or close it.");
                 fileReply(std::move(reply), {}, [this, id] { finishFileUnlock(id, true); }); return;
             }
             request->error = reply.result.error;
@@ -477,8 +489,9 @@ void MainWindow::closeConnectionFile() {
     });
 }
 void MainWindow::saveTemporaryToFile(QPointer<SessionPane> pane) {
-    if (!pane || !pane->profile().isEmpty()) return;
-    const auto target = pane->target();
+    if (pane && pane->profile().isEmpty()) saveTargetToFile(pane->target());
+}
+void MainWindow::saveTargetToFile(const SessionTarget& target, std::shared_ptr<Secret> password) {
     auto* dialog = new QDialog(this); dialog->setObjectName("saveAsConnection"); dialog->setWindowTitle("Save as connection");
     dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::WindowModal);
     auto* layout = new QFormLayout(dialog);
@@ -497,8 +510,8 @@ void MainWindow::saveTemporaryToFile(QPointer<SessionPane> pane) {
     layout->addRow("Name", name); layout->addRow("Connection file", file); layout->addRow("Parent folder", folder);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, dialog); layout->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept); connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::finished, this, [this, pane, target, name, file, folder](int answer) {
-        if (answer != QDialog::Accepted || !pane || closeApproved_) return;
+    connect(dialog, &QDialog::finished, this, [this, target, password, name, file, folder](int answer) {
+        if (answer != QDialog::Accepted || closeApproved_) return;
         const auto id = file->currentData().value<DocumentId>(); const auto doc = context(id);
         if (!doc || !doc->canWrite()) { fail("Target connection file is closed, locked, busy or awaiting recovery."); return; }
         const auto value = folder->currentData(); QString parent;
@@ -509,7 +522,12 @@ void MainWindow::saveTemporaryToFile(QPointer<SessionPane> pane) {
         } else if (value.value<DocumentRootReference>().document != id) { fail("Target root is no longer available."); return; }
         const QJsonObject request{{"name", name->text()}, {"kind", "connection"}, {"parent", parent.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(parent)}, {"overrides", target.overrides()}};
         const auto input = QString::fromUtf8(QJsonDocument(request).toJson(QJsonDocument::Compact));
-        guard([this, id, parent, input] { if (parent.isEmpty() ? selectConnectionFile(id) : selectConnectionProfile({id, parent})) writeFileProfile(rm::ProfileChange::Create, input, {}); });
+        // The saved password is bound to this connection's endpoint and account.
+        std::optional<SessionTarget> account;
+        if (password) account = target.protocol == "ssh" ? normalizeSshTarget(target) : target.protocol == "rdp" ? normalizeRdpTarget(target) : std::nullopt;
+        guard([this, id, parent, input, password = account ? password : nullptr, account] {
+            if (parent.isEmpty() ? selectConnectionFile(id) : selectConnectionProfile({id, parent})) writeFileProfile(rm::ProfileChange::Create, input, {}, false, password, account);
+        });
     }); dialog->open(); name->selectAll(); name->setFocus();
 }
 void MainWindow::updateFileActions() {

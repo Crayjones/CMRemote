@@ -24,7 +24,8 @@ QLineEdit, QComboBox { background: white; color: #202020; border: 1px solid #aba
 QTabWidget::pane { border: 1px solid #ababab; }
 QTabBar::tab { background: #eeeeee; color: #202020; border: 1px solid #ababab; padding: 4px 12px; }
 QTabBar::tab:selected { background: #0078d7; color: white; }
-QTabWidget#sessionTabs QTabBar::tab:selected { background: #dadada; color: #202020; }
+QTabWidget#sessionTabs QTabBar::tab, QTabWidget#panelSessionTabs QTabBar::tab { background: #dadada; color: #505050; }
+QTabWidget#sessionTabs QTabBar::tab:selected, QTabWidget#panelSessionTabs QTabBar::tab:selected { background: #ffffff; color: #202020; border-bottom-color: #ffffff; }
 QWidget#sessionSurface { background: #191919; }
 QLabel#sessionMessage { color: #dddddd; background: transparent; }
 QWidget#configHelp, QWidget#notificationDetails { background: #f0f0f0; }
@@ -91,7 +92,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
     <property name="title"><string>&amp;View</string></property>
     <addaction name="actionAddPanel"/>
     <widget class="QMenu" name="menuConnectionPanels"><property name="title"><string>Connection Panels</string></property><addaction name="actionGeneralPanel"/></widget>
-    <addaction name="menuConnectionPanels"/><addaction name="separator"/>
+    <addaction name="menuConnectionPanels"/><addaction name="actionViewPanels"/><addaction name="separator"/>
     <addaction name="actionViewConnections"/><addaction name="actionViewConfig"/><addaction name="actionViewNotifications"/><addaction name="actionViewScreenshots"/>
     <addaction name="separator"/>
     <widget class="QMenu" name="menuJumpTo"><property name="title"><string>Jump To</string></property><addaction name="actionNextSession"/><addaction name="actionPreviousSession"/></widget>
@@ -99,7 +100,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
     <addaction name="separator"/><addaction name="actionViewQuickConnect"/><addaction name="actionViewExternalTools"/><addaction name="actionViewMultiSsh"/>
     <addaction name="separator"/><addaction name="actionFullscreen"/>
    </widget>
-   <widget class="QMenu" name="menuTools"><property name="title"><string>&amp;Tools</string></property><addaction name="actionUnlockPasswords"/><addaction name="actionLockPasswords"/><addaction name="actionChangeMaster"/><addaction name="separator"/><addaction name="actionDifferentCredentials"/><addaction name="actionReconnectAll"/><addaction name="separator"/><addaction name="actionTerminalAppearance"/><addaction name="separator"/><addaction name="actionExternalTools"/></widget>
+   <widget class="QMenu" name="menuTools"><property name="title"><string>&amp;Tools</string></property><addaction name="actionUnlockPasswords"/><addaction name="actionLockPasswords"/><addaction name="actionChangeMaster"/><addaction name="separator"/><addaction name="actionDifferentCredentials"/><addaction name="actionReconnectAll"/><addaction name="separator"/><addaction name="actionExternalTools"/></widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>&amp;Help</string></property>
     <addaction name="actionHelpContents"/><addaction name="separator"/><addaction name="actionWebsite"/><addaction name="actionSupportForum"/>
@@ -247,8 +248,8 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   <action name="actionSaveFile"><property name="text"><string>Save connection file</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionSaveAsConnection"><property name="text"><string>Save as connection…</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionSaveFileAs"><property name="text"><string>Save connection file as…</string></property><property name="enabled"><bool>false</bool></property></action>
-  <action name="actionTerminalAppearance"><property name="text"><string>Terminal Appearance…</string></property></action>
-  <action name="actionOptions"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Settings_16x.png</normaloff>:/original/Settings_16x.png</iconset></property><property name="menuRole"><enum>QAction::PreferencesRole</enum></property><property name="text"><string>Options…</string></property><property name="enabled"><bool>false</bool></property></action>
+  <action name="actionTerminalAppearance"><property name="text"><string>Terminal Settings…</string></property></action>
+  <action name="actionOptions"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Settings_16x.png</normaloff>:/original/Settings_16x.png</iconset></property><property name="menuRole"><enum>QAction::PreferencesRole</enum></property><property name="text"><string>Settings…</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionExit"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/CloseSolution_16x.png</normaloff>:/original/CloseSolution_16x.png</iconset></property><property name="menuRole"><enum>QAction::QuitRole</enum></property><property name="text"><string>Exit</string></property></action>
   <action name="actionNextSession"><property name="text"><string>Next session</string></property></action>
   <action name="actionPreviousSession"><property name="text"><string>Previous session</string></property></action>
@@ -261,6 +262,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   <action name="actionViewMultiSsh"><property name="text"><string>Multi SSH Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
   <action name="actionReconnectAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Reconnect all connections</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionAddPanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/InsertPanel_16x.png</normaloff>:/original/InsertPanel_16x.png</iconset></property><property name="text"><string>Add Connection Panel</string></property></action>
+  <action name="actionViewPanels"><property name="text"><string>Panel Tabs</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>false</bool></property></action>
   <action name="actionGeneralPanel"><property name="text"><string>General</string></property></action>
   <action name="actionResetLayout"><property name="text"><string>Reset layout</string></property></action>
   <action name="actionLockToolbars"><property name="text"><string>Lock toolbar positions</string></property><property name="checkable"><bool>true</bool></property></action>

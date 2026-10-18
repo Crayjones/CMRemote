@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ThemeIcons.h"
 #include "ProfileEditor.h"
 #include "PropertyDelegate.h"
 #include "SessionPane.h"
@@ -20,6 +21,7 @@
 #include <QPersistentModelIndex>
 #include <QTabBar>
 #include <QTimer>
+#include <QStyle>
 #include <algorithm>
 #ifdef Q_OS_MACOS
 void rmNativeKeepHiddenAfterFullScreen(QWidget* widget);
@@ -154,10 +156,14 @@ QWidget* MainWindow::createPanel(QTabWidget* groups, const QString& requested) {
         if (auto* groups = groupsOf(panel)) { groups->setCurrentWidget(panel); hostOf(groups)->raise(); hostOf(groups)->activateWindow(); }
     });
     connect(panel, &QObject::destroyed, action, &QObject::deleteLater);
-    groups->setCurrentIndex(groups->addTab(panel, QIcon(":/original/Panel_16x.png"), name));
+    groups->setCurrentIndex(groups->addTab(panel, ThemeIcons::themed(QIcon(":/original/Panel_16x.png")), name));
     return panel;
 }
-void MainWindow::addPanel() { if (!closeApproved_) createPanel(ui_->groupTabs); }
+void MainWindow::addPanel() {
+    if (closeApproved_) return;
+    // A new panel is only reachable through its tab, so adding one shows the panel row.
+    ui_->actionViewPanels->setChecked(true); createPanel(ui_->groupTabs);
+}
 void MainWindow::movePanel(QWidget* panel, QTabWidget* destination, int index) {
     auto* source = groupsOf(panel); if (!source || !destination || panel->property("isGeneralPanel").toBool()) return;
     if (auto* tabs = panel->findChild<QTabWidget*>()) for (int i = 0; i < tabs->count(); ++i) exitFullscreenFor(qobject_cast<SessionPane*>(tabs->widget(i)));
@@ -328,20 +334,40 @@ void MainWindow::resetLayout() {
     resizeDocks({ui_->connectionsDock}, {226}, Qt::Horizontal); resizeDocks({ui_->connectionsDock, ui_->configDock}, {210, 250}, Qt::Vertical);
     resizeDocks({ui_->notificationsDock}, {95}, Qt::Vertical);
     for (auto* toolbar : {ui_->quickConnectToolbar, ui_->externalToolsToolbar, ui_->multiSshToolbar}) {
-        removeToolBar(toolbar); addToolBar(Qt::TopToolBarArea, toolbar); toolbar->setMovable(!ui_->actionLockToolbars->isChecked());
+        removeToolBar(toolbar); addToolBar(Qt::TopToolBarArea, toolbar);
+        toolbar->setMovable(!ui_->actionLockToolbars->isChecked() && !(quickConnectInTitleBar_ && toolbar == ui_->quickConnectToolbar));
     }
     ui_->quickConnectToolbar->show(); ui_->externalToolsToolbar->hide(); ui_->multiSshToolbar->hide();
 }
-void MainWindow::notification(const QString& text) {
-    auto* item = new QListWidgetItem(QIcon(":/original/StatusInformation_16x.png"), text, ui_->notificationsList);
-    item->setData(Qt::UserRole, QDateTime::currentDateTime().toString(Qt::ISODate));
-    while (ui_->notificationsList->count() > 200) delete ui_->notificationsList->takeItem(0);
+void MainWindow::notification(const QString& text, Notice level) {
+    const auto icon = level == Notice::Error ? style()->standardIcon(QStyle::SP_MessageBoxCritical)
+        : level == Notice::Warning ? style()->standardIcon(QStyle::SP_MessageBoxWarning) : ThemeIcons::themed(QIcon(":/original/StatusInformation_16x.png"));
+    const auto now = QDateTime::currentDateTime();
+    // The list shows the time; the details pane shows the full message, level and date.
+    auto* item = new QListWidgetItem(icon, now.toString("HH:mm:ss") + "  " + text, ui_->notificationsList);
+    item->setData(Qt::UserRole, now.toString(Qt::ISODateWithMs));
+    item->setData(Qt::UserRole + 1, text);
+    item->setData(Qt::UserRole + 2, level == Notice::Error ? "Error" : level == Notice::Warning ? "Warning" : "Information");
+    item->setToolTip(text);
+    while (ui_->notificationsList->count() > 1000) delete ui_->notificationsList->takeItem(0);
     ui_->notificationsList->setCurrentItem(item); updateNotificationDetails();
+}
+QString MainWindow::describeSession(const SessionPane* pane) const {
+    if (!pane) return {};
+    const auto target = pane->target();
+    QString text = target.protocol.toUpper() + " " + (target.username.isEmpty() || target.protocol == "vnc" ? QString() : target.username + "@") + target.endpoint();
+    QString name;
+    if (const auto doc = context(pane->document()); doc && !pane->profile().isEmpty()) name = doc->profiles().value(pane->profile()).value("name").toString();
+    if (!name.isEmpty()) text += " (" + name + ")"; else if (pane->profile().isEmpty()) text += " (Quick Connect)";
+    return text;
 }
 void MainWindow::updateNotificationDetails() {
     const auto selected = ui_->notificationsList->selectedItems(); auto* item = selected.size() == 1 ? selected.first() : nullptr;
-    ui_->notificationText->setPlainText(item ? item->text() : QString()); ui_->notificationDate->setText(item ? item->data(Qt::UserRole).toString() : QString());
+    const auto message = item ? item->data(Qt::UserRole + 1).toString() : QString();
+    ui_->notificationText->setPlainText(item ? (message.isEmpty() ? item->text() : message) : QString());
+    ui_->notificationDate->setText(item ? item->data(Qt::UserRole + 2).toString() + " · " + item->data(Qt::UserRole).toString() : QString());
     ui_->notificationIcon->setVisible(item != nullptr);
+    if (item) ui_->notificationIcon->setPixmap(item->icon().pixmap(16, 16));
 }
 void MainWindow::rebuildJumpMenu() {
     auto* menu = ui_->menuJumpTo; menu->clear();
@@ -399,7 +425,8 @@ void MainWindow::configureMenus() {
     connect(ui_->actionAddPanel, &QAction::triggered, this, &MainWindow::addPanel);
     connect(ui_->actionResetLayout, &QAction::triggered, this, &MainWindow::resetLayout);
     connect(ui_->actionLockToolbars, &QAction::toggled, this, [this](bool locked) {
-        for (auto* bar : {ui_->quickConnectToolbar, ui_->externalToolsToolbar, ui_->multiSshToolbar}) bar->setMovable(!locked);
+        for (auto* bar : {ui_->quickConnectToolbar, ui_->externalToolsToolbar, ui_->multiSshToolbar})
+            bar->setMovable(!locked && !(quickConnectInTitleBar_ && bar == ui_->quickConnectToolbar));
     });
     connect(ui_->actionFullscreen, &QAction::toggled, this, [this](bool full) {
         if (full) {
@@ -426,6 +453,7 @@ void MainWindow::popup(QMenu* menu, const QPoint& position) {
     menu->setToolTipsVisible(true); connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater); menu->popup(position);
 }
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (titleBarDrag(watched, event)) return true;
     if (auto* bar = qobject_cast<QTabBar*>(watched); bar && tabDragEvent(bar, event)) return true;
     if (event->type() != QEvent::ContextMenu) return QMainWindow::eventFilter(watched, event);
     auto* context = static_cast<QContextMenuEvent*>(event); auto* widget = qobject_cast<QWidget*>(watched); if (!widget) return false;
@@ -473,6 +501,10 @@ QMenu* MainWindow::sessionMenu(SessionPane* pane) {
     menuAction(menu, "actionTabReconnect", !transitionPending_, [this, target] { reconnectPane(target); });
     menuAction(menu, "actionDifferentCredentials", !transitionPending_ && !pane->mock() && !pane->profile().isEmpty(), [this, target] { reconnectPane(target, true); });
     menuAction(menu, "actionTabDisconnect", pane->active(), [this, target] { if (target && ownerOf(target)) disconnectPane(target); });
+    if (pane->profile().isEmpty())
+        menuAction(menu, "actionSaveAsConnection", !transitionPending_, [this, target] {
+            if (target && target->profile().isEmpty()) guard([this, target] { saveTemporaryToFile(target); });
+        });
     auto* clipboard = menu->addAction("Share text clipboard for this session");
     clipboard->setObjectName("actionSessionClipboard"); clipboard->setCheckable(true);
     clipboard->setChecked(pane->clipboardSharingEnabled()); clipboard->setEnabled(pane->clipboardSharingAvailable());
@@ -603,7 +635,11 @@ QMenu* MainWindow::notificationMenu() {
     QList<QPersistentModelIndex> targets;
     for (int i = 0; i < list->count(); ++i) if (all || list->item(i)->isSelected()) targets.append(list->model()->index(i, 0));
     auto* copy = menuAction(menu, "actionNotificationCopy", !targets.isEmpty(), [this, targets] {
-        QStringList messages; for (const auto& index : targets) if (index.isValid()) messages.append(ui_->notificationsList->item(index.row())->text());
+        QStringList messages;
+        for (const auto& index : targets) if (index.isValid()) {
+            const auto* item = ui_->notificationsList->item(index.row());
+            messages.append(item->data(Qt::UserRole).toString() + " [" + item->data(Qt::UserRole + 2).toString() + "] " + item->data(Qt::UserRole + 1).toString());
+        }
         if (!messages.isEmpty()) QApplication::clipboard()->setText(messages.join("\n----------\n"));
     });
     auto* remove = menuAction(menu, "actionNotificationDelete", !targets.isEmpty(), [this, targets] {
@@ -618,7 +654,7 @@ MainWindow::DropTarget MainWindow::dropTarget(QPoint global, QWidget* exclude) c
         if (host == exclude || !host->isVisible() || host->isMinimized()) continue;
         auto* bar = groups->tabBar();
         const QRect panels(QPoint(groups->mapToGlobal(QPoint(0, 0)).x(), bar->mapToGlobal(QPoint(0, 0)).y()), QSize(groups->width(), qMax(bar->height(), 20)));
-        if (panels.contains(global)) return {groups, nullptr, bar->tabAt(bar->mapFromGlobal(global))};
+        if (bar->isVisible() && panels.contains(global)) return {groups, nullptr, bar->tabAt(bar->mapFromGlobal(global))};
         auto* panel = groups->currentWidget(); auto* tabs = panel ? panel->findChild<QTabWidget*>() : nullptr;
         if (!tabs) continue;
         auto* strip = tabs->tabBar();

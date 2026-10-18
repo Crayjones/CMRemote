@@ -171,12 +171,36 @@ FunctionEnd
 Function un.onInit
   SetRegView 64
 FunctionEnd
+Function .onInstFailed
+  ; Roll back: drop the partial copy and restore the version that was installed.
+  IfFileExists "$INSTDIR.previous\RemoteManager.exe" 0 done
+    RMDir /r "$INSTDIR"
+    Rename "$INSTDIR.previous" "$INSTDIR"
+  done:
+FunctionEnd
 Section "Install"
   SetShellVarContext all
-  ; Replace the whole directory so files dropped by an older version cannot be loaded.
-  RMDir /r "$INSTDIR"
+  ; An interrupted earlier setup left the installed version aside: restore it first.
+  IfFileExists "$INSTDIR.previous\RemoteManager.exe" 0 staged
+    RMDir /r "$INSTDIR"
+    Rename "$INSTDIR.previous" "$INSTDIR"
+  staged:
+  ; Move an installed version aside rather than deleting it: files dropped by an older
+  ; version cannot be loaded, and a failed copy rolls back in .onInstFailed. A folder
+  ; without CMRemote in it is never moved or removed.
+  IfFileExists "$INSTDIR\RemoteManager.exe" 0 copy
+    ClearErrors
+    Rename "$INSTDIR" "$INSTDIR.previous"
+    IfErrors 0 copy
+      MessageBox MB_ICONSTOP "Close ${PRODUCT} and run Setup again. The installed version was not changed." /SD IDOK
+      SetErrorLevel 2
+      Quit
+  copy:
   SetOutPath "$INSTDIR"
+  ClearErrors
   File /r "@PACKAGE@\*"
+  IfErrors 0 +2
+    Abort "Copying ${PRODUCT} failed; the previous version is restored."
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\RemoteManager.exe" "" "$INSTDIR\RemoteManager.exe" 0
@@ -189,6 +213,7 @@ Section "Install"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
+  RMDir /r "$INSTDIR.previous"
 SectionEnd
 Section "Uninstall"
   SetShellVarContext all

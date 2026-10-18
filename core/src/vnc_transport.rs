@@ -246,9 +246,14 @@ impl Backend {
                 })
                 .set_pixel_format(PixelFormat::bgra())
                 .allow_shared(true)
+                // Preference order: ZRLE, then Tight and TRLE for servers without
+                // ZRLE (all compressed, far less bandwidth than Raw), CopyRect, Raw.
                 .add_encoding(VncEncoding::Zrle)
+                .add_encoding(VncEncoding::Tight)
+                .add_encoding(VncEncoding::Trle)
                 .add_encoding(VncEncoding::CopyRect)
                 .add_encoding(VncEncoding::Raw)
+                .add_encoding(VncEncoding::LastRectPseudo)
                 .add_encoding(VncEncoding::CursorPseudo)
                 .add_encoding(VncEncoding::DesktopSizePseudo)
                 .build().map_err(|_| Failure::Handshake)?

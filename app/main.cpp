@@ -55,6 +55,8 @@ int main(int argc,char** argv) {
         if (parser.isSet("demo") && parser.isSet("dev-root"))
             QObject::connect(&window, &MainWindow::documentReady, &window, &MainWindow::seedDemo);
         window.show();
+        // Packaged runs only; development and smoke runs never update themselves.
+        if (!parser.isSet("dev-root") && !parser.isSet("smoke")) window.enableAutomaticUpdates(directory);
         if (parser.isSet("smoke")) {
             // Close through MainWindow's shutdown path. QApplication::quit() goes via Cocoa's
             // terminate on macOS, which never completes for an app launched in the background.

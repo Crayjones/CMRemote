@@ -29,6 +29,8 @@ signals:
     void frameAvailable(quint64 generation);
     void cursorAvailable(quint64 generation);
     void phaseChanged(VncWorker::Phase phase, QString error, quint64 generation);
+    // The host resolved to a public internet address; classic VNC is unencrypted.
+    void securityWarning(QString text, quint64 generation);
     // Native thread has been joined off GUI and all retained deliveries drained.
     void finished(quint64 generation);
 private:

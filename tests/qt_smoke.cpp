@@ -1,5 +1,8 @@
 #include "MainWindow.h"
+#include "ThemeIcons.h"
 #include "UpdateCheck.h"
+#include "QuickConnect.h"
+#include "AutoUpdate.h"
 #include <QTextDocument>
 #include "Appearance.h"
 #include "Branding.h"
@@ -631,6 +634,43 @@ private slots:
         QVERIFY(restart.findChild<QWidget*>("configHelp")->isHidden()); QVERIFY(!restart.findChild<QToolBar*>("quickConnectToolbar")->isMovable());
         QVERIFY(restart.findChild<QDockWidget*>("notificationsDock")->isHidden());
     }
+    void darkIconsSwapGlyphsAndRestore() {
+        QImage glyph(16, 16, QImage::Format_ARGB32); glyph.fill(QColor("#f6f6f6"));
+        for (int y = 4; y < 8; ++y) for (int x = 4; x < 8; ++x) glyph.setPixel(x, y, QColor("#424242").rgb());
+        glyph.setPixel(0, 0, QColor("#1ba1e2").rgb());
+        const auto swapped = ThemeIcons::dark(glyph);
+        QCOMPARE(QColor(swapped.pixel(5, 5)), QColor("#f6f6f6")); QCOMPARE(QColor(swapped.pixel(12, 12)), QColor("#252525"));
+        QCOMPARE(QColor(swapped.pixel(0, 0)), QColor("#1ba1e2"));
+        // Full-color pictures without the glyph gray are left alone.
+        QImage picture(16, 16, QImage::Format_ARGB32); picture.fill(QColor("#c03030")); for (int x = 0; x < 16; ++x) picture.setPixel(x, 1, QColor("#424242").rgb());
+        QCOMPARE(ThemeIcons::dark(picture), picture);
+        const QIcon light(QPixmap::fromImage(glyph));
+        applyTheme(*qApp, "dark"); const auto dark = ThemeIcons::themed(light); QVERIFY(dark.cacheKey() != light.cacheKey());
+        QCOMPARE(ThemeIcons::themed(dark).cacheKey(), dark.cacheKey());
+        applyTheme(*qApp, "light"); QCOMPARE(ThemeIcons::themed(dark).cacheKey(), light.cacheKey());
+    }
+    void darkThemePersistsAndRestyles() {
+        QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
+        const auto choose = [&](MainWindow& w, const QString& theme) {
+            auto* action = w.findChild<QAction*>("actionOptions"); [&] { QTRY_VERIFY(action->isEnabled()); }(); action->trigger();
+            auto* dialog = w.findChild<QDialog*>("optionsDialog"); auto* combo = dialog->findChild<QComboBox*>("theme");
+            combo->setCurrentIndex(combo->findData(theme)); dialog->accept(); [&] { QTRY_VERIFY(!w.findChild<QDialog*>("optionsDialog")); }();
+        };
+        {
+            MainWindow w(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); w.show(); WAIT_STORE(w);
+            QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128); const auto icon = w.findChild<QAction*>("actionOptions")->icon().cacheKey(); choose(w, "dark");
+            QVERIFY(w.findChild<QAction*>("actionOptions")->icon().cacheKey() != icon);
+            QVERIFY(qApp->palette().color(QPalette::Window).lightness() < 128);
+            QVERIFY(w.styleSheet().contains("#2b2b2b")); QVERIFY(!w.styleSheet().contains("#f0f0f0"));
+        }
+        QFile stored(preferences); QVERIFY(stored.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(stored.readAll()).object().value("theme"), QJsonValue("dark"));
+        MainWindow restart(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); restart.show(); WAIT_STORE(restart);
+        QTRY_VERIFY(restart.styleSheet().contains("#2b2b2b"));
+        const auto darkIcon = restart.findChild<QAction*>("actionOptions")->icon(); QCOMPARE(QColor(darkIcon.pixmap(16, 16).toImage().pixel(8, 8)).lightness() >= 0, true);
+        choose(restart, "light"); QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128);
+        QVERIFY(restart.findChild<QAction*>("actionOptions")->icon().cacheKey() != darkIcon.cacheKey()); QVERIFY(restart.styleSheet().contains("#f0f0f0"));
+    }
     void openh264OptionCreditsCiscoAndPersists() {
         QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
         const auto open = [](MainWindow& w) {
@@ -711,7 +751,7 @@ private slots:
         auto* pane = w.findChild<SessionPane*>(); QVERIFY(pane);
         auto* connections = w.findChild<QDockWidget*>("connectionsDock"); auto* config = w.findChild<QDockWidget*>("configDock");
         const auto width = w.width(); const auto dockWidth = connections->width();
-        pane->event("state", QString(2048, 'x')); QTest::qWait(80);
+        pane->event("state", QString(2048, 'x')); QVERIFY(pane->minimumSizeHint().width() < 700); QTest::qWait(80);
         QCOMPARE(w.width(), width); QCOMPARE(connections->width(), dockWidth); QVERIFY(config->isVisible());
         QVERIFY(pane->minimumSizeHint().width() < 700);
     }
@@ -757,7 +797,7 @@ private slots:
         QStringList top; for (auto* action : w.menuBar()->actions()) top << action->text().remove('&');
         QCOMPARE(top, QStringList({"File", "View", "Tools", "Help"}));
         QStringList order; for (auto* action : w.findChild<QMenu*>("menuView")->actions()) order << (action->isSeparator() ? "|" : action->text());
-        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
+        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "Panel Tabs", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
         auto* file = w.findChild<QMenu*>("menuFile");
         for (const auto* name : {"actionSaveAsConnection", "actionSaveFile", "actionSaveFileAs", "actionCloseFile"})
             QVERIFY(file->actions().contains(w.findChild<QAction*>(name)));
@@ -807,6 +847,43 @@ private slots:
         QVERIFY(release); QCOMPARE(release->version, QString("0.2.0"));
         // Only this project's release pages are offered as download links.
         QVERIFY(!Updates::parseLatestRelease("{\"tag_name\":\"v9.0.0\",\"html_url\":\"https://example.com/CMRemote\"}"));
+        // Assets: only this repository's downloads, with GitHub's SHA-256 digest.
+        const auto digest = QString(64, 'a');
+        const auto withAssets = Updates::parseLatestRelease(QString("{\"tag_name\":\"v0.3.0\",\"html_url\":\"https://github.com/Crayjones/CMRemote/releases/tag/v0.3.0\",\"assets\":["
+            "{\"name\":\"CMRemote-0.3.0-macos-arm64.dmg\",\"browser_download_url\":\"https://github.com/Crayjones/CMRemote/releases/download/v0.3.0/CMRemote-0.3.0-macos-arm64.dmg\",\"digest\":\"sha256:%1\"},"
+            "{\"name\":\"evil.dmg\",\"browser_download_url\":\"https://example.com/evil.dmg\"},"
+            "{\"name\":\"../x\",\"browser_download_url\":\"https://github.com/Crayjones/CMRemote/releases/download/v0.3.0/x\"}]}").arg(digest).toUtf8());
+        QVERIFY(withAssets); QCOMPARE(withAssets->assets.size(), 1); QCOMPARE(withAssets->assets.first().sha256, digest);
+        QCOMPARE(Updates::checksumFor(QByteArray(digest.toLatin1() + "  CMRemote-0.3.0-windows-x64-setup.exe\n"), "CMRemote-0.3.0-windows-x64-setup.exe"), digest);
+        QVERIFY(Updates::checksumFor("bad  CMRemote.exe\n", "CMRemote.exe").isEmpty());
+        // A development build cannot replace itself.
+        QVERIFY(!Updates::installerFor(withAssets->assets, "0.3.0", Updates::detectInstallation()));
+    }
+    void quickConnectPortFollowsProtocolDefault() {
+        QCOMPARE(followDefaultPort("host:3389", "rdp", "ssh"), QString("host:22"));
+        QCOMPARE(followDefaultPort("user@host:22", "ssh", "vnc"), QString("user@host:5900"));
+        QCOMPARE(followDefaultPort("[::1]:5900", "vnc", "rdp"), QString("[::1]:3389"));
+        QCOMPARE(followDefaultPort("host:8080", "rdp", "ssh"), QString("host:8080"));
+        QCOMPARE(followDefaultPort("host", "rdp", "ssh"), QString("host"));
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* combo = w.findChild<QComboBox*>("quickConnectCombo"); combo->setCurrentText("server:3389");
+        w.setQuickConnectProtocol("ssh"); QCOMPARE(combo->currentText(), QString("server:22"));
+        w.setQuickConnectProtocol("vnc"); QCOMPARE(combo->currentText(), QString("server:5900"));
+    }
+    void panelTabsHiddenByDefaultAndToggle() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* action = w.findChild<QAction*>("actionViewPanels"); auto* groups = w.findChild<QTabWidget*>("groupTabs");
+        QVERIFY(action && action->isEnabled() && !action->isChecked()); QVERIFY(groups->tabBar()->isHidden());
+        action->trigger(); QVERIFY(!groups->tabBar()->isHidden());
+        action->trigger(); QVERIFY(groups->tabBar()->isHidden());
+        // Adding a panel shows the row so the new panel can be reached.
+        w.addPanel(); QVERIFY(action->isChecked()); QVERIFY(!groups->tabBar()->isHidden());
+    }
+    void quickConnectSessionsOfferSaveBesideCopyPaste() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        w.setQuickConnectProtocol("ssh"); w.quickConnect("save.invalid", true);
+        auto* view = w.findChild<TerminalView*>(); QVERIFY(view);
+        QVERIFY(w.findChild<QAction*>("actionSessionSaveAsConnection"));
     }
     void updateCheckReachesGitHub() {
         // Contacts api.github.com; run with RM_NETWORK_TESTS=1.

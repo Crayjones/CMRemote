@@ -16,6 +16,7 @@
 #include "ConnectionXml.h"
 #include "ExternalTools.h"
 #include "ApplicationPreferences.h"
+#include "UpdateCheck.h"
 #include <memory>
 #include <functional>
 namespace Ui { class MainWindow; }
@@ -34,7 +35,6 @@ class SshWorker;
 class VncWorker;
 class SshHostKeyService;
 class TerminalAppearanceService;
-class TerminalAppearanceDialog;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -54,6 +54,10 @@ public:
     QMainWindow* sessionFullscreenWindow() const;
     // Where Check for Updates asks for the latest release (tests use a local file).
     void setUpdateSource(const QUrl& source);
+    // Packaged application only: check, download and install releases automatically.
+    void enableAutomaticUpdates(const QString& dataDirectory);
+    // Takes ownership; tests supply an updater with fixture releases and installation.
+    void attachUpdater(class AutoUpdater* updater);
     DocumentId openConnectionFile(const QString& path, bool createNew = false);
     QList<DocumentId> connectionFiles() const { return documentOrder_; }
     DocumentId selectedDocument() const;
@@ -101,7 +105,8 @@ private:
     void rebuildFiles();
     void fileReply(DocumentReply reply, QString profile = {}, std::function<void()> next = {}, bool automatic = false);
     void fileWarning(DocumentId id, std::function<void()> next);
-    void writeFileProfile(rm::ProfileChange change, const QString& input, std::function<void()> next, bool inheritPassword = false);
+    void writeFileProfile(rm::ProfileChange change, const QString& input, std::function<void()> next, bool inheritPassword = false,
+                          std::shared_ptr<Secret> password = {}, std::optional<SessionTarget> account = {});
     void promptFileUnlock(DocumentId id, std::function<void()> next = {});
     void reviewFilePasswords(DocumentId id, std::function<void()> next = {});
     void processFileUnlocks();
@@ -114,6 +119,7 @@ private:
     void savePasswordEdit(std::function<void()> next);
     void commitPasswordEdit(std::vector<PasswordAuthorization> reviewed, std::function<void()> next);
     void saveTemporaryToFile(QPointer<SessionPane> pane);
+    void saveTargetToFile(const SessionTarget& target, std::shared_ptr<Secret> password = {});
     void updateFileActions();
     QString documentHelp() const;
     void revertEditor();
@@ -151,6 +157,7 @@ private:
         std::optional<SessionTarget> authenticatedTarget;
         QString folder; // Folder-connect source for a missing username or password.
         bool console = false; // "Connect to console session" on a profile that does not request it.
+        bool save = false; std::optional<Secret> savePassword; // Quick Connect "Save to Connections".
     };
     using Attempt = std::shared_ptr<CredentialAttempt>;
     std::optional<SessionTarget> committedTarget(const QString& profile) const;
@@ -161,6 +168,7 @@ private:
     void lookupFileCredentials(Attempt attempt);
     void promptCredentials(Attempt attempt);
     void finishCredentials(Attempt attempt);
+    void saveAttempt(const Attempt& attempt, const SessionTarget& target);
     void clearCredentialDialog();
     void connectDifferent();
     // Connection tree commands matching mRemoteNG's context menu.
@@ -255,7 +263,27 @@ private:
     Qt::WindowStates applicationFullscreenState_;
     QRect applicationFullscreenGeometry_;
     void showOptions();
+    void openSettings(int page);
     void applyPreferences(PreferenceValues values);
+    PreferenceValues currentPreferences() const;
+    // View > Panel Tabs shows or hides the General/Panel N row in every window.
+    void applyPanelTabs();
+    bool commandAsControl_ = false, autoUpdate_ = true;
+    QString theme_ = "light", lightStyleSheet_;
+    void applyThemeStyle();
+    class AutoUpdater* updater_ = nullptr;
+    QString promptedUpdate_;
+    bool relaunchAfterUpdate_ = false, skipUpdateOnExit_ = false, updatePreferenceKnown_ = false, updateCheckRequested_ = false;
+    void promptUpdateInstall(const QString& version, bool again);
+    void finishUpdatePreparation(bool ok, const QString& error);
+    void showUpdateCheck(bool ok, const Updates::Release& latest, const QString& error, bool installable);
+    // macOS: Quick Connect sits in the title bar beside the window buttons.
+    void placeQuickConnectInTitleBar();
+    void fitTitleBar();
+    bool titleBarDrag(QObject* watched, QEvent* event);
+    bool quickConnectInTitleBar_ = false;
+    QAction* titleBarInset_ = nullptr;
+    int titleBarHeight_ = 0;
     void setConfigMode(bool defaults, bool inheritance);
     ConnectionDefaults defaults_;
     bool preferencesReady_ = false;
@@ -263,7 +291,10 @@ private:
     class OpenH264Codec* openh264_ = nullptr;
     bool openh264Enabled_ = true;
     QPointer<QDialog> optionsDialog_;
-    void notification(const QString& text);
+    enum class Notice { Info, Warning, Error };
+    void notification(const QString& text, Notice level = Notice::Info);
+    // "RDP alice@host:3389 (Office PC)" for session notifications.
+    QString describeSession(const SessionPane* pane) const;
     void updateNotificationDetails();
     void configureMenus();
     void rebuildJumpMenu();
@@ -279,7 +310,6 @@ private:
     void checkForUpdates();
     class UpdateChecker* updateChecker_ = nullptr;
     TerminalAppearanceService* terminalAppearance_ = nullptr;
-    QPointer<TerminalAppearanceDialog> appearanceDialog_;
     bool appearanceStopped_ = true;
     SshHostKeyService* sshTrust_ = nullptr;
     QString sshHostKeyPath_;

@@ -135,7 +135,9 @@ void SessionFullscreenController::enter(SessionPane* pane, QTabWidget* owner, co
     active_ = true; ++generation_;
     for (auto* dock : window_->findChildren<QDockWidget*>()) suppress(dock);
     for (auto* toolbar : window_->findChildren<QToolBar*>()) suppress(toolbar);
-    suppress(window_->statusBar()); if (!window_->menuBar()->isNativeMenuBar()) suppress(window_->menuBar());
+    // statusBar() would create an empty bar that stays behind after exit.
+    if (auto* status = window_->findChild<QStatusBar*>(QString(), Qt::FindDirectChildrenOnly)) suppress(status);
+    if (!window_->menuBar()->isNativeMenuBar()) suppress(window_->menuBar());
     suppress(groups_->tabBar()); suppress(owner->tabBar()); unframe(groups_); unframe(owner);
     // An overlay, not a layout row: the session keeps the whole screen.
     auto* row = new QWidget(window_->centralWidget()); row_ = row; row->setObjectName("fullscreenControlsRow");

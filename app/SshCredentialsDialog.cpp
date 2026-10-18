@@ -12,6 +12,11 @@ SshCredentialsDialog::SshCredentialsDialog(const SshCredentialRequest& request, 
     ui_->endpointLabel->setText(request.endpoint); ui_->usernameEdit->setText(request.username); ui_->usernameEdit->setEnabled(request.usernameEditable);
     ui_->authCombo->addItem("Password", "password"); ui_->authCombo->addItem("Private key", "private_key");
     ui_->authCombo->setCurrentIndex(ui_->authCombo->findData(request.auth)); ui_->authCombo->setEnabled(methodEditable_);
+    ui_->saveCheck->setVisible(request.saveOption);
+    connect(ui_->saveCheck, &QCheckBox::toggled, this, [this](bool save) {
+        ui_->sessionLabel->setText(save ? "The connection and username are saved to a connection file, and the password too when using Password. Key contents and passphrases are never saved."
+                                        : "Credentials are used only for this session. No password, key contents, or passphrase are saved by this dialog.");
+    });
     ui_->keyPathEdit->setText(request.keyPath); ui_->keyPathEdit->setReadOnly(!methodEditable_); methodChanged();
     connect(ui_->authCombo, &QComboBox::currentIndexChanged, this, [this] { methodChanged(); });
     connect(ui_->chooseKeyButton, &QPushButton::clicked, this, [this] {
@@ -30,6 +35,7 @@ SshCredentialsDialog::SshCredentialsDialog(const SshCredentialRequest& request, 
         completed_ = true; std::optional<TransientSshCredentials> reply;
         if (answer == QDialog::Accepted) {
             reply.emplace(); reply->username = ui_->usernameEdit->text(); reply->auth = ui_->authCombo->currentData().toString(); reply->keyPath = ui_->keyPathEdit->text();
+            reply->save = !ui_->saveCheck->isHidden() && ui_->saveCheck->isChecked();
             auto text = ui_->authenticationEdit->text(); auto bytes = text.toUtf8(); reply->authentication = Secret(bytes);
             bytes.fill(0); text.fill(QChar(0));
         }

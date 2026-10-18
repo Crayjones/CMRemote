@@ -231,13 +231,15 @@ private slots:
         service.save(idA, candidate.projection, candidate.reservation, next.completion()); QVERIFY(finish(next)); QVERIFY(context.adopt(*next.reply).ok);
         QVERIFY(service.status(idA)->warning.isEmpty());
     }
-    void independentIdleAndUnlockRevisionGates() {
+    void unlockedFilesNeverRelockAndRevisionGates() {
         QTemporaryDir dir; QVERIFY(dir.isValid()); const auto a = dir.filePath("a.xml"), b = dir.filePath("b.xml");
         const auto sourceA = fixture(masterA(), "localhost"), sourceB = fixture(masterB(), "127.0.0.1"); QVERIFY(write(a, sourceA) && write(b, sourceB));
         DocumentService service; Await openA, openB; const auto idA = service.open(a, openA.completion()), idB = service.open(b, openB.completion()); QVERIFY(finish(openA) && finish(openB));
         Await unlockA, unlockB; service.unlock(idA, masterA(), unlockA.completion()); service.unlock(idB, masterB(), unlockB.completion()); QVERIFY(finish(unlockA) && finish(unlockB));
-        const auto statusB = *service.status(idB); service.setIdleInterval(idA, 25); service.setIdleInterval(idB, 60000);
-        QTRY_VERIFY_WITH_TIMEOUT(!service.status(idA)->unlocked, 10000); QVERIFY(service.status(idB)->unlocked);
+        const auto statusB = *service.status(idB);
+        // Unlocked files never relock on their own; only an explicit Lock clears the master.
+        QTest::qWait(200); QVERIFY(service.status(idA)->unlocked && service.status(idB)->unlocked);
+        service.lock(idA); QVERIFY(!service.status(idA)->unlocked); QVERIFY(service.status(idB)->unlocked);
         QCOMPARE(service.status(idB)->generation, statusB.generation); QCOMPARE(service.status(idB)->revision, statusB.revision);
         const auto revisionA = service.status(idA)->revision; QVERIFY(write(a, fixture(masterA(), "127.0.0.1")));
         Await changed; service.unlock(idA, masterA(), changed.completion()); QVERIFY(finish(changed)); QVERIFY(!changed.reply->result.ok);

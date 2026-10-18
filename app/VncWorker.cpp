@@ -13,6 +13,12 @@ namespace {
 std::atomic<int> liveWorkers{0};
 rust::String owned(const QString& value) { const auto bytes = value.toUtf8(); return rust::String(bytes.constData(), size_t(bytes.size())); }
 QString text(const rust::String& value) { return QString::fromUtf8(value.data(), qsizetype(value.size())); }
+// Loopback, private (RFC 1918 / ULA), link-local and carrier-grade NAT ranges.
+bool localNetwork(const QHostAddress& address) {
+    if (address.isLoopback() || address.isLinkLocal() || address.isSiteLocal() || address.isUniqueLocalUnicast() || address.isPrivateUse()) return true;
+    bool ok = false; const auto v4 = address.toIPv4Address(&ok);
+    return ok && (v4 >> 22) == ((100u << 2) | 1u); // 100.64.0.0/10 (Tailscale and other CGNAT overlays)
+}
 bool terminal(VncWorker::Phase phase) {
     return phase == VncWorker::Phase::Disconnected || phase == VncWorker::Phase::Cancelled || phase == VncWorker::Phase::Failed;
 }
@@ -72,14 +78,18 @@ VncWorker::VncWorker(SessionTarget target, rust::Box<rm::vnc::Authentication> au
     lookup_ = QHostInfo::lookupHost(target.host, this, [this, generation](const QHostInfo& info) {
         lookup_ = -1;
         if (generation != generation_ || state_->stopping || state_->retired || !state_->control) return;
-        rust::Vec<rust::String> addresses; QSet<QString> seen;
+        rust::Vec<rust::String> addresses; QSet<QString> seen; QString exposed;
         if (info.error() == QHostInfo::NoError) {
             for (const auto& address : info.addresses()) {
                 const auto value = address.toString();
+                if (exposed.isEmpty() && !localNetwork(address)) exposed = value;
                 if (seen.contains(value)) continue;
                 seen.insert(value); addresses.push_back(owned(value)); if (addresses.size() == 16) break;
             }
         }
+        if (!exposed.isEmpty())
+            emit securityWarning("VNC to " + info.hostName() + " (" + exposed + ") crosses the internet unencrypted: the screen, keystrokes and "
+                                 "VNC password can be read in transit. Use a VPN or SSH tunnel for VNC outside your local network.", generation);
         (*state_->control)->resolved(std::move(addresses));
     });
 }

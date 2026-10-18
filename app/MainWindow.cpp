@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "Branding.h"
+#include <algorithm>
 #include <functional>
 #include "Credentials.h"
 #include "ProfileEditor.h"
@@ -10,10 +11,11 @@
 #include "VncWorker.h"
 #include "SshHostKeyService.h"
 #include "TerminalAppearanceService.h"
-#include "TerminalAppearanceDialog.h"
 #include "DataPaths.h"
 #include "QuickConnect.h"
 #include "OptionsDialog.h"
+#include "Appearance.h"
+#include "ThemeIcons.h"
 #include "OpenH264.h"
 #include "LocalShortcuts.h"
 #include "Views.h"
@@ -21,6 +23,7 @@
 #include "PanelWindow.h"
 #include "ShellVisibility.h"
 #include "UpdateCheck.h"
+#include "AutoUpdate.h"
 #include "ui_test.h"
 #include <QDir>
 #include <QActionGroup>
@@ -30,6 +33,12 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QToolBar>
+#include <QWindow>
+#include <QGuiApplication>
 #include <QMenu>
 #include <QPointer>
 #include <QTimer>
@@ -42,7 +51,10 @@
 
 static QString qstr(const rust::String& s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
 static std::string bytes(const QString& s) { return s.toUtf8().toStdString(); }
-static QIcon originalIcon(const QString& name) { return QIcon(":/original/" + name); }
+static QIcon originalIcon(const QString& name) { return ThemeIcons::themed(QIcon(":/original/" + name)); }
+#ifdef Q_OS_MACOS
+QSize rmNativeTitleBarInset(QWidget* widget);
+#endif
 
 MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, std::shared_ptr<ClipboardEndpoint> clipboard, QString sshHostKeyPath, QString terminalAppearancePath, const QString& preferencesPath)
     : QMainWindow(parent), sshHostKeyPath_(std::move(sshHostKeyPath)), ui_(std::make_unique<Ui::MainWindow>()), core_(rm::detached_core()), dataPath_(dataPath), testMode_(testMode) {
@@ -55,6 +67,8 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     ui_->menubar->setNativeMenuBar(false);
 #endif
     setWindowTitle("CMRemote");
+    // No bottom status strip; messages go to Notifications.
+    statusBar()->hide();
     setWindowIcon(Branding::applicationIcon());
     ui_->groupTabs->setTabIcon(ui_->groupTabs->indexOf(ui_->generalPanel), Branding::applicationIcon());
     while (ui_->sessionTabs->count()) { auto* page = ui_->sessionTabs->widget(0); ui_->sessionTabs->removeTab(0); delete page; }
@@ -68,7 +82,7 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     }
     for (auto* action : {ui_->actionAddFolder, ui_->actionAddConnection, ui_->actionTreeConnect, ui_->actionTreeDelete,
          ui_->actionTreeRename, ui_->actionTabDisconnect, ui_->actionTabReconnect, ui_->actionExit, ui_->actionAbout,
-         ui_->actionViewConnections, ui_->actionViewConfig, ui_->actionViewNotifications, ui_->actionViewQuickConnect,
+         ui_->actionViewConnections, ui_->actionViewConfig, ui_->actionViewNotifications, ui_->actionViewQuickConnect, ui_->actionViewPanels,
          ui_->actionViewExternalTools, ui_->actionViewMultiSsh, ui_->actionGeneralPanel, ui_->actionExpandAll,
          ui_->actionCollapseAll, ui_->actionSort, ui_->actionShowHelp, ui_->actionCategorized, ui_->actionAlphabetical}) {
         action->setEnabled(true); action->setToolTip(action->text());
@@ -82,13 +96,12 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
         });
         connect(terminalAppearance_, &TerminalAppearanceService::changed, this, [this] {
             if (!closeApproved_ && terminalAppearance_->ready() && !terminalAppearance_->error().isEmpty())
-                statusBar()->showMessage(terminalAppearance_->error());
+                notification("Terminal appearance: " + terminalAppearance_->error(), Notice::Warning);
         });
     }
-    for (auto* action : {ui_->actionOptions, ui_->actionTerminalAppearance}) {
-        action->setEnabled(true); action->setToolTip("Font, colors and cursor for all SSH terminals");
-        connect(action, &QAction::triggered, this, &MainWindow::showTerminalAppearance);
-    }
+    // Not in a menu bar: SSH context menus copy it to open Settings at the Terminal page.
+    ui_->actionTerminalAppearance->setEnabled(true); ui_->actionTerminalAppearance->setToolTip("Font, colors and cursor for all SSH terminals");
+    connect(ui_->actionTerminalAppearance, &QAction::triggered, this, &MainWindow::showTerminalAppearance);
     ui_->actionAbout->setText("About CMRemote");
     ui_->actionTabDisconnect->setToolTip("Disconnect; keep this tab until Close");
     sizeQuickConnect(ui_->quickConnectControls, ui_->quickConnectCombo, ui_->quickConnectToolbar);
@@ -220,11 +233,17 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     bindToolbar(ui_->quickConnectToolbar, ui_->actionViewQuickConnect); bindToolbar(ui_->externalToolsToolbar, ui_->actionViewExternalTools);
     bindToolbar(ui_->multiSshToolbar, ui_->actionViewMultiSsh);
     ui_->externalToolsToolbar->hide(); ui_->multiSshToolbar->hide();
+    ui_->actionViewPanels->setToolTip("Show the connection panel tabs (General, Panel 1, …) above the session tabs");
+    connect(ui_->actionViewPanels, &QAction::toggled, this, &MainWindow::applyPanelTabs);
+    applyPanelTabs();
     connect(ui_->actionGeneralPanel, &QAction::triggered, this, [this] { ui_->groupTabs->setCurrentWidget(ui_->generalPanel); });
     ui_->configHelpTitle->setText("Profile settings");
     ui_->configHelpText->setText("Enter or leaving the cell saves it. Escape cancels the cell. Passwords belong to the selected XML file.");
     ui_->configSplitter->setSizes({170, 65}); ui_->notificationSplitter->setSizes({226, 899});
     setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea); setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() == "cocoa") placeQuickConnectInTitleBar();
+#endif
     resetLayout();
     pollTimer_ = new QTimer(this);
     connect(pollTimer_, &QTimer::timeout, this, [this] {
@@ -251,7 +270,7 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
         if (closeApproved_) return;
         preferencesReady_ = reply.result.ok && !preferencesPath.isEmpty();
         if (reply.result.ok) applyPreferences(reply.values); else { fail(reply.result.error); updateActions(); }
-        ui_->actionOptions->setEnabled(true); ui_->actionOptions->setToolTip("Options");
+        ui_->actionOptions->setEnabled(true); ui_->actionOptions->setToolTip("Settings");
     });
 }
 void MainWindow::setConfigMode(bool defaults, bool inheritance) {
@@ -271,16 +290,44 @@ void MainWindow::applyPreferences(PreferenceValues values) {
     if (openh264_) openh264_->setEnabled(values.openh264);
     editor_->setCategorized(values.categorized); ui_->actionShowHelp->setChecked(values.propertyHelp);
     ui_->actionViewQuickConnect->setChecked(values.quickConnect); ui_->actionLockToolbars->setChecked(values.lockToolbars);
+    ui_->actionViewPanels->setChecked(values.showPanels);
+    commandAsControl_ = values.commandAsControl; DesktopView::setCommandAsControl(values.commandAsControl);
+    // Updates are scheduled only once the stored choice is known, so an opt-out never races the default.
+    autoUpdate_ = values.autoUpdate; updatePreferenceKnown_ = true; if (updater_) updater_->setAutomatic(values.autoUpdate);
+    theme_ = values.theme; applyTheme(*qApp, theme_); applyThemeStyle();
     updateActions();
 }
-void MainWindow::showOptions() {
-    guard([this] {
-        if (optionsDialog_) { optionsDialog_->raise(); optionsDialog_->activateWindow(); return; }
-        const PreferenceValues current{editor_->categorized(), ui_->actionShowHelp->isChecked(), ui_->actionViewQuickConnect->isChecked(), ui_->actionLockToolbars->isChecked(), defaults_, openh264Enabled_};
-        auto* dialog = new OptionsDialog(current, preferences_, this, openh264_); optionsDialog_ = dialog;
+PreferenceValues MainWindow::currentPreferences() const {
+    PreferenceValues values;
+    values.categorized = editor_->categorized(); values.propertyHelp = ui_->actionShowHelp->isChecked();
+    values.quickConnect = ui_->actionViewQuickConnect->isChecked(); values.lockToolbars = ui_->actionLockToolbars->isChecked();
+    values.defaults = defaults_; values.openh264 = openh264Enabled_; values.showPanels = ui_->actionViewPanels->isChecked();
+    values.commandAsControl = commandAsControl_; values.autoUpdate = autoUpdate_; values.theme = theme_;
+    return values;
+}
+void MainWindow::applyPanelTabs() {
+    // Separate windows keep their panel row: it carries their window menu.
+    setShellVisible(ui_->groupTabs->tabBar(), ui_->actionViewPanels->isChecked());
+}
+void MainWindow::applyThemeStyle() {
+    if (lightStyleSheet_.isEmpty()) {
+        lightStyleSheet_ = styleSheet();
+        // Match the system when it switches while Settings says "Match System".
+        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] { applyThemeStyle(); });
+    }
+    const auto sheet = themeStyleSheet(lightStyleSheet_, themeIsDark());
+    if (sheet != styleSheet()) setStyleSheet(sheet);
+    ThemeIcons::restyle();
+}
+void MainWindow::showOptions() { guard([this] { openSettings(0); }); }
+void MainWindow::openSettings(int page) {
+    if (!optionsDialog_) {
+        auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_, terminalAppearance_); optionsDialog_ = dialog;
         connect(dialog, &OptionsDialog::applied, this, &MainWindow::applyPreferences);
         dialog->open();
-    });
+    }
+    if (page) qobject_cast<OptionsDialog*>(optionsDialog_.data())->showPage(page);
+    optionsDialog_->raise(); optionsDialog_->activateWindow();
 }
 MainWindow::~MainWindow() {
     // Child widgets can emit focus/editor signals during QMainWindow teardown.
@@ -295,12 +342,19 @@ void MainWindow::changeEvent(QEvent* event) {
     QMainWindow::changeEvent(event);
     if (event->type() == QEvent::WindowStateChange && ui_) {
         const QSignalBlocker blocker(ui_->actionFullscreen); ui_->actionFullscreen->setChecked(isFullScreen());
+        fitTitleBar();
     }
 }
 void MainWindow::closeEvent(QCloseEvent* event) {
     if (!closeApproved_) editor_->flush();
     if (!closeApproved_ && (autoSaveQueued_ || autoSaveInFlight_ || editor_->dirty())) {
-        event->ignore(); guard([this] { close(); }); return;
+        // A close the guard drops or the user cancels (e.g. save recovery) also cancels Restart & Update.
+        QPointer<MainWindow> self(this);
+        auto attempt = std::shared_ptr<bool>(new bool(false), [self](bool* closed) {
+            if (!*closed && self && !self->closeApproved_) self->relaunchAfterUpdate_ = false;
+            delete closed;
+        });
+        event->ignore(); guard([this, attempt] { *attempt = true; close(); }); return;
     }
     if (!closeApproved_) for (const auto& doc : documents_) {
         if (doc->status().busy || !doc->status().warning.isEmpty() || doc->pending()) { closeRequested_ = true; event->ignore(); return; }
@@ -308,17 +362,26 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     if (!closeApproved_ && transitionPending_) {
         closeRequested_ = true; event->ignore(); return;
     }
+    // Before anything irreversible: the helper must be ready, or the user chooses to quit without updating.
+    if (!closeApproved_ && updater_ && !skipUpdateOnExit_ && updater_->installOnExit() && !updater_->prepared()) {
+        if (!updater_->preparing()) updater_->prepare();
+        event->ignore(); return;
+    }
     closeApproved_ = true; cancelCredentials();
     closeAllSessions();
     if (sshTrust_ && !sshTrustStopped_) {
         sshTrust_->shutdown([this] { sshTrustStopped_ = true; finishSshShutdown(); });
     }
     if (terminalAppearance_ && !appearanceStopped_) {
-        if (appearanceDialog_) { appearanceDialog_->hide(); appearanceDialog_->deleteLater(); }
+        if (optionsDialog_) { optionsDialog_->hide(); optionsDialog_->deleteLater(); }
         terminalAppearance_->shutdown([this] { appearanceStopped_ = true; finishSshShutdown(); });
     }
     if (!sshWorkers_.isEmpty() || !vncWorkers_.isEmpty() || VncWorker::activeWorkers() != 0 || !sshTrustStopped_ || !appearanceStopped_) { event->ignore(); return; }
     if (files_) for (auto id : documentOrder_) files_->lock(id);
+    if (updater_ && !skipUpdateOnExit_ && updater_->prepared() && updater_->installOnExit()) {
+        QString error;
+        if (!updater_->commit(relaunchAfterUpdate_, &error)) notification("Update not installed: " + error);
+    }
     event->accept();
 }
 void MainWindow::finishSshShutdown() {
@@ -327,11 +390,7 @@ void MainWindow::finishSshShutdown() {
 void MainWindow::showTerminalAppearance() {
     if (closeApproved_) return;
     if (!terminalAppearance_) { fail("Terminal appearance storage path is unavailable."); return; }
-    if (!appearanceDialog_) {
-        appearanceDialog_ = new TerminalAppearanceDialog(terminalAppearance_, this);
-        appearanceDialog_->setAttribute(Qt::WA_DeleteOnClose);
-    }
-    appearanceDialog_->show(); appearanceDialog_->raise(); appearanceDialog_->activateWindow();
+    openSettings(OptionsDialog::TerminalPage);
 }
 void MainWindow::finishTransition() {
     transitionPending_ = false; updateActions();
@@ -452,7 +511,7 @@ bool MainWindow::inheritanceAvailable() const {
     return doc && !id.isEmpty() && !doc->profiles().value(id).value("parent").toString().isEmpty();
 }
 void MainWindow::fail(const QString& message) {
-    lastError_ = message; statusBar()->showMessage(message); notification(message);
+    lastError_ = message; statusBar()->showMessage(message); notification(message, Notice::Error);
     if (!testMode_) {
         auto* dialog = new QMessageBox(QMessageBox::Warning, "CMRemote", message, QMessageBox::Ok, this);
         dialog->setTextFormat(Qt::PlainText); dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
@@ -564,7 +623,7 @@ void MainWindow::addFolder() { add(true); }
 void MainWindow::addConnection() { add(false); }
 void MainWindow::saveDraft(std::function<void()> next) {
     if (editor_->defaultsMode()) {
-        const PreferenceValues values{editor_->categorized(), ui_->actionShowHelp->isChecked(), ui_->actionViewQuickConnect->isChecked(), ui_->actionLockToolbars->isChecked(), editor_->defaultsDraft(), openh264Enabled_};
+        auto values = currentPreferences(); values.defaults = editor_->defaultsDraft();
         updateActions();
         preferences_->save(values, [this, next = std::move(next)](PreferenceReply reply) {
             if (!reply.result.ok) { autoSaveFailed(reply.result.error); return; }
@@ -659,6 +718,11 @@ void MainWindow::quickConnect(const QString& endpoint, bool mock) {
 QString MainWindow::quickConnectProtocol() const { return ui_->quickConnectButton->property("protocol").toString(); }
 void MainWindow::setQuickConnectProtocol(const QString& protocol) {
     for (auto* action : ui_->quickConnectButton->menu()->actions()) if (action->isEnabled() && action->data().toString() == protocol) {
+        const auto previous = quickConnectProtocol();
+        if (!previous.isEmpty() && previous != protocol) {
+            const auto text = ui_->quickConnectCombo->currentText(), moved = followDefaultPort(text, previous, protocol);
+            if (moved != text) ui_->quickConnectCombo->setCurrentText(moved);
+        }
         action->setChecked(true); ui_->quickConnectButton->setText(action->text());
         ui_->quickConnectButton->setProperty("protocol", protocol); updateActions(); return;
     }
@@ -668,7 +732,7 @@ void MainWindow::rebuildConnectionsMenu(QMenu* menu) {
     for (auto id : documentOrder_) {
         const auto doc = context(id); if (!doc) continue;
         const auto title = "Connections — " + QFileInfo(doc->status().path).fileName();
-        if (!doc->status().metadataAvailable) { menu->addAction(QIcon(":/original/ASPWebSite_16x.png"), title + " (locked)")->setEnabled(false); continue; }
+        if (!doc->status().metadataAvailable) { menu->addAction(originalIcon("ASPWebSite_16x.png"), title + " (locked)")->setEnabled(false); continue; }
         std::function<void(QMenu*, const QString&)> fill = [&](QMenu* parent, const QString& folder) {
             for (const auto& profile : doc->order()) {
                 const auto node = doc->profiles().value(profile);
@@ -688,7 +752,7 @@ void MainWindow::rebuildConnectionsMenu(QMenu* menu) {
                 });
             }
         };
-        auto* root = menu->addMenu(QIcon(":/original/ASPWebSite_16x.png"), title); fill(root, {});
+        auto* root = menu->addMenu(originalIcon("ASPWebSite_16x.png"), title); fill(root, {});
         if (root->isEmpty()) root->addAction("(empty)")->setEnabled(false);
     }
     if (menu->isEmpty()) menu->addAction("No connection files open")->setEnabled(false);
@@ -745,6 +809,14 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
         if (auto* view = pane->findChild<TerminalView*>()) {
             if (terminalAppearance_) view->setAppearance(terminalAppearance_->current());
             connect(view, &TerminalView::appearanceRequested, this, &MainWindow::showTerminalAppearance);
+            // Quick Connect sessions can be saved from beside Copy/Paste.
+            if (profile.isEmpty()) {
+                auto* save = new QAction("Save as Connection…", pane); save->setObjectName("actionSessionSaveAsConnection");
+                connect(save, &QAction::triggered, this, [this, target = QPointer<SessionPane>(pane)] {
+                    if (target && target->profile().isEmpty()) guard([this, target] { saveTemporaryToFile(target); });
+                });
+                view->setContextActions({save});
+            }
         }
         owner->insertTab(index, pane, context(document) ? ConnectionIcons::profile(context(document)->profiles().value(profile)) : ConnectionIcons::resolve(""), caption); owner->setCurrentIndex(index);
         connect(pane, &SessionPane::input, this, [this, document](const QString& session, const QString& text) {
@@ -754,12 +826,16 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
             try { sessionCore(document).mock_resize(bytes(session), size.width(), size.height()); } catch (const rust::Error&) {}
         });
         QPointer<SessionPane> guarded = pane;
+        connect(pane, &SessionPane::notice, this, [this](const QString& text) { notification(text, Notice::Warning); });
         connect(pane, &SessionPane::state, this, [this, guarded, document](const QString& session, const QString& state) {
             if (!guarded || guarded->id() != session || !guarded->active()) return;
             if (state == "failed" || state == "disconnected") exitFullscreenFor(guarded);
             if (guarded->mock()) return;
             try { sessionCore(document).session_state(bytes(session), bytes(state)); } catch (const rust::Error&) {}
-            notification(guarded->target().protocol.toUpper() + " session " + state); updateActions();
+            const auto detail = guarded->statusDetail().trimmed();
+            notification(describeSession(guarded) + ": " + state + (detail.isEmpty() || state == "connected" ? QString() : " — " + detail),
+                         state == "failed" ? Notice::Error : state == "disconnected" ? Notice::Warning : Notice::Info);
+            updateActions();
         });
         if (!mock && target.protocol == "ssh") {
             SshWorker* worker = nullptr;
@@ -783,7 +859,7 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
         if (!mock && target.protocol == "rdp") pane->startRdp({target.host, target.username, QFileInfo(dataPath_).absolutePath() + "/freerdp",
                                    std::move(credentials->password), target.port, credentials->clipboard || target.options.clipboard, target.domain, target.options});
 #endif
-        focusPane(pane); notification(mock ? "Opened mock session" : "Opening " + target.protocol.toUpper() + " session");
+        focusPane(pane); notification(mock ? "Opened mock session " + describeSession(pane) : "Opening " + describeSession(pane) + (replacement ? " (reconnect)" : ""));
         if (fullscreenOnOpen_.removeAll(ProfileReference{document, profile})) fullscreenPane(pane);
         if (!reconnectQueue_.isEmpty()) QTimer::singleShot(0, this, [this] { continueReconnectAll(); });
         updateActions();
@@ -803,6 +879,7 @@ void MainWindow::disconnectPane(SessionPane* pane) {
     if (!pane) return;
     exitFullscreenFor(pane);
     if (credentialPage_ == pane) cancelCredentials();
+    if (pane->active() && !pane->mock()) notification("Disconnecting " + describeSession(pane));
     pane->shutdown();
     try { sessionCore(pane->document()).session_state(bytes(pane->id()), "disconnected"); } catch (const rust::Error&) {}
     updateActions();
@@ -860,8 +937,17 @@ void MainWindow::deleteCommitted() {
     };
     if (testMode_) { remove(); return; }
     transitionPending_ = true; updateActions();
-    auto* dialog = new QMessageBox(QMessageBox::Question, "Delete profile", "Delete this profile and all its children?",
-                                  QMessageBox::Yes | QMessageBox::Cancel, this);
+    const auto profile = profiles_.value(id); const bool folder = profile.value("kind") == "folder";
+    int inside = 0;
+    std::function<void(const QTreeWidgetItem*)> count = [&](const QTreeWidgetItem* item) { for (int i = 0; i < item->childCount(); ++i) { ++inside; count(item->child(i)); } };
+    if (auto* item = ui_->connectionTree->currentItem()) count(item);
+    const auto name = "\u201C" + profile.value("name").toString() + "\u201D";
+    const auto text = !folder ? "Delete the connection " + name + "?"
+        : inside ? QString("Delete the folder %1 and the %2 item(s) inside it?").arg(name).arg(inside)
+        : "Delete the empty folder " + name + "?";
+    auto* dialog = new QMessageBox(QMessageBox::Question, folder ? "Delete folder" : "Delete connection", text, QMessageBox::Yes | QMessageBox::Cancel, this);
+    dialog->setInformativeText("This cannot be undone.");
+    dialog->button(QMessageBox::Yes)->setText("Delete");
     dialog->setObjectName("deleteProfile"); dialog->setTextFormat(Qt::PlainText); dialog->setDefaultButton(QMessageBox::Cancel);
     dialog->setWindowModality(Qt::WindowModal); dialog->setAttribute(Qt::WA_DeleteOnClose);
     connect(dialog, &QDialog::finished, this, [this, remove](int answer) { if (answer == QMessageBox::Yes) remove(); else finishTransition(); });
@@ -870,22 +956,200 @@ void MainWindow::deleteCommitted() {
 
 void MainWindow::setUpdateSource(const QUrl& source) { delete updateChecker_; updateChecker_ = new UpdateChecker(this, source); }
 void MainWindow::checkForUpdates() {
+    // The updater answers with the same release it downloads, so nothing is fetched twice.
+    if (updater_) {
+        // Repeated requests while one runs still show a single answer.
+        updateCheckRequested_ = true; updater_->checkNow(true); return;
+    }
     if (!updateChecker_) updateChecker_ = new UpdateChecker(this);
     if (updateChecker_->running()) return;
     connect(updateChecker_, &UpdateChecker::finished, this, [this](bool ok, const Updates::Release& latest, const QString& error) {
-        const auto current = Updates::currentVersion(); const QString releases = QString(Updates::Repository) + "/releases";
-        const auto link = [](const QString& url, const QString& text) { return "<a href=\"" + url.toHtmlEscaped() + "\">" + text.toHtmlEscaped() + "</a>"; };
-        QString text;
-        if (!ok) text = "Could not check for updates: " + error.toHtmlEscaped() + "<br>" + link(releases, releases);
-        else if (Updates::compareVersions(current, latest.version).value_or(0) < 0)
-            text = "CMRemote " + latest.version.toHtmlEscaped() + " is available. You have " + current + ".<br>" + link(latest.url, "Download it from GitHub");
-        else text = "You have the latest version, CMRemote " + current + ".";
-        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Check for Updates", text, QMessageBox::Ok, this);
-        dialog->setObjectName("updateDialog"); dialog->setProperty("latestVersion", ok ? latest.version : QString());
-        dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
-        dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);
-        if (auto* label = dialog->findChild<QLabel*>("qt_msgbox_label")) label->setOpenExternalLinks(true);
-        dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+        showUpdateCheck(ok, latest, error, false);
     }, Qt::SingleShotConnection);
     updateChecker_->check();
+}
+void MainWindow::showUpdateCheck(bool ok, const Updates::Release& latest, const QString& error, bool installable) {
+    if (closeApproved_) return;
+    const auto current = Updates::currentVersion(); const QString releases = QString(Updates::Repository) + "/releases";
+    const auto link = [](const QString& url, const QString& text) { return "<a href=\"" + url.toHtmlEscaped() + "\">" + text.toHtmlEscaped() + "</a>"; };
+    QString text;
+    if (!ok) text = "Could not check for updates: " + error.toHtmlEscaped() + "<br>" + link(releases, releases);
+    else if (Updates::compareVersions(current, latest.version).value_or(0) < 0) {
+        if (installable && updater_ && updater_->offered() && updater_->readyVersion() == latest.version) { promptUpdateInstall(latest.version, true); return; }
+        text = "CMRemote " + latest.version.toHtmlEscaped() + " is available. You have " + current + ".<br>";
+        if (installable) text += "It is downloading now. When it is ready, CMRemote asks whether to install it.<br>" + link(latest.url, "Release notes");
+        else {
+            if (updater_ && !updater_->installation().supported()) text += updater_->installation().reason.toHtmlEscaped() + "<br>";
+            text += link(latest.url, "Download it from GitHub");
+        }
+    }
+    else text = "You have the latest version, CMRemote " + current + ".";
+    auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Check for Updates", text, QMessageBox::Ok, this);
+    dialog->setObjectName("updateDialog"); dialog->setProperty("latestVersion", ok ? latest.version : QString());
+    dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
+    dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    if (auto* label = dialog->findChild<QLabel*>("qt_msgbox_label")) label->setOpenExternalLinks(true);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+}
+void MainWindow::enableAutomaticUpdates(const QString& dataDirectory) {
+    if (updater_ || testMode_) return;
+    AutoUpdater::Options options; options.dataDirectory = dataDirectory;
+    attachUpdater(new AutoUpdater(std::move(options), this));
+}
+void MainWindow::attachUpdater(AutoUpdater* updater) {
+    if (updater_ || !updater) return;
+    updater_ = updater; updater->setParent(this);
+    connect(updater_, &AutoUpdater::log, this, [this](const QString& text) { notification(text); });
+    connect(updater_, &AutoUpdater::readyToInstall, this, [this](const QString& version) { promptUpdateInstall(version, false); });
+    connect(updater_, &AutoUpdater::preparationFinished, this, &MainWindow::finishUpdatePreparation);
+    connect(updater_, &AutoUpdater::checked, this, [this](bool ok, const Updates::Release& latest, const QString& error, bool installable) {
+        if (std::exchange(updateCheckRequested_, false)) showUpdateCheck(ok, latest, error, installable);
+    });
+    if (updatePreferenceKnown_) updater_->setAutomatic(autoUpdate_);
+}
+void MainWindow::promptUpdateInstall(const QString& version, bool again) {
+    // Once per version and run unless the user asks; nothing installs until the user chooses.
+    if (closeApproved_ || !updater_ || !updater_->offered() || updater_->readyVersion() != version || (!again && promptedUpdate_ == version)) return;
+    promptedUpdate_ = version;
+    if (auto* previous = findChild<QMessageBox*>("updateReady")) previous->close();
+    QString text = "CMRemote " + version + " has been downloaded and verified. Install it?\n\n"
+        "Restart & Update installs it now. Install When I Quit installs it the next time you quit. "
+        "Not Now asks again next time CMRemote starts; Skip This Version waits for a newer one.";
+    if (sessionCount()) text += "\n\nRestarting disconnects your open sessions.";
+    auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Update ready", text, QMessageBox::NoButton, this);
+    dialog->setObjectName("updateReady"); dialog->setTextFormat(Qt::PlainText);
+    dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
+    auto* restart = dialog->addButton("Restart && Update", QMessageBox::AcceptRole);
+    auto* onQuit = dialog->addButton("Install When I Quit", QMessageBox::AcceptRole);
+    auto* skip = dialog->addButton("Skip This Version", QMessageBox::DestructiveRole);
+    auto* later = dialog->addButton("Not Now", QMessageBox::RejectRole);
+    // Enter, Escape or closing the dialog installs nothing.
+    dialog->setDefaultButton(later); dialog->setEscapeButton(later);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::NonModal);
+    // finished also covers Escape and closing the window: both mean Not Now.
+    connect(dialog, &QDialog::finished, this, [this, dialog, restart, onQuit, skip, version] {
+        auto* button = dialog->clickedButton();
+        if (closeApproved_ || !updater_ || updater_->readyVersion() != version) return;
+        if (button == skip) { updater_->skip(); return; }
+        if (button != restart && button != onQuit) { updater_->decline(); return; }
+        updater_->accept(); skipUpdateOnExit_ = false;
+        if (button != restart || !updater_->installOnExit()) return;
+        relaunchAfterUpdate_ = true;
+        notification("Update: restarting to install CMRemote " + version + ".");
+        QTimer::singleShot(0, this, [this] { close(); });
+    });
+    dialog->show();
+}
+void MainWindow::finishUpdatePreparation(bool ok, const QString& error) {
+    if (closeApproved_) return;
+    if (ok) { QTimer::singleShot(0, this, [this] { close(); }); return; }
+    const bool restart = std::exchange(relaunchAfterUpdate_, false);
+    if (restart) {
+        // Restart & Update could not be prepared: CMRemote stays open and usable.
+        auto* dialog = new QMessageBox(QMessageBox::Warning, "Update not installed",
+            "CMRemote could not prepare the update: " + error + "\n\nCMRemote stays open.", QMessageBox::Ok, this);
+        dialog->setObjectName("updatePrepareFailed"); dialog->setTextFormat(Qt::PlainText);
+        dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+        return;
+    }
+    auto* dialog = new QMessageBox(QMessageBox::Warning, "Update not installed",
+        "CMRemote could not prepare the update: " + error + "\n\nQuit without installing it, or cancel and keep working?", QMessageBox::Cancel, this);
+    dialog->setObjectName("updatePrepareFailed"); dialog->setTextFormat(Qt::PlainText);
+    auto* quit = dialog->addButton("Quit Without Updating", QMessageBox::AcceptRole);
+    dialog->setDefaultButton(QMessageBox::Cancel); dialog->setEscapeButton(QMessageBox::Cancel);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::WindowModal);
+    connect(dialog, &QMessageBox::buttonClicked, this, [this, quit](QAbstractButton* button) {
+        if (button != quit) return;
+        skipUpdateOnExit_ = true; QTimer::singleShot(0, this, [this] { close(); });
+    });
+    dialog->open();
+}
+namespace {
+// Draws over the transparent title bar: the window title centered like a native
+// title (hidden when the Quick Connect controls reach it) and a thin separator
+// between the title bar and the window content.
+class TitleBarDecoration final : public QWidget {
+public:
+    TitleBarDecoration(QMainWindow* window, QToolBar* toolbar, int height) : QWidget(window), window_(window), toolbar_(toolbar), height_(height) {
+        setObjectName("titleBarDecoration"); setAttribute(Qt::WA_TransparentForMouseEvents);
+        window->installEventFilter(this); toolbar->installEventFilter(this);
+        connect(window, &QWidget::windowTitleChanged, this, qOverload<>(&QWidget::update));
+        place();
+    }
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Move || event->type() == QEvent::Show
+            || event->type() == QEvent::Hide || event->type() == QEvent::LayoutRequest || event->type() == QEvent::WindowStateChange) place();
+        return QWidget::eventFilter(watched, event);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setPen(palette().color(QPalette::Window).darker(118)); painter.drawLine(0, height() - 1, width(), height() - 1);
+        QFont font = this->font(); font.setBold(true); painter.setFont(font);
+        const QFontMetrics metrics(font); const auto title = window_->windowTitle();
+        QRect text(0, 0, metrics.horizontalAdvance(title), height_); text.moveCenter(QPoint(width() / 2, height_ / 2));
+        // Keep clear of the rightmost visible toolbar control.
+        int controls = 0;
+        if (toolbar_->isVisible())
+            for (auto* child : toolbar_->findChildren<QWidget*>(Qt::FindDirectChildrenOnly))
+                if (child->isVisible() && child->objectName() != "qt_toolbar_ext_button")
+                    controls = std::max(controls, toolbar_->mapTo(window_, QPoint(child->geometry().right(), 0)).x());
+        if (text.left() < controls + 16) return;
+        painter.setPen(palette().color(QPalette::WindowText)); painter.drawText(text, Qt::AlignCenter, title);
+    }
+private:
+    void place() {
+        if (window_->isFullScreen()) { hide(); return; }
+        const int bottom = toolbar_->isVisible() ? std::max(height_, toolbar_->mapTo(window_, QPoint(0, toolbar_->height())).y()) : height_;
+        setGeometry(0, 0, window_->width(), bottom); show(); raise(); update();
+    }
+    QMainWindow* window_; QToolBar* toolbar_; int height_;
+};
+}
+void MainWindow::placeQuickConnectInTitleBar() {
+#ifdef Q_OS_MACOS
+    // The window content extends under a transparent title bar; the toolbar row
+    // starts right after the close/minimize/zoom buttons.
+    setWindowFlag(Qt::ExpandedClientAreaHint, true); setWindowFlag(Qt::NoTitleBarBackgroundHint, true);
+    // Qt otherwise keeps the layout below the title bar's safe area.
+    setAttribute(Qt::WA_ContentsMarginsRespectsSafeArea, false);
+    const auto inset = rmNativeTitleBarInset(this); if (inset.isEmpty()) return;
+    quickConnectInTitleBar_ = true; titleBarHeight_ = inset.height();
+    auto* toolbar = ui_->quickConnectToolbar;
+    auto* spacer = new QWidget(toolbar); spacer->setObjectName("titleBarInset"); spacer->setFixedWidth(inset.width());
+    spacer->setAttribute(Qt::WA_TransparentForMouseEvents);
+    titleBarInset_ = toolbar->insertWidget(toolbar->actions().value(0), spacer);
+    toolbar->setMovable(false); toolbar->setMinimumHeight(titleBarHeight_);
+    toolbar->setStyleSheet("QToolBar { background: transparent; border: none; }");
+    // Empty toolbar space still drags and zooms the window like a title bar.
+    // So does the window's own background beside the toolbar.
+    for (QWidget* area : {static_cast<QWidget*>(this), static_cast<QWidget*>(toolbar), ui_->quickConnectControls, static_cast<QWidget*>(ui_->quickConnectLabel)}) area->installEventFilter(this);
+    connect(toolbar, &QToolBar::visibilityChanged, this, &MainWindow::fitTitleBar); fitTitleBar();
+    new TitleBarDecoration(this, toolbar, titleBarHeight_);
+#endif
+}
+void MainWindow::fitTitleBar() {
+    if (!quickConnectInTitleBar_) return;
+    // Fullscreen has no title bar: Quick Connect starts at the left edge.
+    const bool titleBar = !isFullScreen();
+    titleBarInset_->setVisible(titleBar);
+    // Without the toolbar, keep everything below the window buttons.
+    setContentsMargins(0, titleBar && ui_->quickConnectToolbar->isHidden() ? titleBarHeight_ : 0, 0, 0);
+}
+bool MainWindow::titleBarDrag(QObject* watched, QEvent* event) {
+    if (!quickConnectInTitleBar_) return false;
+    if (event->type() != QEvent::MouseButtonPress && event->type() != QEvent::MouseButtonDblClick) return false;
+    auto* mouse = static_cast<QMouseEvent*>(event);
+    if (watched == this) {
+        const auto* toolbar = ui_->quickConnectToolbar;
+        const int bottom = toolbar->isVisible() ? std::max(titleBarHeight_, toolbar->geometry().bottom() + 1) : titleBarHeight_;
+        if (mouse->position().y() >= bottom) return false;
+    } else if (watched != ui_->quickConnectToolbar && watched != ui_->quickConnectControls && watched != ui_->quickConnectLabel) return false;
+    if (event->type() == QEvent::MouseButtonDblClick && mouse->button() == Qt::LeftButton) {
+        if (isMaximized()) showNormal(); else showMaximized();
+        return true;
+    }
+    if (event->type() == QEvent::MouseButtonPress && mouse->button() == Qt::LeftButton && windowHandle())
+        return windowHandle()->startSystemMove();
+    return false;
 }

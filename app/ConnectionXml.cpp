@@ -1154,9 +1154,12 @@ bool ConnectionXml::followAccountEdits(const Secret& master, const std::vector<C
         std::vector<const Node*> nodes; if (!path(impl_->tree.root, record.consumer, nodes)) continue;
         const auto target = account(nodes); const auto* owner = passwordOwner(nodes);
         if (!target || !owner || target->sameAccount(record.target) || owner->id != record.owner) continue;
-        // Only the endpoint moved: a different user, domain, protocol or SSH method is a different account.
-        auto moved = record.target; moved.host = target->host; moved.port = target->port;
-        if (!target->sameAccount(moved)) continue;
+        // An in-app edit of the host, port or protocol keeps the password; a
+        // different user name (or RDP domain) is a different account. VNC has no
+        // user name, so moves to or from VNC keep it as well.
+        const bool vnc = target->protocol == "vnc" || record.target.protocol == "vnc";
+        if (!vnc && target->username != record.target.username) continue;
+        if (target->protocol == "rdp" && record.target.protocol == "rdp" && target->domain != record.target.domain) continue;
         const auto hash = QCryptographicHash::hash(QByteArray::fromBase64(owner->attribute("Password").toLatin1()), QCryptographicHash::Sha256);
         if (hash != record.passwordHash) continue;
         followed.append(record.consumer);
