@@ -1,4 +1,5 @@
 #include "ConnectionIcons.h"
+#include "ThemeIcons.h"
 
 namespace ConnectionIcons {
 const QStringList& names() {
@@ -15,7 +16,7 @@ QIcon resolve(const QString& name, bool folder) {
     // Never turn imported icon names into paths. Only exact catalog entries
     // can address a resource; unknown names remain metadata with a fallback.
     if (names().contains(name)) return QIcon(":/connection-icons/" + name + ".ico");
-    return QIcon(folder ? ":/original/FolderClosed_16x.png" : ":/original/Connection.ico");
+    return ThemeIcons::themed(QIcon(folder ? ":/original/FolderClosed_16x.png" : ":/original/Connection.ico"));
 }
 QIcon profile(const QJsonObject& profile) {
     return resolve(profile.value("effective").toObject().value("icon").toString(), profile.value("kind") == "folder");

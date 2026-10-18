@@ -27,7 +27,7 @@ bool MainWindow::validAttempt(const Attempt& attempt) const {
 void MainWindow::clearCredentialDialog() { auto dialog = credentialDialog_; credentialDialog_.clear(); if (dialog) dialog->accept(); }
 void MainWindow::cancelCredentials() {
     ++credentialToken_; auto dialog = credentialDialog_; credentialDialog_.clear(); credentialPage_.clear(); credentialOwner_.clear();
-    if (credentialAttempt_) { credentialAttempt_->credentials.reset(); credentialAttempt_->sshAuthentication.reset(); credentialAttempt_->vncAuthentication.reset(); } credentialAttempt_.reset();
+    if (credentialAttempt_) { credentialAttempt_->savePassword.reset(); credentialAttempt_->credentials.reset(); credentialAttempt_->sshAuthentication.reset(); credentialAttempt_->vncAuthentication.reset(); } credentialAttempt_.reset();
     if (dialog) dialog->reject();
     if (!closeApproved_) updateFileActions();
     if (folderConnect_ && !closeApproved_) QTimer::singleShot(0, this, [this] { continueFolderConnect(); });
@@ -43,12 +43,14 @@ void MainWindow::promptCredentials(Attempt attempt) {
     if (attempt->target.protocol == "ssh") {
         const bool freshTemporary = attempt->profile.isEmpty() && !attempt->replacing;
         auto* dialog = new SshCredentialsDialog({attempt->target.endpoint(), attempt->target.username, attempt->target.sshAuth,
-            attempt->target.sshKeyPath, !attempt->replacing || !attempt->profile.isEmpty(), freshTemporary},
+            attempt->target.sshKeyPath, !attempt->replacing || !attempt->profile.isEmpty(), freshTemporary, freshTemporary},
             [this, attempt](std::optional<TransientSshCredentials> credentials) {
                 if (!validAttempt(attempt)) return; credentialDialog_.clear();
                 if (!credentials) { cancelCredentials(); return; }
                 auto target = attempt->target; target.username = credentials->username;
                 target.sshAuth = credentials->auth; target.sshKeyPath = credentials->keyPath;
+                attempt->save = credentials->save;
+                if (attempt->save && target.sshAuth == "password" && credentials->authentication.size()) attempt->savePassword = credentials->authentication.clone();
                 const auto normalized = normalizeSshTarget(target);
                 if (!normalized || normalized->username.isEmpty()) { cancelCredentials(); fail("Invalid SSH username or target."); return; }
                 try {
@@ -61,14 +63,25 @@ void MainWindow::promptCredentials(Attempt attempt) {
         credentialDialog_ = dialog; dialog->open(); return;
     }
     PromptCredentialProvider provider;
-    credentialDialog_ = provider.request(this, {attempt->target.endpoint(), attempt->target.username, !attempt->replacing || !attempt->profile.isEmpty(), attempt->target.domain},
+    const bool freshTemporary = attempt->profile.isEmpty() && !attempt->replacing;
+    credentialDialog_ = provider.request(this, {attempt->target.endpoint(), attempt->target.username, !attempt->replacing || !attempt->profile.isEmpty(), attempt->target.domain, true, freshTemporary},
         [this, attempt](std::optional<TransientCredentials> credentials) {
             if (!validAttempt(attempt)) return; credentialDialog_.clear();
             if (!credentials) { cancelCredentials(); return; }
             auto target = attempt->target; target.username = credentials->username; target.domain = credentials->domain;
             if (!normalizeSessionTarget(target)) { cancelCredentials(); fail("Invalid RDP username or target."); return; }
+            attempt->save = credentials->save;
+            if (attempt->save && !credentials->password.isEmpty()) attempt->savePassword = Secret(credentials->password);
             attempt->credentials = std::move(credentials); finishCredentials(attempt);
         });
+}
+void MainWindow::saveAttempt(const Attempt& attempt, const SessionTarget& target) {
+    if (!attempt->save || closeApproved_) return;
+    attempt->save = false;
+    std::shared_ptr<Secret> password;
+    if (attempt->savePassword) password = std::make_shared<Secret>(std::move(*attempt->savePassword));
+    attempt->savePassword.reset();
+    guard([this, target, password] { saveTargetToFile(target, password); });
 }
 void MainWindow::finishCredentials(Attempt attempt) {
     if (!validAttempt(attempt)) return;
@@ -91,6 +104,7 @@ void MainWindow::finishCredentials(Attempt attempt) {
         clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear(); credentialOwner_.clear();
         auto authentication = std::move(attempt->sshAuthentication); attempt->sshAuthentication.reset();
         attachSession(attempt->profile, target, false, attempt->owner, attempt->page, {}, attempt->document, std::move(authentication));
+        saveAttempt(attempt, target);
         updateFileActions(); if (folderConnect_) QTimer::singleShot(0, this, [this] { continueFolderConnect(); });
         if (!reconnectQueue_.isEmpty()) QTimer::singleShot(0, this, [this] { continueReconnectAll(); }); return;
     }
@@ -100,7 +114,8 @@ void MainWindow::finishCredentials(Attempt attempt) {
     const auto normalized = normalizeSessionTarget(target); if (!normalized) { cancelCredentials(); fail("Invalid RDP username or target."); return; }
     clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear(); credentialOwner_.clear();
     auto credentials = std::move(attempt->credentials); attempt->credentials.reset();
-    attachSession(attempt->profile, *normalized, false, attempt->owner, attempt->page, std::move(credentials), attempt->document); updateFileActions();
+    attachSession(attempt->profile, *normalized, false, attempt->owner, attempt->page, std::move(credentials), attempt->document);
+    saveAttempt(attempt, *normalized); updateFileActions();
     if (folderConnect_) QTimer::singleShot(0, this, [this] { continueFolderConnect(); });
 }
 void MainWindow::connectDifferent() {

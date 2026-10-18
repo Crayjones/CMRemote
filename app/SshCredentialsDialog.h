@@ -8,11 +8,12 @@
 namespace Ui { class SshCredentialsDialog; }
 struct SshCredentialRequest {
     QString endpoint, username, auth, keyPath;
-    bool usernameEditable = true, methodEditable = false;
+    bool usernameEditable = true, methodEditable = false, saveOption = false;
 };
 struct TransientSshCredentials {
     QString username, auth, keyPath;
     Secret authentication;
+    bool save = false; // Also save the connection (and a password) to a connection file.
 };
 class SshCredentialsDialog final : public QDialog {
     Q_OBJECT

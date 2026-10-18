@@ -2,23 +2,33 @@
 <ui version="4.0">
  <class>OptionsDialog</class>
  <widget class="QDialog" name="OptionsDialog">
-  <property name="windowTitle"><string>Options</string></property>
-  <property name="minimumSize"><size><width>480</width><height>300</height></size></property>
+  <property name="windowTitle"><string>Settings</string></property>
+  <property name="minimumSize"><size><width>720</width><height>560</height></size></property>
   <layout class="QVBoxLayout" name="layout">
    <item><layout class="QHBoxLayout" name="pagesLayout">
     <item><widget class="QListWidget" name="categories">
      <property name="maximumSize"><size><width>150</width><height>16777215</height></size></property>
      <item><property name="text"><string>Appearance</string></property></item>
+     <item><property name="text"><string>Terminal</string></property></item>
      <item><property name="text"><string>Tabs &amp; Panels</string></property></item>
      <item><property name="text"><string>Remote Desktop</string></property></item>
      <item><property name="text"><string>Updates</string></property></item>
     </widget></item>
     <item><widget class="QStackedWidget" name="pages">
      <widget class="QWidget" name="appearancePage"><layout class="QVBoxLayout" name="appearanceLayout">
+      <item><layout class="QHBoxLayout" name="themeLayout">
+       <item><widget class="QLabel" name="themeLabel"><property name="text"><string>Theme</string></property><property name="buddy"><cstring>theme</cstring></property></widget></item>
+       <item><widget class="QComboBox" name="theme"/></item>
+       <item><spacer name="themeSpace"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint"><size><width>40</width><height>20</height></size></property></spacer></item>
+      </layout></item>
       <item><widget class="QLabel" name="appearanceTitle"><property name="text"><string>Config appearance</string></property></widget></item>
       <item><widget class="QCheckBox" name="categorized"><property name="text"><string>Group properties by category</string></property></widget></item>
       <item><widget class="QCheckBox" name="propertyHelp"><property name="text"><string>Show property help</string></property></widget></item>
       <item><spacer name="appearanceSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
+     </layout></widget>
+     <widget class="QWidget" name="terminalPage"><layout class="QVBoxLayout" name="terminalLayout">
+      <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
      </layout></widget>
      <widget class="QWidget" name="panelsPage"><layout class="QVBoxLayout" name="panelsLayout">
       <item><widget class="QLabel" name="panelsTitle"><property name="text"><string>Toolbars</string></property></widget></item>
@@ -47,7 +57,7 @@
     </widget></item>
    </layout></item>
    <item><widget class="QLabel" name="error"><property name="text"><string/></property><property name="wordWrap"><bool>true</bool></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
-   <item><widget class="QDialogButtonBox" name="buttons"><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+   <item><widget class="QDialogButtonBox" name="buttons"><property name="standardButtons"><set>QDialogButtonBox::Apply|QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
   </layout>
  </widget>
  <resources/>

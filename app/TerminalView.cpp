@@ -450,7 +450,7 @@ void TerminalView::contextMenuEvent(QContextMenuEvent* event) {
         action("Decrease Font Size", Qt::Key_Minus, Qt::ControlModifier, Shortcut::ZoomOut, appearance_.fontSize > 6);
         action("Reset Session Font Size", Qt::Key_0, Qt::ControlModifier, Shortcut::ZoomReset, zoomOffset_ != 0);
     }
-    menu->addSeparator(); auto* appearance = menu->addAction("Terminal Appearance…"); appearance->setObjectName("actionTerminalAppearance");
+    menu->addSeparator(); auto* appearance = menu->addAction("Terminal Settings…"); appearance->setObjectName("actionTerminalAppearance");
     connect(appearance, &QAction::triggered, this, &TerminalView::appearanceRequested);
     menu->popup(event->globalPos());
 }

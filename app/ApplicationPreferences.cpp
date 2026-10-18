@@ -19,10 +19,11 @@ PreferenceReply access(const QString& path, bool write, PreferenceValues values)
             (object.contains("openh264") && !object.value("openh264").isBool()) ||
             (object.contains("show_panels") && !object.value("show_panels").isBool()) ||
             (object.contains("command_as_control") && !object.value("command_as_control").isBool()) ||
-            (object.contains("auto_update") && !object.value("auto_update").isBool())) {
+            (object.contains("auto_update") && !object.value("auto_update").isBool()) ||
+            (object.contains("theme") && !QStringList{"system", "light", "dark"}.contains(object.value("theme").toString()))) {
             reply.result = {false, "Application preferences are invalid. The file was not changed.", {}}; return reply;
         }
-        for (auto it = object.begin(); it != object.end(); ++it) if (!QStringList{"version", "categorized", "property_help", "quick_connect", "lock_toolbars", "connection_defaults", "openh264", "show_panels", "command_as_control", "auto_update"}.contains(it.key())) {
+        for (auto it = object.begin(); it != object.end(); ++it) if (!QStringList{"version", "categorized", "property_help", "quick_connect", "lock_toolbars", "connection_defaults", "openh264", "show_panels", "command_as_control", "auto_update", "theme"}.contains(it.key())) {
             reply.result = {false, "Application preferences contain unsupported fields. The file was not changed.", {}}; return reply;
         }
         ConnectionDefaults defaults;
@@ -32,14 +33,15 @@ PreferenceReply access(const QString& path, bool write, PreferenceValues values)
             defaults = *parsed;
         }
         if (!write) reply.values = {object.value("categorized").toBool(), object.value("property_help").toBool(), object.value("quick_connect").toBool(), object.value("lock_toolbars").toBool(), defaults, object.value("openh264").toBool(true),
-            object.value("show_panels").toBool(false), object.value("command_as_control").toBool(false), object.value("auto_update").toBool(true)};
+            object.value("show_panels").toBool(false), object.value("command_as_control").toBool(false), object.value("auto_update").toBool(true), object.value("theme").toString("light")};
     }
     if (write) {
+        if (!QStringList{"system", "light", "dark"}.contains(values.theme)) { reply.result = {false, "The theme is invalid. The file was not changed.", {}}; return reply; }
         if (!ConnectionDefaults::parse(values.defaults.json())) { reply.result = {false, "Connection defaults are invalid. The file was not changed.", {}}; return reply; }
         const auto encoded = QJsonDocument(QJsonObject{{"version", 1}, {"categorized", values.categorized},
             {"property_help", values.propertyHelp}, {"quick_connect", values.quickConnect}, {"lock_toolbars", values.lockToolbars},
             {"connection_defaults", values.defaults.json()}, {"openh264", values.openh264}, {"show_panels", values.showPanels},
-            {"command_as_control", values.commandAsControl}, {"auto_update", values.autoUpdate}}).toJson(QJsonDocument::Compact);
+            {"command_as_control", values.commandAsControl}, {"auto_update", values.autoUpdate}, {"theme", values.theme}}).toJson(QJsonDocument::Compact);
         if (bytes != encoded) reply.result = file.replace(encoded, 65536, "application preferences");
     }
     return reply;

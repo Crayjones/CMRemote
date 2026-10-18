@@ -75,11 +75,13 @@ void PropertyDelegate::updateEditorGeometry(QWidget* editor, const QStyleOptionV
 }
 void PropertyDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const {
     QStyleOptionViewItem cell(option); initStyleOption(&cell, index);
-    if (index.siblingAtColumn(0).data(CategoryRole).toBool()) { cell.backgroundBrush = QColor("#f0f0f0"); cell.font.setBold(true); }
+    if (index.siblingAtColumn(0).data(CategoryRole).toBool()) { cell.backgroundBrush = option.palette.color(QPalette::Window); cell.font.setBold(true); }
     else if (index.column() == 1) cell.font.setBold(index.data(LocalRole).toBool());
     const auto* style = cell.widget ? cell.widget->style() : QApplication::style();
     style->drawControl(QStyle::CE_ItemViewItem, &cell, painter, cell.widget);
-    painter->save(); painter->setPen(QColor("#e5e5e5"));
+    // Grid lines: a tenth of the way from the cell background to the text color.
+    const auto base = option.palette.color(QPalette::Base), text = option.palette.color(QPalette::Text);
+    painter->save(); painter->setPen(QColor::fromRgbF(base.redF() * 0.9f + text.redF() * 0.1f, base.greenF() * 0.9f + text.greenF() * 0.1f, base.blueF() * 0.9f + text.blueF() * 0.1f));
     painter->drawLine(option.rect.bottomLeft(), option.rect.bottomRight());
     painter->drawLine(option.rect.topRight(), option.rect.bottomRight()); painter->restore();
 }

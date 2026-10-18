@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ThemeIcons.h"
 #include "ProfileEditor.h"
 #include "PropertyDelegate.h"
 #include "SessionPane.h"
@@ -155,7 +156,7 @@ QWidget* MainWindow::createPanel(QTabWidget* groups, const QString& requested) {
         if (auto* groups = groupsOf(panel)) { groups->setCurrentWidget(panel); hostOf(groups)->raise(); hostOf(groups)->activateWindow(); }
     });
     connect(panel, &QObject::destroyed, action, &QObject::deleteLater);
-    groups->setCurrentIndex(groups->addTab(panel, QIcon(":/original/Panel_16x.png"), name));
+    groups->setCurrentIndex(groups->addTab(panel, ThemeIcons::themed(QIcon(":/original/Panel_16x.png")), name));
     return panel;
 }
 void MainWindow::addPanel() {
@@ -340,7 +341,7 @@ void MainWindow::resetLayout() {
 }
 void MainWindow::notification(const QString& text, Notice level) {
     const auto icon = level == Notice::Error ? style()->standardIcon(QStyle::SP_MessageBoxCritical)
-        : level == Notice::Warning ? style()->standardIcon(QStyle::SP_MessageBoxWarning) : QIcon(":/original/StatusInformation_16x.png");
+        : level == Notice::Warning ? style()->standardIcon(QStyle::SP_MessageBoxWarning) : ThemeIcons::themed(QIcon(":/original/StatusInformation_16x.png"));
     const auto now = QDateTime::currentDateTime();
     // The list shows the time; the details pane shows the full message, level and date.
     auto* item = new QListWidgetItem(icon, now.toString("HH:mm:ss") + "  " + text, ui_->notificationsList);

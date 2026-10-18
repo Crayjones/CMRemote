@@ -47,12 +47,12 @@ add_library(rm_frontend STATIC
     app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp app/MainWindow.h app/ui/test.ui app/ui/preview-icons.qrc
     app/ProfileEditor.cpp app/ProfileEditor.h app/PropertyDelegate.cpp app/PropertyDelegate.h app/RdpTarget.cpp app/RdpTarget.h
     app/PointerCapture.cpp app/PointerCapture.h
-    app/ConnectionTree.cpp app/ConnectionTree.h app/ConnectionIcons.cpp app/ConnectionIcons.h app/ConfigDescriptions.h
+    app/ConnectionTree.cpp app/ConnectionTree.h app/ConnectionIcons.cpp app/ConnectionIcons.h app/ThemeIcons.cpp app/ThemeIcons.h app/ConfigDescriptions.h
     app/ApplicationPreferences.cpp app/ApplicationPreferences.h app/ConnectionDefaults.cpp app/ConnectionDefaults.h app/OptionsDialog.cpp app/OptionsDialog.h app/ui/OptionsDialog.ui
     app/SessionPane.cpp app/SessionPane.h app/IdleTimeout.h app/Views.cpp app/Views.h
     app/TerminalScreen.cpp app/TerminalScreen.h app/TerminalView.cpp
     app/TerminalAppearance.cpp app/TerminalAppearance.h app/TerminalAppearanceService.cpp app/TerminalAppearanceService.h
-    app/TerminalAppearanceDialog.cpp app/TerminalAppearanceDialog.h app/ui/TerminalAppearanceDialog.ui
+    app/TerminalAppearancePage.cpp app/TerminalAppearancePage.h app/ui/TerminalAppearancePage.ui
     app/SessionClipboard.cpp app/SessionClipboard.h app/ClipboardTransfer.cpp app/ClipboardTransfer.h app/RemoteCursor.h
     app/PerformanceTrace.cpp app/PerformanceTrace.h app/DesktopUpdate.cpp app/DesktopUpdate.h
     app/SessionFullscreenController.cpp app/SessionFullscreenController.h app/PanelWindow.cpp app/PanelWindow.h

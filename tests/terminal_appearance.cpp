@@ -1,6 +1,8 @@
 #include "TerminalAppearance.h"
 #include "TerminalAppearanceService.h"
-#include "TerminalAppearanceDialog.h"
+#include "OptionsDialog.h"
+#include "ApplicationPreferences.h"
+#include "TerminalAppearancePage.h"
 #include "TerminalScreen.h"
 #include "Views.h"
 #include "ClipboardDriver.h"
@@ -78,25 +80,24 @@ private slots:
             "#666666", "#d54e53", "#b9ca4b", "#e6c547", "#7aa6da", "#c397d8", "#70c0b1", "#eaeaea"};
         for (size_t i = 0; i < 16; ++i) expected.ansi[i] = QColor(colors[i]);
         {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); auto* preset = dialog.findChild<QComboBox*>("palettePreset"); QVERIFY(preset);
+            TerminalAppearancePage dialog(&service); dialog.show(); auto* preset = dialog.findChild<QComboBox*>("palettePreset"); QVERIFY(preset);
             const auto index = preset->findText("Tomorrow Night"); QVERIFY(index >= 0);
             dialog.findChild<QSpinBox*>("fontSize")->setValue(18); dialog.findChild<QComboBox*>("cursorShape")->setCurrentIndex(2);
             dialog.findChild<QCheckBox*>("cursorBlink")->setChecked(true); dialog.findChild<QComboBox*>("boldStyle")->setCurrentIndex(1);
             preset->setCurrentIndex(index); QCOMPARE(dialog.findChild<TerminalView*>("appearancePreview")->appearance(), expected);
-            QCOMPARE(service.current(), TerminalAppearance::classic()); QVERIFY(!QFile::exists(path)); dialog.reject(); QVERIFY(!QFile::exists(path));
+            QCOMPARE(service.current(), TerminalAppearance::classic()); QVERIFY(!QFile::exists(path));
         }
         {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); dialog.findChild<QComboBox*>("palettePreset")->setCurrentText("Tomorrow Night");
+            TerminalAppearancePage dialog(&service); dialog.show(); dialog.findChild<QComboBox*>("palettePreset")->setCurrentText("Tomorrow Night");
             dialog.findChild<QSpinBox*>("fontSize")->setValue(18); dialog.findChild<QComboBox*>("cursorShape")->setCurrentIndex(2);
             dialog.findChild<QCheckBox*>("cursorBlink")->setChecked(true); dialog.findChild<QComboBox*>("boldStyle")->setCurrentIndex(1);
-            dialog.findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Apply)->click(); QTRY_VERIFY(service.current() == expected);
-            QCOMPARE(TerminalAppearance::decode(contents(path)).value(), expected); dialog.reject();
+            QVERIFY(dialog.save()); QTRY_VERIFY(service.current() == expected);
+            QCOMPARE(TerminalAppearance::decode(contents(path)).value(), expected);
         }
         {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); QCOMPARE(dialog.findChild<QComboBox*>("palettePreset")->currentText(), QString("Tomorrow Night"));
+            TerminalAppearancePage dialog(&service); dialog.show(); QCOMPARE(dialog.findChild<QComboBox*>("palettePreset")->currentText(), QString("Tomorrow Night"));
             const auto bytes = contents(path); service.setFault(AtomicFile::Fault::BeforeReplace);
-            dialog.findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Apply)->click(); QTRY_VERIFY(!service.busy());
-            QVERIFY(service.error().isEmpty()); QCOMPARE(contents(path), bytes); dialog.reject();
+            QVERIFY(!dialog.save()); QTRY_VERIFY(!service.busy()); QVERIFY(service.error().isEmpty()); QCOMPARE(contents(path), bytes);
         }
     }
     void terminalSessionZoomIsLocalBoundedAndSendsNoInput() {
@@ -121,7 +122,7 @@ private slots:
         QTest::keyClick(&view, Qt::Key_Minus, Qt::MetaModifier); QCOMPARE(view.appearance().fontSize, 13);
 #endif
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid()); TerminalAppearanceService service(directory.filePath("appearance.json")); QTRY_VERIFY(service.ready());
-        TerminalAppearanceDialog dialog(&service); auto* preview = dialog.findChild<TerminalView*>("appearancePreview"); QVERIFY(preview);
+        TerminalAppearancePage dialog(&service); auto* preview = dialog.findChild<TerminalView*>("appearancePreview"); QVERIFY(preview);
         const auto draft = preview->appearance(); QTest::keyClick(preview, Qt::Key_Plus, Qt::ControlModifier); QCOMPARE(preview->appearance(), draft);
         QTest::keyClick(dialog.findChild<QSpinBox*>("fontSize"), Qt::Key_Plus, Qt::ControlModifier); QCOMPARE(view.appearance().fontSize, 13); QCOMPARE(other.appearance().fontSize, 12);
         QVERIFY(!QFile::exists(directory.filePath("appearance.json")));
@@ -149,9 +150,9 @@ private slots:
         window.setQuickConnectProtocol("ssh"); window.quickConnect("temporary.invalid", true);
         auto* temporary = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(temporary); auto* tempView = temporary->findChild<TerminalView*>(); tempView->initializeTerminal(endpoint);
         QCOMPARE(tempView->appearance().fontSize, 12); tabs->setCurrentWidget(saved); window.disconnectCurrent(); QCOMPARE(view->appearance().fontSize, 13);
-        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        auto* dialog = window.findChild<TerminalAppearanceDialog*>(); dialog->findChild<QSpinBox*>("fontSize")->setValue(18);
-        dialog->findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Ok)->click(); QTRY_COMPARE(view->appearance().fontSize, 19); QCOMPARE(tempView->appearance().fontSize, 18);
+        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        auto* dialog = window.findChild<OptionsDialog*>(); dialog->findChild<QSpinBox*>("fontSize")->setValue(18);
+        dialog->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Ok)->click(); QTRY_COMPARE(view->appearance().fontSize, 19); QCOMPARE(tempView->appearance().fontSize, 18);
         const auto applied = contents(settings); view->setFocus(); QTest::keyClick(view, Qt::Key_Minus, Qt::ControlModifier); QCOMPARE(view->appearance().fontSize, 18);
         QCOMPARE(saved->id(), id); QVERIFY(saved->target() == target); QCOMPARE(contents(xml), before); QCOMPARE(contents(settings), applied);
         window.reconnectCurrent(); QTRY_VERIFY(qobject_cast<SessionPane*>(tabs->currentWidget())->id() != id);
@@ -410,30 +411,47 @@ private slots:
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid()); const auto path = directory.filePath("appearance.json");
         TerminalAppearanceService service(path); QTRY_VERIFY(service.ready());
         {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); auto* size = dialog.findChild<QSpinBox*>("fontSize"); QVERIFY(size);
-            size->setValue(20); QCOMPARE(service.current().fontSize, 12); QVERIFY(!QFile::exists(path));
-            QCOMPARE(dialog.findChild<TerminalView*>("appearancePreview")->appearance().fontSize, 20); dialog.reject(); QVERIFY(!QFile::exists(path));
+            TerminalAppearancePage page(&service); page.show(); auto* size = page.findChild<QSpinBox*>("fontSize"); QVERIFY(size);
+            size->setValue(20); QCOMPARE(service.current().fontSize, 12); QVERIFY(!QFile::exists(path)); QVERIFY(page.dirty());
+            QCOMPARE(page.findChild<TerminalView*>("appearancePreview")->appearance().fontSize, 20);
+        }
+        QVERIFY(!QFile::exists(path));
+        {
+            TerminalAppearancePage page(&service); page.show(); page.findChild<QSpinBox*>("fontSize")->setValue(20);
+            QVERIFY(page.save()); QTRY_COMPARE(service.current().fontSize, 20); QTRY_VERIFY(!page.busy()); QVERIFY(!page.dirty());
+            const auto saved = contents(path); page.findChild<QPushButton*>("resetDefaults")->click(); QCOMPARE(page.findChild<QSpinBox*>("fontSize")->value(), 12);
+            QCOMPARE(service.current().fontSize, 20); QCOMPARE(contents(path), saved);
         }
         {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); dialog.findChild<QSpinBox*>("fontSize")->setValue(20);
-            auto* buttons = dialog.findChild<QDialogButtonBox*>("buttonBox"); buttons->button(QDialogButtonBox::Apply)->click(); QTRY_COMPARE(service.current().fontSize, 20);
-            const auto saved = contents(path); dialog.findChild<QPushButton*>("resetDefaults")->click(); QCOMPARE(dialog.findChild<QSpinBox*>("fontSize")->value(), 12);
-            QCOMPARE(service.current().fontSize, 20); QCOMPARE(contents(path), saved); dialog.reject(); QCOMPARE(contents(path), saved);
+            TerminalAppearancePage page(&service); page.show(); auto* size = page.findChild<QSpinBox*>("fontSize");
+            QSignalSpy saves(&page, &TerminalAppearancePage::saved); const auto saved = contents(path);
+            service.setFault(AtomicFile::Fault::BeforeReplace); QVERIFY(!page.save()); QCOMPARE(contents(path), saved);
+            size->setValue(24); QVERIFY(page.save()); QTRY_COMPARE(saves.count(), 1); QCOMPARE(saves.takeFirst().at(0).toBool(), false);
+            QVERIFY(!service.error().isEmpty()); QCOMPARE(size->value(), 24);
+            QCOMPARE(service.current().fontSize, 20); QCOMPARE(contents(path), saved); QVERIFY(!page.findChild<QLabel*>("statusLabel")->text().isEmpty());
+            service.setFault(AtomicFile::Fault::DirectorySync); QVERIFY(page.save());
+            QTRY_COMPARE(service.current().fontSize, 24); QTRY_VERIFY(page.findChild<QMessageBox*>());
+            QVERIFY(saves.isEmpty()); QVERIFY(!service.warning().isEmpty()); QCOMPARE(TerminalAppearance::decode(contents(path))->fontSize, 24);
+            page.findChild<QMessageBox*>()->button(QMessageBox::Ok)->click(); QTRY_COMPARE(saves.count(), 1);
+            QCOMPARE(saves.takeFirst().at(0).toBool(), true); QVERIFY(service.warning().isEmpty());
         }
-        {
-            TerminalAppearanceDialog dialog(&service); dialog.show(); auto* size = dialog.findChild<QSpinBox*>("fontSize");
-            auto* buttons = dialog.findChild<QDialogButtonBox*>("buttonBox"); const auto saved = contents(path);
-            service.setFault(AtomicFile::Fault::BeforeReplace); buttons->button(QDialogButtonBox::Apply)->click();
-            QTRY_VERIFY(!service.busy()); QVERIFY(service.error().isEmpty()); QCOMPARE(contents(path), saved);
-            size->setValue(24); buttons->button(QDialogButtonBox::Ok)->click(); QTRY_VERIFY(!service.busy());
-            QVERIFY(!service.error().isEmpty()); QVERIFY(dialog.isVisible()); QCOMPARE(size->value(), 24);
-            QCOMPARE(service.current().fontSize, 20); QCOMPARE(contents(path), saved); QVERIFY(!dialog.findChild<QLabel*>("statusLabel")->text().isEmpty());
-            service.setFault(AtomicFile::Fault::DirectorySync); buttons->button(QDialogButtonBox::Ok)->click();
-            QTRY_COMPARE(service.current().fontSize, 24); QTRY_VERIFY(dialog.findChild<QMessageBox*>());
-            QVERIFY(dialog.isVisible()); QVERIFY(!service.warning().isEmpty()); QCOMPARE(TerminalAppearance::decode(contents(path))->fontSize, 24);
-            dialog.findChild<QMessageBox*>()->button(QMessageBox::Ok)->click(); QTRY_VERIFY(!dialog.isVisible());
-            QCOMPARE(dialog.result(), int(QDialog::Accepted)); QVERIFY(service.warning().isEmpty());
-        }
+    }
+    void settingsDialogSavesTerminalAndRedrawsPreview() {
+        QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid()); const auto path = directory.filePath("appearance.json");
+        TerminalAppearanceService service(path); QTRY_VERIFY(service.ready());
+        ApplicationPreferences store(directory.filePath("preferences.json"));
+        auto* dialog = new OptionsDialog({}, &store, nullptr, nullptr, &service); QPointer<OptionsDialog> guard = dialog;
+        dialog->resize(900, 700); dialog->show(); dialog->showPage(OptionsDialog::TerminalPage);
+        auto* preview = dialog->findChild<TerminalView*>("appearancePreview"); QVERIFY(preview); QTRY_VERIFY(preview->isVisible());
+        // The sample is redrawn at the visible width, so its colour row fits on one line.
+        QTRY_VERIFY(preview->screen()->lineText(preview->screen()->historyLines() + 1).contains("Black Red Green Yellow Blue Magenta Cyan White"));
+        QCOMPARE(preview->screen()->historyLines(), 0);
+        dialog->findChild<QSpinBox*>("fontSize")->setValue(16);
+        dialog->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Ok)->click();
+        QTRY_COMPARE(service.current().fontSize, 16); QTRY_VERIFY(!guard || !guard->isVisible());
+        // Terminal-only edits do not write application preferences.
+        QVERIFY(!QFile::exists(directory.filePath("preferences.json")));
+        delete guard.data();
     }
     void terminalAppearanceUpdatesAllSshTabsWithoutRetargeting() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid()); const auto xml = directory.filePath("connections.xml"), settings = directory.filePath("appearance.json");
@@ -451,32 +469,27 @@ private slots:
         window.setQuickConnectProtocol("rdp"); window.quickConnect("rdp.invalid", true);
         auto* rdp = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(rdp); const auto rdpId = rdp->id(); const auto rdpTarget = rdp->target();
         auto* desktop = rdp->findChild<DesktopView*>(); QVERIFY(desktop); QImage frame(32, 24, QImage::Format_RGB32); frame.fill(Qt::red); desktop->setFrame(frame);
-        // Options opens only the Options dialog, never Terminal Appearance.
-        if (auto* options = window.findChild<QAction*>("actionOptions"); options->isEnabled()) {
-            options->trigger(); QCoreApplication::processEvents(); QVERIFY(!window.findChild<TerminalAppearanceDialog*>());
-            if (auto* optionsDialog = window.findChild<QDialog*>("optionsDialog")) optionsDialog->reject();
-        }
-        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        auto* dialog = window.findChild<TerminalAppearanceDialog*>(); window.findChild<QAction*>("actionTerminalAppearance")->trigger();
-        QCOMPARE(window.findChildren<TerminalAppearanceDialog*>().size(), 1); QVERIFY(!QFile::exists(settings));
+        window.findChild<QAction*>("actionTerminalAppearance")->trigger(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        auto* dialog = window.findChild<OptionsDialog*>(); window.findChild<QAction*>("actionTerminalAppearance")->trigger();
+        QCOMPARE(window.findChildren<OptionsDialog*>().size(), 1); QVERIFY(dialog->findChild<TerminalAppearancePage*>()->isVisible()); QVERIFY(!QFile::exists(settings));
         dialog->findChild<QSpinBox*>("fontSize")->setValue(18); QCOMPARE(first->findChild<TerminalView*>()->appearance().fontSize, 12);
-        dialog->findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Apply)->click();
+        dialog->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Apply)->click();
         QTRY_COMPARE(first->findChild<TerminalView*>()->appearance().fontSize, 18); QCOMPARE(second->findChild<TerminalView*>()->appearance().fontSize, 18);
         QCOMPARE(saved->findChild<TerminalView*>()->appearance().fontSize, 18); QCOMPARE(saved->id(), savedId); QVERIFY(saved->target() == savedTarget);
         QCOMPARE(first->id(), firstId); QCOMPARE(second->id(), secondId); QVERIFY(first->target() == firstTarget && second->target() == secondTarget);
         QCOMPARE(rdp->id(), rdpId); QVERIFY(rdp->target() == rdpTarget); QCOMPARE(desktop->frame(), frame);
-        QCOMPARE(contents(xml), xmlBytes); QCOMPARE(contents(trust), trustBytes); dialog->reject(); QTRY_VERIFY(!window.findChild<TerminalAppearanceDialog*>());
+        QCOMPARE(contents(xml), xmlBytes); QCOMPARE(contents(trust), trustBytes); dialog->reject(); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
         auto* view = first->findChild<TerminalView*>(); view->initializeTerminal(clipboard);
         QContextMenuEvent context(QContextMenuEvent::Mouse, QPoint(2, 2), view->mapToGlobal(QPoint(2, 2))); QApplication::sendEvent(view, &context);
         auto* menu = view->findChild<QMenu*>(); QVERIFY(menu); auto* action = menu->findChild<QAction*>("actionTerminalAppearance"); QVERIFY(action);
-        action->trigger(); menu->close(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        window.findChild<TerminalAppearanceDialog*>()->reject(); QTRY_VERIFY(!window.findChild<TerminalAppearanceDialog*>());
+        action->trigger(); menu->close(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        window.findChild<OptionsDialog*>()->reject(); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
         const auto point = tabs->tabBar()->tabRect(tabs->indexOf(saved)).center();
         QContextMenuEvent tabContext(QContextMenuEvent::Mouse, point, tabs->tabBar()->mapToGlobal(point)); QApplication::sendEvent(tabs->tabBar(), &tabContext);
         auto* tabMenu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(tabMenu);
         auto* tabAppearance = tabMenu->findChild<QAction*>("actionTerminalAppearance"); QVERIFY(tabAppearance && tabAppearance->isEnabled());
-        tabAppearance->trigger(); tabMenu->close(); QTRY_VERIFY(window.findChild<TerminalAppearanceDialog*>());
-        window.findChild<TerminalAppearanceDialog*>()->reject(); QTRY_VERIFY(!window.findChild<TerminalAppearanceDialog*>());
+        tabAppearance->trigger(); tabMenu->close(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
+        window.findChild<OptionsDialog*>()->reject(); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
         tabs->setCurrentWidget(saved); window.reconnectCurrent();
         QTRY_VERIFY(qobject_cast<SessionPane*>(tabs->currentWidget())->id() != savedId);
         auto* reconnect = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(reconnect->target() == savedTarget);

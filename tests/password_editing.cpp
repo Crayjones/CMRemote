@@ -484,6 +484,36 @@ private slots:
         }
         QVERIFY(!contents(path).contains("synthetic-account-password")); assertSecretFree(window, "synthetic-account-password");
     }
+    void quickConnectSaveToConnectionsKeepsPassword() {
+#if defined(Q_OS_UNIX) && defined(RM_WITH_RDP)
+        QTemporaryDir dir; const auto path = dir.filePath("quick.xml"); QVERIFY(fixture(path, "127.0.0.1"));
+        PromptListener listener; QVERIFY(listener.port != 0);
+        MainWindow window(path, true); window.show(); auto* files = window.findChild<DocumentService*>(); const auto id = window.connectionFiles().first();
+        QTRY_VERIFY(files->status(id) && !files->status(id)->busy); window.unlockConnectionFile(id, Secret(QByteArray("synthetic file master")));
+        QTRY_VERIFY(files->status(id)->unlocked && !files->status(id)->busy);
+        const auto known = files->status(id)->passwords.keys();
+        window.quickConnect("127.0.0.1:" + QString::number(listener.port), false);
+        QTRY_VERIFY(window.findChild<QDialog*>("CredentialsDialog")); auto* prompt = window.findChild<QDialog*>("CredentialsDialog");
+        auto* save = prompt->findChild<QCheckBox*>("saveCheck"); QVERIFY(save && !save->isHidden() && !save->isChecked());
+        prompt->findChild<QLineEdit*>("usernameEdit")->setText("quick-user");
+        prompt->findChild<QLineEdit*>("passwordEdit")->setText("synthetic-quick-password"); save->setChecked(true);
+        QTest::mouseClick(prompt->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok), Qt::LeftButton);
+        QTRY_VERIFY(window.findChild<QDialog*>("saveAsConnection")); auto* dialog = window.findChild<QDialog*>("saveAsConnection");
+        dialog->findChild<QLineEdit*>("connectionName")->setText("Quick saved"); dialog->accept(); QVERIFY(settled(window, id));
+        QString saved;
+        for (const auto& key : files->status(id)->passwords.keys()) if (!known.contains(key)) saved = key;
+        QVERIFY2(!saved.isEmpty(), qPrintable(window.lastError()));
+        QVERIFY(files->status(id)->passwords.value(saved).present && files->status(id)->passwords.value(saved).authorized);
+        SessionTarget target; target.host = "127.0.0.1"; target.port = listener.port; target.username = "quick-user";
+        std::optional<DocumentReply> reply; files->lookup({id, saved}, target, [&](DocumentReply value) { reply.emplace(std::move(value)); });
+        QTRY_VERIFY(reply.has_value()); QVERIFY(reply->result.ok && reply->password);
+        QVERIFY(reply->password->takeBytes() == QByteArray("synthetic-quick-password"));
+        QVERIFY(!contents(path).contains("synthetic-quick-password"));
+        window.closeTab(0); assertSecretFree(window, "synthetic-quick-password");
+#else
+        QSKIP("Requires an RDP build on Unix");
+#endif
+    }
     void temporaryAndDifferentCredentialsNeverPersist() {
         QTemporaryDir dir; const auto path = dir.filePath("transient.xml"); QVERIFY(fixture(path, "127.0.0.1"));
 #if defined(Q_OS_UNIX) && defined(RM_WITH_RDP)

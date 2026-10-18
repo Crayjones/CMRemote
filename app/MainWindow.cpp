@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "Branding.h"
+#include <algorithm>
 #include <functional>
 #include "Credentials.h"
 #include "ProfileEditor.h"
@@ -10,10 +11,11 @@
 #include "VncWorker.h"
 #include "SshHostKeyService.h"
 #include "TerminalAppearanceService.h"
-#include "TerminalAppearanceDialog.h"
 #include "DataPaths.h"
 #include "QuickConnect.h"
 #include "OptionsDialog.h"
+#include "Appearance.h"
+#include "ThemeIcons.h"
 #include "OpenH264.h"
 #include "LocalShortcuts.h"
 #include "Views.h"
@@ -33,6 +35,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QToolBar>
 #include <QWindow>
 #include <QGuiApplication>
@@ -48,7 +51,7 @@
 
 static QString qstr(const rust::String& s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
 static std::string bytes(const QString& s) { return s.toUtf8().toStdString(); }
-static QIcon originalIcon(const QString& name) { return QIcon(":/original/" + name); }
+static QIcon originalIcon(const QString& name) { return ThemeIcons::themed(QIcon(":/original/" + name)); }
 #ifdef Q_OS_MACOS
 QSize rmNativeTitleBarInset(QWidget* widget);
 #endif
@@ -96,7 +99,7 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
                 notification("Terminal appearance: " + terminalAppearance_->error(), Notice::Warning);
         });
     }
-    // Options has its own dialog (showOptions); only this action opens Terminal Appearance.
+    // Not in a menu bar: SSH context menus copy it to open Settings at the Terminal page.
     ui_->actionTerminalAppearance->setEnabled(true); ui_->actionTerminalAppearance->setToolTip("Font, colors and cursor for all SSH terminals");
     connect(ui_->actionTerminalAppearance, &QAction::triggered, this, &MainWindow::showTerminalAppearance);
     ui_->actionAbout->setText("About CMRemote");
@@ -267,7 +270,7 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
         if (closeApproved_) return;
         preferencesReady_ = reply.result.ok && !preferencesPath.isEmpty();
         if (reply.result.ok) applyPreferences(reply.values); else { fail(reply.result.error); updateActions(); }
-        ui_->actionOptions->setEnabled(true); ui_->actionOptions->setToolTip("Options");
+        ui_->actionOptions->setEnabled(true); ui_->actionOptions->setToolTip("Settings");
     });
 }
 void MainWindow::setConfigMode(bool defaults, bool inheritance) {
@@ -290,6 +293,7 @@ void MainWindow::applyPreferences(PreferenceValues values) {
     ui_->actionViewPanels->setChecked(values.showPanels);
     commandAsControl_ = values.commandAsControl; DesktopView::setCommandAsControl(values.commandAsControl);
     autoUpdate_ = values.autoUpdate; if (updater_) updater_->setEnabled(values.autoUpdate);
+    theme_ = values.theme; applyTheme(*qApp, theme_); applyThemeStyle();
     updateActions();
 }
 PreferenceValues MainWindow::currentPreferences() const {
@@ -297,20 +301,32 @@ PreferenceValues MainWindow::currentPreferences() const {
     values.categorized = editor_->categorized(); values.propertyHelp = ui_->actionShowHelp->isChecked();
     values.quickConnect = ui_->actionViewQuickConnect->isChecked(); values.lockToolbars = ui_->actionLockToolbars->isChecked();
     values.defaults = defaults_; values.openh264 = openh264Enabled_; values.showPanels = ui_->actionViewPanels->isChecked();
-    values.commandAsControl = commandAsControl_; values.autoUpdate = autoUpdate_;
+    values.commandAsControl = commandAsControl_; values.autoUpdate = autoUpdate_; values.theme = theme_;
     return values;
 }
 void MainWindow::applyPanelTabs() {
     // Separate windows keep their panel row: it carries their window menu.
     setShellVisible(ui_->groupTabs->tabBar(), ui_->actionViewPanels->isChecked());
 }
-void MainWindow::showOptions() {
-    guard([this] {
-        if (optionsDialog_) { optionsDialog_->raise(); optionsDialog_->activateWindow(); return; }
-        auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_); optionsDialog_ = dialog;
+void MainWindow::applyThemeStyle() {
+    if (lightStyleSheet_.isEmpty()) {
+        lightStyleSheet_ = styleSheet();
+        // Match the system when it switches while Settings says "Match System".
+        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] { applyThemeStyle(); });
+    }
+    const auto sheet = themeStyleSheet(lightStyleSheet_, themeIsDark());
+    if (sheet != styleSheet()) setStyleSheet(sheet);
+    ThemeIcons::restyle();
+}
+void MainWindow::showOptions() { guard([this] { openSettings(0); }); }
+void MainWindow::openSettings(int page) {
+    if (!optionsDialog_) {
+        auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_, terminalAppearance_); optionsDialog_ = dialog;
         connect(dialog, &OptionsDialog::applied, this, &MainWindow::applyPreferences);
         dialog->open();
-    });
+    }
+    if (page) qobject_cast<OptionsDialog*>(optionsDialog_.data())->showPage(page);
+    optionsDialog_->raise(); optionsDialog_->activateWindow();
 }
 MainWindow::~MainWindow() {
     // Child widgets can emit focus/editor signals during QMainWindow teardown.
@@ -325,6 +341,7 @@ void MainWindow::changeEvent(QEvent* event) {
     QMainWindow::changeEvent(event);
     if (event->type() == QEvent::WindowStateChange && ui_) {
         const QSignalBlocker blocker(ui_->actionFullscreen); ui_->actionFullscreen->setChecked(isFullScreen());
+        fitTitleBar();
     }
 }
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -344,7 +361,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         sshTrust_->shutdown([this] { sshTrustStopped_ = true; finishSshShutdown(); });
     }
     if (terminalAppearance_ && !appearanceStopped_) {
-        if (appearanceDialog_) { appearanceDialog_->hide(); appearanceDialog_->deleteLater(); }
+        if (optionsDialog_) { optionsDialog_->hide(); optionsDialog_->deleteLater(); }
         terminalAppearance_->shutdown([this] { appearanceStopped_ = true; finishSshShutdown(); });
     }
     if (!sshWorkers_.isEmpty() || !vncWorkers_.isEmpty() || VncWorker::activeWorkers() != 0 || !sshTrustStopped_ || !appearanceStopped_) { event->ignore(); return; }
@@ -361,11 +378,7 @@ void MainWindow::finishSshShutdown() {
 void MainWindow::showTerminalAppearance() {
     if (closeApproved_) return;
     if (!terminalAppearance_) { fail("Terminal appearance storage path is unavailable."); return; }
-    if (!appearanceDialog_) {
-        appearanceDialog_ = new TerminalAppearanceDialog(terminalAppearance_, this);
-        appearanceDialog_->setAttribute(Qt::WA_DeleteOnClose);
-    }
-    appearanceDialog_->show(); appearanceDialog_->raise(); appearanceDialog_->activateWindow();
+    openSettings(OptionsDialog::TerminalPage);
 }
 void MainWindow::finishTransition() {
     transitionPending_ = false; updateActions();
@@ -707,7 +720,7 @@ void MainWindow::rebuildConnectionsMenu(QMenu* menu) {
     for (auto id : documentOrder_) {
         const auto doc = context(id); if (!doc) continue;
         const auto title = "Connections — " + QFileInfo(doc->status().path).fileName();
-        if (!doc->status().metadataAvailable) { menu->addAction(QIcon(":/original/ASPWebSite_16x.png"), title + " (locked)")->setEnabled(false); continue; }
+        if (!doc->status().metadataAvailable) { menu->addAction(originalIcon("ASPWebSite_16x.png"), title + " (locked)")->setEnabled(false); continue; }
         std::function<void(QMenu*, const QString&)> fill = [&](QMenu* parent, const QString& folder) {
             for (const auto& profile : doc->order()) {
                 const auto node = doc->profiles().value(profile);
@@ -727,7 +740,7 @@ void MainWindow::rebuildConnectionsMenu(QMenu* menu) {
                 });
             }
         };
-        auto* root = menu->addMenu(QIcon(":/original/ASPWebSite_16x.png"), title); fill(root, {});
+        auto* root = menu->addMenu(originalIcon("ASPWebSite_16x.png"), title); fill(root, {});
         if (root->isEmpty()) root->addAction("(empty)")->setEnabled(false);
     }
     if (menu->isEmpty()) menu->addAction("No connection files open")->setEnabled(false);
@@ -912,8 +925,17 @@ void MainWindow::deleteCommitted() {
     };
     if (testMode_) { remove(); return; }
     transitionPending_ = true; updateActions();
-    auto* dialog = new QMessageBox(QMessageBox::Question, "Delete profile", "Delete this profile and all its children?",
-                                  QMessageBox::Yes | QMessageBox::Cancel, this);
+    const auto profile = profiles_.value(id); const bool folder = profile.value("kind") == "folder";
+    int inside = 0;
+    std::function<void(const QTreeWidgetItem*)> count = [&](const QTreeWidgetItem* item) { for (int i = 0; i < item->childCount(); ++i) { ++inside; count(item->child(i)); } };
+    if (auto* item = ui_->connectionTree->currentItem()) count(item);
+    const auto name = "\u201C" + profile.value("name").toString() + "\u201D";
+    const auto text = !folder ? "Delete the connection " + name + "?"
+        : inside ? QString("Delete the folder %1 and the %2 item(s) inside it?").arg(name).arg(inside)
+        : "Delete the empty folder " + name + "?";
+    auto* dialog = new QMessageBox(QMessageBox::Question, folder ? "Delete folder" : "Delete connection", text, QMessageBox::Yes | QMessageBox::Cancel, this);
+    dialog->setInformativeText("This cannot be undone.");
+    dialog->button(QMessageBox::Yes)->setText("Delete");
     dialog->setObjectName("deleteProfile"); dialog->setTextFormat(Qt::PlainText); dialog->setDefaultButton(QMessageBox::Cancel);
     dialog->setWindowModality(Qt::WindowModal); dialog->setAttribute(Qt::WA_DeleteOnClose);
     connect(dialog, &QDialog::finished, this, [this, remove](int answer) { if (answer == QMessageBox::Yes) remove(); else finishTransition(); });
@@ -971,6 +993,48 @@ void MainWindow::promptUpdateInstall(const QString& version) {
     });
     dialog->show();
 }
+namespace {
+// Draws over the transparent title bar: the window title centered like a native
+// title (hidden when the Quick Connect controls reach it) and a thin separator
+// between the title bar and the window content.
+class TitleBarDecoration final : public QWidget {
+public:
+    TitleBarDecoration(QMainWindow* window, QToolBar* toolbar, int height) : QWidget(window), window_(window), toolbar_(toolbar), height_(height) {
+        setObjectName("titleBarDecoration"); setAttribute(Qt::WA_TransparentForMouseEvents);
+        window->installEventFilter(this); toolbar->installEventFilter(this);
+        connect(window, &QWidget::windowTitleChanged, this, qOverload<>(&QWidget::update));
+        place();
+    }
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize || event->type() == QEvent::Move || event->type() == QEvent::Show
+            || event->type() == QEvent::Hide || event->type() == QEvent::LayoutRequest || event->type() == QEvent::WindowStateChange) place();
+        return QWidget::eventFilter(watched, event);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setPen(palette().color(QPalette::Window).darker(118)); painter.drawLine(0, height() - 1, width(), height() - 1);
+        QFont font = this->font(); font.setBold(true); painter.setFont(font);
+        const QFontMetrics metrics(font); const auto title = window_->windowTitle();
+        QRect text(0, 0, metrics.horizontalAdvance(title), height_); text.moveCenter(QPoint(width() / 2, height_ / 2));
+        // Keep clear of the rightmost visible toolbar control.
+        int controls = 0;
+        if (toolbar_->isVisible())
+            for (auto* child : toolbar_->findChildren<QWidget*>(Qt::FindDirectChildrenOnly))
+                if (child->isVisible() && child->objectName() != "qt_toolbar_ext_button")
+                    controls = std::max(controls, toolbar_->mapTo(window_, QPoint(child->geometry().right(), 0)).x());
+        if (text.left() < controls + 16) return;
+        painter.setPen(palette().color(QPalette::WindowText)); painter.drawText(text, Qt::AlignCenter, title);
+    }
+private:
+    void place() {
+        if (window_->isFullScreen()) { hide(); return; }
+        const int bottom = toolbar_->isVisible() ? std::max(height_, toolbar_->mapTo(window_, QPoint(0, toolbar_->height())).y()) : height_;
+        setGeometry(0, 0, window_->width(), bottom); show(); raise(); update();
+    }
+    QMainWindow* window_; QToolBar* toolbar_; int height_;
+};
+}
 void MainWindow::placeQuickConnectInTitleBar() {
 #ifdef Q_OS_MACOS
     // The window content extends under a transparent title bar; the toolbar row
@@ -983,20 +1047,33 @@ void MainWindow::placeQuickConnectInTitleBar() {
     auto* toolbar = ui_->quickConnectToolbar;
     auto* spacer = new QWidget(toolbar); spacer->setObjectName("titleBarInset"); spacer->setFixedWidth(inset.width());
     spacer->setAttribute(Qt::WA_TransparentForMouseEvents);
-    toolbar->insertWidget(toolbar->actions().value(0), spacer);
+    titleBarInset_ = toolbar->insertWidget(toolbar->actions().value(0), spacer);
     toolbar->setMovable(false); toolbar->setMinimumHeight(titleBarHeight_);
     toolbar->setStyleSheet("QToolBar { background: transparent; border: none; }");
     // Empty toolbar space still drags and zooms the window like a title bar.
-    for (QWidget* area : {static_cast<QWidget*>(toolbar), ui_->quickConnectControls, static_cast<QWidget*>(ui_->quickConnectLabel)}) area->installEventFilter(this);
-    // Without the toolbar, keep everything below the window buttons.
-    auto margins = [this] { setContentsMargins(0, ui_->quickConnectToolbar->isHidden() ? titleBarHeight_ : 0, 0, 0); };
-    connect(toolbar, &QToolBar::visibilityChanged, this, margins); margins();
+    // So does the window's own background beside the toolbar.
+    for (QWidget* area : {static_cast<QWidget*>(this), static_cast<QWidget*>(toolbar), ui_->quickConnectControls, static_cast<QWidget*>(ui_->quickConnectLabel)}) area->installEventFilter(this);
+    connect(toolbar, &QToolBar::visibilityChanged, this, &MainWindow::fitTitleBar); fitTitleBar();
+    new TitleBarDecoration(this, toolbar, titleBarHeight_);
 #endif
+}
+void MainWindow::fitTitleBar() {
+    if (!quickConnectInTitleBar_) return;
+    // Fullscreen has no title bar: Quick Connect starts at the left edge.
+    const bool titleBar = !isFullScreen();
+    titleBarInset_->setVisible(titleBar);
+    // Without the toolbar, keep everything below the window buttons.
+    setContentsMargins(0, titleBar && ui_->quickConnectToolbar->isHidden() ? titleBarHeight_ : 0, 0, 0);
 }
 bool MainWindow::titleBarDrag(QObject* watched, QEvent* event) {
     if (!quickConnectInTitleBar_) return false;
-    if (watched != ui_->quickConnectToolbar && watched != ui_->quickConnectControls && watched != ui_->quickConnectLabel) return false;
+    if (event->type() != QEvent::MouseButtonPress && event->type() != QEvent::MouseButtonDblClick) return false;
     auto* mouse = static_cast<QMouseEvent*>(event);
+    if (watched == this) {
+        const auto* toolbar = ui_->quickConnectToolbar;
+        const int bottom = toolbar->isVisible() ? std::max(titleBarHeight_, toolbar->geometry().bottom() + 1) : titleBarHeight_;
+        if (mouse->position().y() >= bottom) return false;
+    } else if (watched != ui_->quickConnectToolbar && watched != ui_->quickConnectControls && watched != ui_->quickConnectLabel) return false;
     if (event->type() == QEvent::MouseButtonDblClick && mouse->button() == Qt::LeftButton) {
         if (isMaximized()) showNormal(); else showMaximized();
         return true;

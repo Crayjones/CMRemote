@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "ThemeIcons.h"
 #include "UpdateCheck.h"
 #include "QuickConnect.h"
 #include "AutoUpdate.h"
@@ -632,6 +633,43 @@ private slots:
         QVERIFY(!restart.findChild<ProfileEditor*>()->categorized()); QVERIFY(restart.findChild<QToolBar*>("quickConnectToolbar")->isHidden());
         QVERIFY(restart.findChild<QWidget*>("configHelp")->isHidden()); QVERIFY(!restart.findChild<QToolBar*>("quickConnectToolbar")->isMovable());
         QVERIFY(restart.findChild<QDockWidget*>("notificationsDock")->isHidden());
+    }
+    void darkIconsSwapGlyphsAndRestore() {
+        QImage glyph(16, 16, QImage::Format_ARGB32); glyph.fill(QColor("#f6f6f6"));
+        for (int y = 4; y < 8; ++y) for (int x = 4; x < 8; ++x) glyph.setPixel(x, y, QColor("#424242").rgb());
+        glyph.setPixel(0, 0, QColor("#1ba1e2").rgb());
+        const auto swapped = ThemeIcons::dark(glyph);
+        QCOMPARE(QColor(swapped.pixel(5, 5)), QColor("#f6f6f6")); QCOMPARE(QColor(swapped.pixel(12, 12)), QColor("#252525"));
+        QCOMPARE(QColor(swapped.pixel(0, 0)), QColor("#1ba1e2"));
+        // Full-color pictures without the glyph gray are left alone.
+        QImage picture(16, 16, QImage::Format_ARGB32); picture.fill(QColor("#c03030")); for (int x = 0; x < 16; ++x) picture.setPixel(x, 1, QColor("#424242").rgb());
+        QCOMPARE(ThemeIcons::dark(picture), picture);
+        const QIcon light(QPixmap::fromImage(glyph));
+        applyTheme(*qApp, "dark"); const auto dark = ThemeIcons::themed(light); QVERIFY(dark.cacheKey() != light.cacheKey());
+        QCOMPARE(ThemeIcons::themed(dark).cacheKey(), dark.cacheKey());
+        applyTheme(*qApp, "light"); QCOMPARE(ThemeIcons::themed(dark).cacheKey(), light.cacheKey());
+    }
+    void darkThemePersistsAndRestyles() {
+        QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
+        const auto choose = [&](MainWindow& w, const QString& theme) {
+            auto* action = w.findChild<QAction*>("actionOptions"); [&] { QTRY_VERIFY(action->isEnabled()); }(); action->trigger();
+            auto* dialog = w.findChild<QDialog*>("optionsDialog"); auto* combo = dialog->findChild<QComboBox*>("theme");
+            combo->setCurrentIndex(combo->findData(theme)); dialog->accept(); [&] { QTRY_VERIFY(!w.findChild<QDialog*>("optionsDialog")); }();
+        };
+        {
+            MainWindow w(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); w.show(); WAIT_STORE(w);
+            QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128); const auto icon = w.findChild<QAction*>("actionOptions")->icon().cacheKey(); choose(w, "dark");
+            QVERIFY(w.findChild<QAction*>("actionOptions")->icon().cacheKey() != icon);
+            QVERIFY(qApp->palette().color(QPalette::Window).lightness() < 128);
+            QVERIFY(w.styleSheet().contains("#2b2b2b")); QVERIFY(!w.styleSheet().contains("#f0f0f0"));
+        }
+        QFile stored(preferences); QVERIFY(stored.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(stored.readAll()).object().value("theme"), QJsonValue("dark"));
+        MainWindow restart(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); restart.show(); WAIT_STORE(restart);
+        QTRY_VERIFY(restart.styleSheet().contains("#2b2b2b"));
+        const auto darkIcon = restart.findChild<QAction*>("actionOptions")->icon(); QCOMPARE(QColor(darkIcon.pixmap(16, 16).toImage().pixel(8, 8)).lightness() >= 0, true);
+        choose(restart, "light"); QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128);
+        QVERIFY(restart.findChild<QAction*>("actionOptions")->icon().cacheKey() != darkIcon.cacheKey()); QVERIFY(restart.styleSheet().contains("#f0f0f0"));
     }
     void openh264OptionCreditsCiscoAndPersists() {
         QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
