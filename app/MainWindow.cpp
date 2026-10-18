@@ -292,7 +292,8 @@ void MainWindow::applyPreferences(PreferenceValues values) {
     ui_->actionViewQuickConnect->setChecked(values.quickConnect); ui_->actionLockToolbars->setChecked(values.lockToolbars);
     ui_->actionViewPanels->setChecked(values.showPanels);
     commandAsControl_ = values.commandAsControl; DesktopView::setCommandAsControl(values.commandAsControl);
-    autoUpdate_ = values.autoUpdate; if (updater_) updater_->setEnabled(values.autoUpdate);
+    // Updates are scheduled only once the stored choice is known, so an opt-out never races the default.
+    autoUpdate_ = values.autoUpdate; updatePreferenceKnown_ = true; if (updater_) updater_->setAutomatic(values.autoUpdate);
     theme_ = values.theme; applyTheme(*qApp, theme_); applyThemeStyle();
     updateActions();
 }
@@ -347,13 +348,24 @@ void MainWindow::changeEvent(QEvent* event) {
 void MainWindow::closeEvent(QCloseEvent* event) {
     if (!closeApproved_) editor_->flush();
     if (!closeApproved_ && (autoSaveQueued_ || autoSaveInFlight_ || editor_->dirty())) {
-        event->ignore(); guard([this] { close(); }); return;
+        // A close the guard drops or the user cancels (e.g. save recovery) also cancels Restart & Update.
+        QPointer<MainWindow> self(this);
+        auto attempt = std::shared_ptr<bool>(new bool(false), [self](bool* closed) {
+            if (!*closed && self && !self->closeApproved_) self->relaunchAfterUpdate_ = false;
+            delete closed;
+        });
+        event->ignore(); guard([this, attempt] { *attempt = true; close(); }); return;
     }
     if (!closeApproved_) for (const auto& doc : documents_) {
         if (doc->status().busy || !doc->status().warning.isEmpty() || doc->pending()) { closeRequested_ = true; event->ignore(); return; }
     }
     if (!closeApproved_ && transitionPending_) {
         closeRequested_ = true; event->ignore(); return;
+    }
+    // Before anything irreversible: the helper must be ready, or the user chooses to quit without updating.
+    if (!closeApproved_ && updater_ && !skipUpdateOnExit_ && updater_->installOnExit() && !updater_->prepared()) {
+        if (!updater_->preparing()) updater_->prepare();
+        event->ignore(); return;
     }
     closeApproved_ = true; cancelCredentials();
     closeAllSessions();
@@ -366,9 +378,9 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
     if (!sshWorkers_.isEmpty() || !vncWorkers_.isEmpty() || VncWorker::activeWorkers() != 0 || !sshTrustStopped_ || !appearanceStopped_) { event->ignore(); return; }
     if (files_) for (auto id : documentOrder_) files_->lock(id);
-    if (updater_ && updater_->ready() && autoUpdate_) {
+    if (updater_ && !skipUpdateOnExit_ && updater_->prepared() && updater_->installOnExit()) {
         QString error;
-        if (!updater_->install(relaunchAfterUpdate_, &error)) notification("Update not installed: " + error);
+        if (!updater_->commit(relaunchAfterUpdate_, &error)) notification("Update not installed: " + error);
     }
     event->accept();
 }
@@ -944,54 +956,113 @@ void MainWindow::deleteCommitted() {
 
 void MainWindow::setUpdateSource(const QUrl& source) { delete updateChecker_; updateChecker_ = new UpdateChecker(this, source); }
 void MainWindow::checkForUpdates() {
+    // The updater answers with the same release it downloads, so nothing is fetched twice.
+    if (updater_) {
+        // Repeated requests while one runs still show a single answer.
+        updateCheckRequested_ = true; updater_->checkNow(true); return;
+    }
     if (!updateChecker_) updateChecker_ = new UpdateChecker(this);
     if (updateChecker_->running()) return;
     connect(updateChecker_, &UpdateChecker::finished, this, [this](bool ok, const Updates::Release& latest, const QString& error) {
-        const auto current = Updates::currentVersion(); const QString releases = QString(Updates::Repository) + "/releases";
-        const auto link = [](const QString& url, const QString& text) { return "<a href=\"" + url.toHtmlEscaped() + "\">" + text.toHtmlEscaped() + "</a>"; };
-        QString text;
-        if (!ok) text = "Could not check for updates: " + error.toHtmlEscaped() + "<br>" + link(releases, releases);
-        else if (Updates::compareVersions(current, latest.version).value_or(0) < 0) {
-            text = "CMRemote " + latest.version.toHtmlEscaped() + " is available. You have " + current + ".<br>";
-            if (updater_ && Updates::installerFor(latest.assets, latest.version)) {
-                text += "It is downloading now and installs when CMRemote restarts or quits.<br>" + link(latest.url, "Release notes");
-                // An explicit check downloads even when automatic updates are off.
-                updater_->checkNow();
-            } else text += link(latest.url, "Download it from GitHub");
-        }
-        else text = "You have the latest version, CMRemote " + current + ".";
-        auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Check for Updates", text, QMessageBox::Ok, this);
-        dialog->setObjectName("updateDialog"); dialog->setProperty("latestVersion", ok ? latest.version : QString());
-        dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
-        dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);
-        if (auto* label = dialog->findChild<QLabel*>("qt_msgbox_label")) label->setOpenExternalLinks(true);
-        dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+        showUpdateCheck(ok, latest, error, false);
     }, Qt::SingleShotConnection);
     updateChecker_->check();
 }
+void MainWindow::showUpdateCheck(bool ok, const Updates::Release& latest, const QString& error, bool installable) {
+    if (closeApproved_) return;
+    const auto current = Updates::currentVersion(); const QString releases = QString(Updates::Repository) + "/releases";
+    const auto link = [](const QString& url, const QString& text) { return "<a href=\"" + url.toHtmlEscaped() + "\">" + text.toHtmlEscaped() + "</a>"; };
+    QString text;
+    if (!ok) text = "Could not check for updates: " + error.toHtmlEscaped() + "<br>" + link(releases, releases);
+    else if (Updates::compareVersions(current, latest.version).value_or(0) < 0) {
+        if (installable && updater_ && updater_->offered() && updater_->readyVersion() == latest.version) { promptUpdateInstall(latest.version, true); return; }
+        text = "CMRemote " + latest.version.toHtmlEscaped() + " is available. You have " + current + ".<br>";
+        if (installable) text += "It is downloading now. When it is ready, CMRemote asks whether to install it.<br>" + link(latest.url, "Release notes");
+        else {
+            if (updater_ && !updater_->installation().supported()) text += updater_->installation().reason.toHtmlEscaped() + "<br>";
+            text += link(latest.url, "Download it from GitHub");
+        }
+    }
+    else text = "You have the latest version, CMRemote " + current + ".";
+    auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Check for Updates", text, QMessageBox::Ok, this);
+    dialog->setObjectName("updateDialog"); dialog->setProperty("latestVersion", ok ? latest.version : QString());
+    dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
+    dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    if (auto* label = dialog->findChild<QLabel*>("qt_msgbox_label")) label->setOpenExternalLinks(true);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+}
 void MainWindow::enableAutomaticUpdates(const QString& dataDirectory) {
     if (updater_ || testMode_) return;
-    updater_ = new AutoUpdater(dataDirectory, this);
-    connect(updater_, &AutoUpdater::log, this, [this](const QString& text) { notification(text); });
-    connect(updater_, &AutoUpdater::readyToInstall, this, &MainWindow::promptUpdateInstall);
-    updater_->setEnabled(autoUpdate_);
+    AutoUpdater::Options options; options.dataDirectory = dataDirectory;
+    attachUpdater(new AutoUpdater(std::move(options), this));
 }
-void MainWindow::promptUpdateInstall(const QString& version) {
-    if (closeApproved_ || updatePrompted_) return;
-    updatePrompted_ = true;
-    auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Update ready",
-        "CMRemote " + version + " has been downloaded and verified.\n\nRestart now to install it, or keep working and it installs when you quit.",
-        QMessageBox::NoButton, this);
+void MainWindow::attachUpdater(AutoUpdater* updater) {
+    if (updater_ || !updater) return;
+    updater_ = updater; updater->setParent(this);
+    connect(updater_, &AutoUpdater::log, this, [this](const QString& text) { notification(text); });
+    connect(updater_, &AutoUpdater::readyToInstall, this, [this](const QString& version) { promptUpdateInstall(version, false); });
+    connect(updater_, &AutoUpdater::preparationFinished, this, &MainWindow::finishUpdatePreparation);
+    connect(updater_, &AutoUpdater::checked, this, [this](bool ok, const Updates::Release& latest, const QString& error, bool installable) {
+        if (std::exchange(updateCheckRequested_, false)) showUpdateCheck(ok, latest, error, installable);
+    });
+    if (updatePreferenceKnown_) updater_->setAutomatic(autoUpdate_);
+}
+void MainWindow::promptUpdateInstall(const QString& version, bool again) {
+    // Once per version and run unless the user asks; nothing installs until the user chooses.
+    if (closeApproved_ || !updater_ || !updater_->offered() || updater_->readyVersion() != version || (!again && promptedUpdate_ == version)) return;
+    promptedUpdate_ = version;
+    if (auto* previous = findChild<QMessageBox*>("updateReady")) previous->close();
+    QString text = "CMRemote " + version + " has been downloaded and verified. Install it?\n\n"
+        "Restart & Update installs it now. Install When I Quit installs it the next time you quit. "
+        "Not Now asks again next time CMRemote starts; Skip This Version waits for a newer one.";
+    if (sessionCount()) text += "\n\nRestarting disconnects your open sessions.";
+    auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Update ready", text, QMessageBox::NoButton, this);
     dialog->setObjectName("updateReady"); dialog->setTextFormat(Qt::PlainText);
     dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
-    auto* restart = dialog->addButton("Restart Now", QMessageBox::AcceptRole); dialog->addButton("When I Quit", QMessageBox::RejectRole);
-    dialog->setDefaultButton(restart); dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::NonModal);
-    connect(dialog, &QMessageBox::buttonClicked, this, [this, restart](QAbstractButton* button) {
-        if (button != restart) return;
-        relaunchAfterUpdate_ = true; notification("Update: restarting to install CMRemote " + updater_->readyVersion() + ".");
+    auto* restart = dialog->addButton("Restart && Update", QMessageBox::AcceptRole);
+    auto* onQuit = dialog->addButton("Install When I Quit", QMessageBox::AcceptRole);
+    auto* skip = dialog->addButton("Skip This Version", QMessageBox::DestructiveRole);
+    auto* later = dialog->addButton("Not Now", QMessageBox::RejectRole);
+    // Enter, Escape or closing the dialog installs nothing.
+    dialog->setDefaultButton(later); dialog->setEscapeButton(later);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::NonModal);
+    // finished also covers Escape and closing the window: both mean Not Now.
+    connect(dialog, &QDialog::finished, this, [this, dialog, restart, onQuit, skip, version] {
+        auto* button = dialog->clickedButton();
+        if (closeApproved_ || !updater_ || updater_->readyVersion() != version) return;
+        if (button == skip) { updater_->skip(); return; }
+        if (button != restart && button != onQuit) { updater_->decline(); return; }
+        updater_->accept(); skipUpdateOnExit_ = false;
+        if (button != restart || !updater_->installOnExit()) return;
+        relaunchAfterUpdate_ = true;
+        notification("Update: restarting to install CMRemote " + version + ".");
         QTimer::singleShot(0, this, [this] { close(); });
     });
     dialog->show();
+}
+void MainWindow::finishUpdatePreparation(bool ok, const QString& error) {
+    if (closeApproved_) return;
+    if (ok) { QTimer::singleShot(0, this, [this] { close(); }); return; }
+    const bool restart = std::exchange(relaunchAfterUpdate_, false);
+    if (restart) {
+        // Restart & Update could not be prepared: CMRemote stays open and usable.
+        auto* dialog = new QMessageBox(QMessageBox::Warning, "Update not installed",
+            "CMRemote could not prepare the update: " + error + "\n\nCMRemote stays open.", QMessageBox::Ok, this);
+        dialog->setObjectName("updatePrepareFailed"); dialog->setTextFormat(Qt::PlainText);
+        dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+        return;
+    }
+    auto* dialog = new QMessageBox(QMessageBox::Warning, "Update not installed",
+        "CMRemote could not prepare the update: " + error + "\n\nQuit without installing it, or cancel and keep working?", QMessageBox::Cancel, this);
+    dialog->setObjectName("updatePrepareFailed"); dialog->setTextFormat(Qt::PlainText);
+    auto* quit = dialog->addButton("Quit Without Updating", QMessageBox::AcceptRole);
+    dialog->setDefaultButton(QMessageBox::Cancel); dialog->setEscapeButton(QMessageBox::Cancel);
+    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->setWindowModality(Qt::WindowModal);
+    connect(dialog, &QMessageBox::buttonClicked, this, [this, quit](QAbstractButton* button) {
+        if (button != quit) return;
+        skipUpdateOnExit_ = true; QTimer::singleShot(0, this, [this] { close(); });
+    });
+    dialog->open();
 }
 namespace {
 // Draws over the transparent title bar: the window title centered like a native

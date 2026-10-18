@@ -41,13 +41,18 @@ std::optional<Release> parseLatestRelease(const QByteArray& json) {
         // Only this repository's release downloads; a name never names a directory.
         if (name.isEmpty() || name.contains('/') || name.contains('\\') || name.startsWith('.') || !link.startsWith(downloads)) continue;
         const auto match = digest.match(asset.value("digest").toString());
-        release.assets.append({name, link, match.hasMatch() ? match.captured(1).toLower() : QString()});
+        release.assets.append({name, link, match.hasMatch() ? match.captured(1).toLower() : QString(), qMax<qint64>(0, asset.value("size").toInteger())});
     }
     return release;
 }
 }
 
-UpdateChecker::UpdateChecker(QObject* parent, QUrl source) : QObject(parent), source_(std::move(source)), network_(new QNetworkAccessManager(this)) {}
+UpdateChecker::UpdateChecker(QObject* parent, QUrl source, QNetworkAccessManager* network)
+    : QObject(parent), source_(std::move(source)), network_(network ? network : new QNetworkAccessManager(this)) {}
+UpdateChecker::~UpdateChecker() {
+    // Abandon the request, also when the manager is shared and outlives this checker.
+    if (reply_) { reply_->disconnect(this); reply_->abort(); reply_->deleteLater(); }
+}
 void UpdateChecker::check() {
     if (reply_) return;
     QNetworkRequest request(source_);

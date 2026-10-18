@@ -13,7 +13,7 @@ inline constexpr auto LatestReleaseApi = "https://api.github.com/repos/Crayjones
 QString currentVersion();
 // Dotted numeric comparison; a leading "v" and any "-suffix" are ignored. Unparseable → nullopt.
 std::optional<int> compareVersions(const QString& left, const QString& right);
-struct Asset { QString name, url, sha256; }; // sha256: lowercase hex from GitHub's asset digest, if published
+struct Asset { QString name, url, sha256; qint64 size = 0; }; // sha256: lowercase hex from GitHub's asset digest, if published; size 0: unknown
 struct Release { QString version, url; QList<Asset> assets; };
 // GitHub's "latest release" JSON: tag_name, html_url and assets (release downloads only).
 std::optional<Release> parseLatestRelease(const QByteArray& json);
@@ -25,7 +25,9 @@ Q_DECLARE_METATYPE(Updates::Release)
 class UpdateChecker : public QObject {
     Q_OBJECT
 public:
-    explicit UpdateChecker(QObject* parent = nullptr, QUrl source = QUrl(Updates::LatestReleaseApi));
+    // network: shared manager (tests redirect requests to local files); owned when null.
+    explicit UpdateChecker(QObject* parent = nullptr, QUrl source = QUrl(Updates::LatestReleaseApi), QNetworkAccessManager* network = nullptr);
+    ~UpdateChecker() override;
     void check();
     bool running() const { return reply_; }
 signals:

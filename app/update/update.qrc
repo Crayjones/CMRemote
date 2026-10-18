@@ -1,0 +1,7 @@
+<RCC>
+ <qresource prefix="/update">
+  <file>common.sh</file>
+  <file>install-macos.sh</file>
+  <file>install-appimage.sh</file>
+ </qresource>
+</RCC>

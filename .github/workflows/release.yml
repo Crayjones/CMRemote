@@ -87,7 +87,7 @@ jobs:
         env:
           RM_TARGET_ARCH: ${{ matrix.target }}
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
-        run: python3 scripts/project.py package --release --artifact-name "$NAME"
+        run: python3 scripts/project.py package --release --artifact-name "$NAME" --update-channel github
       - name: Check the package on a clean profile
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
@@ -119,7 +119,7 @@ jobs:
       - name: Package
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-linux-x86_64
-        run: python3 scripts/docker.py package --release --artifact-name "$NAME" --arch amd64
+        run: python3 scripts/docker.py package --release --artifact-name "$NAME" --update-channel github --arch amd64
       - name: AppImage and Flatpak
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-linux-x86_64
@@ -150,7 +150,7 @@ jobs:
       - name: Package
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-windows-x64
-        run: python3 scripts/docker.py windows --arch amd64 python3 scripts/project.py package --release --artifact-name "$NAME"
+        run: python3 scripts/docker.py windows --arch amd64 python3 scripts/project.py package --release --artifact-name "$NAME" --update-channel github
       - name: Installer
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-windows-x64

@@ -43,7 +43,7 @@ add_library(rust_core STATIC IMPORTED GLOBAL)
 set_target_properties(rust_core PROPERTIES IMPORTED_LOCATION "${RUST_LIBRARY}")
 file(MAKE_DIRECTORY "${CARGO_TARGET}/cxxbridge")
 add_library(rm_frontend STATIC
-    app/Branding.cpp app/Branding.h app/ui/branding.qrc app/UpdateCheck.cpp app/UpdateCheck.h app/AutoUpdate.cpp app/AutoUpdate.h app/OpenH264.cpp app/OpenH264.h
+    app/Branding.cpp app/Branding.h app/ui/branding.qrc app/UpdateCheck.cpp app/UpdateCheck.h app/AutoUpdate.cpp app/AutoUpdate.h app/update/update.qrc app/OpenH264.cpp app/OpenH264.h
     app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp app/MainWindow.h app/ui/test.ui app/ui/preview-icons.qrc
     app/ProfileEditor.cpp app/ProfileEditor.h app/PropertyDelegate.cpp app/PropertyDelegate.h app/RdpTarget.cpp app/RdpTarget.h
     app/PointerCapture.cpp app/PointerCapture.h
@@ -153,6 +153,11 @@ if(RM_BUILD_TESTS)
     target_link_libraries(session_clipboard_test PRIVATE rm_frontend Qt6::Test)
     add_test(NAME session_clipboard COMMAND session_clipboard_test)
     set_tests_properties(session_clipboard PROPERTIES TIMEOUT 30)
+    # Fixture releases and disposable install targets only; never the network or a real installation.
+    add_executable(auto_update_test tests/auto_update.cpp)
+    target_link_libraries(auto_update_test PRIVATE rm_frontend Qt6::Test)
+    add_test(NAME auto_update COMMAND auto_update_test)
+    set_tests_properties(auto_update PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
     add_executable(desktop_updates_test tests/desktop_updates.cpp)
     target_link_libraries(desktop_updates_test PRIVATE rm_frontend Qt6::Test)
     add_test(NAME desktop_updates COMMAND desktop_updates_test)
@@ -248,7 +253,7 @@ if(RM_BUILD_TESTS)
         # Explicit opt-in runner supplies an owned server and ephemeral credentials.
     endif()
     if(APPLE)
-        foreach(target vnc_integration vnc_sessions_test terminal_test terminal_appearance_test ssh_integration ssh_sessions_test qt_smoke property_grid_test document_shell_test xml_storage_test connection_moves_test multiple_files_test password_editing_test rdp_integration rdp_session_integration performance_client)
+        foreach(target auto_update_test vnc_integration vnc_sessions_test terminal_test terminal_appearance_test ssh_integration ssh_sessions_test qt_smoke property_grid_test document_shell_test xml_storage_test connection_moves_test multiple_files_test password_editing_test rdp_integration rdp_session_integration performance_client)
             if(TARGET ${target})
                 target_sources(${target} PRIVATE tests/NativeTestWindow.mm)
                 target_link_libraries(${target} PRIVATE "-framework AppKit")

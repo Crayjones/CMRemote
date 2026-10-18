@@ -148,3 +148,35 @@ class Versioning(unittest.TestCase):
         template = (ROOT / 'cmake/Version.h.in').read_text()
         self.assertIn('#define RM_VERSION "@PROJECT_VERSION@"', template)
         self.assertIn('configure_file(cmake/Version.h.in', (ROOT / 'CMakeLists.txt').read_text())
+
+
+class SelfUpdate(unittest.TestCase):
+    def test_setup_moves_the_installed_version_aside_and_rolls_back(self):
+        script = module('release').NSIS_SCRIPT
+        install = script[script.index('Section "Install"'):]
+        install = install[:install.index('SectionEnd')]
+        copy = install.index('File /r')
+        # Never delete before copying: the installed version is moved aside, restored on failure.
+        self.assertLess(install.index('Rename "$INSTDIR" "$INSTDIR.previous"'), copy)
+        self.assertEqual(install[:copy].count('RMDir /r "$INSTDIR"'), 1)
+        self.assertIn('IfFileExists "$INSTDIR.previous\\RemoteManager.exe" 0 staged\n    RMDir /r "$INSTDIR"', install)
+        # A chosen folder without CMRemote in it is never moved or removed.
+        self.assertIn('IfFileExists "$INSTDIR\\RemoteManager.exe" 0 copy', install)
+        self.assertTrue(install.rstrip().endswith('RMDir /r "$INSTDIR.previous"'))
+        failed = script[script.index('Function .onInstFailed'):]
+        failed = failed[:failed.index('FunctionEnd')]
+        self.assertIn('Rename "$INSTDIR.previous" "$INSTDIR"', failed)
+
+    def test_only_published_release_packages_update_themselves(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        self.assertEqual(workflow.count('--artifact-name "$NAME" --update-channel github'), 3)
+        ci = (ROOT / '.github/workflows/ci.yml').read_text()
+        self.assertNotIn('update-channel', ci)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX shell helpers')
+    def test_appimage_helper_against_disposable_fixtures(self):
+        import subprocess
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/test-auto-update.py'), '--suite', 'appimage'],
+                                capture_output=True, text=True, timeout=300)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('canceled quit / crash before commit', result.stdout)

@@ -16,6 +16,7 @@
 #include "ConnectionXml.h"
 #include "ExternalTools.h"
 #include "ApplicationPreferences.h"
+#include "UpdateCheck.h"
 #include <memory>
 #include <functional>
 namespace Ui { class MainWindow; }
@@ -55,6 +56,8 @@ public:
     void setUpdateSource(const QUrl& source);
     // Packaged application only: check, download and install releases automatically.
     void enableAutomaticUpdates(const QString& dataDirectory);
+    // Takes ownership; tests supply an updater with fixture releases and installation.
+    void attachUpdater(class AutoUpdater* updater);
     DocumentId openConnectionFile(const QString& path, bool createNew = false);
     QList<DocumentId> connectionFiles() const { return documentOrder_; }
     DocumentId selectedDocument() const;
@@ -269,8 +272,11 @@ private:
     QString theme_ = "light", lightStyleSheet_;
     void applyThemeStyle();
     class AutoUpdater* updater_ = nullptr;
-    bool updatePrompted_ = false, relaunchAfterUpdate_ = false;
-    void promptUpdateInstall(const QString& version);
+    QString promptedUpdate_;
+    bool relaunchAfterUpdate_ = false, skipUpdateOnExit_ = false, updatePreferenceKnown_ = false, updateCheckRequested_ = false;
+    void promptUpdateInstall(const QString& version, bool again);
+    void finishUpdatePreparation(bool ok, const QString& error);
+    void showUpdateCheck(bool ok, const Updates::Release& latest, const QString& error, bool installable);
     // macOS: Quick Connect sits in the title bar beside the window buttons.
     void placeQuickConnectInTitleBar();
     void fitTitleBar();

@@ -857,7 +857,7 @@ private slots:
         QCOMPARE(Updates::checksumFor(QByteArray(digest.toLatin1() + "  CMRemote-0.3.0-windows-x64-setup.exe\n"), "CMRemote-0.3.0-windows-x64-setup.exe"), digest);
         QVERIFY(Updates::checksumFor("bad  CMRemote.exe\n", "CMRemote.exe").isEmpty());
         // A development build cannot replace itself.
-        QVERIFY(!Updates::installerFor(withAssets->assets, "0.3.0"));
+        QVERIFY(!Updates::installerFor(withAssets->assets, "0.3.0", Updates::detectInstallation()));
     }
     void quickConnectPortFollowsProtocolDefault() {
         QCOMPARE(followDefaultPort("host:3389", "rdp", "ssh"), QString("host:22"));

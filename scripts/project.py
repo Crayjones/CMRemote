@@ -25,8 +25,10 @@ def main():
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--artifact-name', help='Package under this name (package command)')
+    parser.add_argument('--update-channel', choices=['github'], help='Mark a published release package that updates itself (Release workflow only)')
     parser.add_argument('--release', action='store_true', help='Optimized Release build in its own build directory (published installers use this)')
     args = parser.parse_args()
+    if args.update_channel and args.command != 'package': parser.error('--update-channel requires package')
     if args.target and (args.command != 'build' or any(value.startswith('-') or not value.replace('_', '').replace('-', '').isascii() or not value.replace('_', '').replace('-', '').isalnum() for value in args.target)):
         parser.error('--target requires build and a plain CMake target name')
     env = environment(); build = Path(env['RM_BUILD_DIR']) / ('app-mock' if args.mock_only else 'app-release' if args.release else 'app')
@@ -61,7 +63,8 @@ def main():
         # upstream-only license files; container images do not keep the bootstrap cache.
         run('cargo','fetch','--locked')
         fetch_notices(env['RM_PLATFORM'])
-        run(sys.executable,ROOT / 'scripts/package.py',*(['--artifact-name',args.artifact_name] if args.artifact_name else []))
+        run(sys.executable,ROOT / 'scripts/package.py',*(['--artifact-name',args.artifact_name] if args.artifact_name else []),
+            *(['--update-channel',args.update_channel] if args.update_channel else []))
 
 
 if __name__ == '__main__': main()

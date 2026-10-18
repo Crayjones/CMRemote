@@ -50,8 +50,8 @@
      </layout></widget>
      <widget class="QWidget" name="updatesPage"><layout class="QVBoxLayout" name="updatesLayout">
       <item><widget class="QLabel" name="updatesTitle"><property name="text"><string>Updates</string></property></widget></item>
-      <item><widget class="QCheckBox" name="autoUpdate"><property name="text"><string>Automatically download and install new versions</string></property></widget></item>
-      <item><widget class="QLabel" name="autoUpdateHelp"><property name="text"><string>CMRemote checks GitHub at startup and once a day. A verified update is downloaded in the background and installed when you restart or quit.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QCheckBox" name="autoUpdate"><property name="text"><string>Automatically check for and download new versions</string></property></widget></item>
+      <item><widget class="QLabel" name="autoUpdateHelp"><property name="text"><string>CMRemote checks GitHub at startup and once a day. A verified update downloads in the background, then CMRemote asks whether to install it now, when you quit, later, or not at all. Nothing installs or restarts without your choice. The macOS app and the Linux AppImage install updates themselves; other copies link to the download.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
       <item><spacer name="updatesSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
      </layout></widget>
     </widget></item>
