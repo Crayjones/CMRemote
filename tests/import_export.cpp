@@ -109,6 +109,8 @@ private slots:
         window.selectConnectionFile(window.selectedDocument());
         ExportOptions everything; const auto xmlPath = dir.filePath("export.xml");
         window.exportConnections(xmlPath, everything); QTRY_VERIFY(QFile::exists(xmlPath));
+        // The export file is committed before the store finishes the operation; a second export while busy is rejected.
+        WAIT_STORE(window); QVERIFY2(window.lastError().isEmpty(), qPrintable(window.lastError()));
         QFile exported(xmlPath); QVERIFY(exported.open(QIODevice::ReadOnly)); const auto bytes = exported.readAll();
         QVERIFY(!bytes.contains("RmFileId")); QVERIFY(!bytes.contains("RmCredentialBindings"));
         const auto result = read(bytes); QVERIFY(result); QCOMPARE(result->profiles.size(), 3);
@@ -117,7 +119,8 @@ private slots:
 
         ExportOptions csvOptions; csvOptions.format = ExportOptions::Format::Csv; csvOptions.password = false; csvOptions.domain = false;
         const auto csvPath = dir.filePath("export.csv");
-        window.exportConnections(csvPath, csvOptions); QTRY_VERIFY(QFile::exists(csvPath));
+        window.exportConnections(csvPath, csvOptions); WAIT_STORE(window);
+        QVERIFY2(window.lastError().isEmpty(), qPrintable(window.lastError())); QVERIFY(QFile::exists(csvPath));
         QFile csvOut(csvPath); QVERIFY(csvOut.open(QIODevice::ReadOnly)); const auto csvText = QString::fromUtf8(csvOut.readAll());
         QVERIFY(csvText.startsWith("Name;Id;Parent;NodeType;Description;Icon;Panel;Username;Password;Domain;Hostname;Port;Protocol"));
         QVERIFY(csvText.contains("alpha.example")); QVERIFY(csvText.contains("alice")); QVERIFY(!csvText.contains("pa55")); QVERIFY(!csvText.contains("CORP"));
