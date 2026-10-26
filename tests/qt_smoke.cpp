@@ -41,6 +41,7 @@ bool triggerNativePreferencesShortcut();
 #include <QLayout>
 #include <QLineEdit>
 #include <QSignalSpy>
+#include <QWheelEvent>
 #include <QKeyEvent>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -1943,6 +1944,14 @@ private slots:
         QTest::mousePress(&view,Qt::RightButton,Qt::NoModifier,view.rect().center());
         QCoreApplication::sendEvent(&view,&out);
         QCOMPARE(pointer.last().at(0).value<quint16>(),quint16(0x2000));
+        const auto wheel = [&](QPoint angle) {
+            const QPointF at = view.rect().center(); QWheelEvent event(at,view.mapToGlobal(at),QPoint(),angle,Qt::NoButton,Qt::NoModifier,Qt::ScrollUpdate,false);
+            QCoreApplication::sendEvent(&view,&event);
+        };
+        pointer.clear(); wheel(QPoint(0,-8));
+        QCOMPARE(pointer.size(),1); QCOMPARE(pointer.last().at(0).value<quint16>(),quint16(0x0200|0x0100|(quint16(-8)&0x00ff)));
+        wheel(QPoint(0,0)); wheel(QPoint(6,0)); QCOMPARE(pointer.size(),1);
+        wheel(QPoint(0,120)); QCOMPARE(pointer.size(),2); QCOMPARE(pointer.last().at(0).value<quint16>(),quint16(0x0200|120));
     }
 #ifdef RM_WITH_RDP
     void framebufferCopiesSurviveResizeAndFree() {

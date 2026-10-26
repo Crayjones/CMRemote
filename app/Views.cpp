@@ -475,8 +475,9 @@ void DesktopView::mousePressEvent(QMouseEvent* e) { setFocus(); pointer(e, true,
 void DesktopView::mouseReleaseEvent(QMouseEvent* e) { pointer(e, false, true); }
 void DesktopView::wheelEvent(QWheelEvent* e) {
     if (mock_) emit mockInput(QString("Wheel %1").arg(e->angleDelta().y()));
-    else {
-        int delta = std::clamp(e->angleDelta().y(), -255, 255);
+    else if (const int delta = std::clamp(e->angleDelta().y(), -255, 255)) {
+        // Zero deltas (trackpad phase/momentum ends, horizontal-only motion) must not be sent:
+        // xrdp ignores the rotation value and treats any non-negative wheel PDU as scroll up.
         emit pointerInput(quint16(0x0200 | (delta < 0 ? 0x0100 : 0) | (quint16(delta) & 0x00ff)), quint16(lastPointer_.x()), quint16(lastPointer_.y()));
     }
     e->accept();
