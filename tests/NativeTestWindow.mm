@@ -42,6 +42,16 @@ void deminiaturizeNative(QWidget* widget) {
     [view.window deminiaturize:nil];
 }
 
+const void* nativeWindow(QWidget* widget) {
+    if (QGuiApplication::platformName() != "cocoa") return nullptr;
+    return reinterpret_cast<NSView*>(widget->winId()).window;
+}
+
+bool isNativeTitleHidden(QWidget* widget) {
+    if (QGuiApplication::platformName() != "cocoa") return false;
+    return reinterpret_cast<NSView*>(widget->winId()).window.titleVisibility == NSWindowTitleHidden;
+}
+
 bool screenCaptureAllowed() {
     // Preflight never shows the Screen Recording prompt; capturing without access would.
     return QGuiApplication::platformName() != "cocoa" || CGPreflightScreenCaptureAccess();

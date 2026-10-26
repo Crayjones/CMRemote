@@ -17,6 +17,8 @@ bool isNativeFullScreen(QWidget* widget);
 bool isNativeVisible(QWidget* widget);
 bool isNativeMiniaturized(QWidget* widget);
 void deminiaturizeNative(QWidget* widget);
+const void* nativeWindow(QWidget* widget);
+bool isNativeTitleHidden(QWidget* widget);
 // False on macOS until Screen Recording access was granted; never prompts.
 bool screenCaptureAllowed();
 #else

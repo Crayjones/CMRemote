@@ -62,6 +62,8 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     clipboardEndpoint_ = clipboard ? std::move(clipboard) : systemClipboardEndpoint();
     static const bool resources = [] { Q_INIT_RESOURCE(preview_icons); return true; }();
     Q_UNUSED(resources);
+    // setupUi already creates the native window.
+    DesktopView::prepareWindow(this);
     ui_->setupUi(this);
 #ifndef Q_OS_MACOS
     ui_->menubar->setNativeMenuBar(false);

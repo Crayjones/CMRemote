@@ -2,6 +2,7 @@
 #include "ThemeIcons.h"
 #include "Branding.h"
 #include "SessionFullscreenController.h"
+#include "Views.h"
 #include <QCloseEvent>
 #include <QMenu>
 #include <QTabBar>
@@ -13,6 +14,7 @@ PanelWindow::PanelWindow(int number, QWidget* parent) : QMainWindow(parent) {
     Branding::initialize();
     setObjectName("panelWindow"); setWindowTitle(QString("CMRemote — Window %1").arg(number));
     setWindowIcon(Branding::applicationIcon());
+    DesktopView::prepareWindow(this);
     auto* central = new QWidget(this); auto* layout = new QVBoxLayout(central);
     layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(0);
     groups_ = new QTabWidget(central); groups_->setObjectName("windowGroupTabs"); groups_->setDocumentMode(true); groups_->setMovable(true);

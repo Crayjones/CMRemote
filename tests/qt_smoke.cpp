@@ -378,6 +378,19 @@ private slots:
         full->findChild<QToolButton*>("exitSessionFullscreen")->click(); QTRY_VERIFY(!w.sessionFullscreenWindow()); QVERIFY(w.isFullScreen());
         w.findChild<QAction*>("actionFullscreen")->setChecked(false); QTRY_VERIFY(!w.isFullScreen()); QTRY_COMPARE(w.geometry(), geometry);
     }
+    void firstSessionKeepsNativeWindowAndHiddenTitle() {
+#ifdef Q_OS_MACOS
+        if (QGuiApplication::platformName() != "cocoa") QSKIP("AppKit requires Cocoa");
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(900, 650); w.show(); WAIT_STORE(w);
+        QVERIFY(QTest::qWaitForWindowExposed(&w));
+        const auto* before = nativeWindow(&w); QVERIFY(before); QVERIFY(isNativeTitleHidden(&w));
+        // The first QRhiWidget must not make Qt replace the NSWindow (flicker, title text shown over Quick Connect).
+        w.quickConnect("first-session.invalid", true); QVERIFY(w.findChild<DesktopView*>("desktopView")); QTest::qWait(300);
+        QCOMPARE(nativeWindow(&w), before); QVERIFY(isNativeTitleHidden(&w));
+#else
+        QSKIP("AppKit requires macOS");
+#endif
+    }
     void nativeToggleExitsSessionFullscreen() {
 #ifdef Q_OS_MACOS
         if (QGuiApplication::platformName() != "cocoa") QSKIP("Native View requires Cocoa");

@@ -22,6 +22,17 @@
 #include <rhi/qshader.h>
 #include <algorithm>
 
+void DesktopView::prepareWindow(QWidget* window) {
+#ifdef Q_OS_MACOS
+    // Qt creates a window for GPU drawing only if it already contains a QRhiWidget.
+    // Otherwise the first session swaps in a new NSWindow, which flickers the window
+    // and drops native settings such as the hidden title.
+    auto* placeholder = new QRhiWidget(window); placeholder->setObjectName("rhiWindowPlaceholder");
+    placeholder->setFixedSize(0, 0); placeholder->hide();
+#else
+    Q_UNUSED(window);
+#endif
+}
 DesktopView::DesktopView(bool mock, QWidget* parent) : QRhiWidget(parent), mock_(mock) {
     setFocusPolicy(Qt::StrongFocus);
     // RDP sends physical scancodes; the remote layout composes text. Without an

@@ -27,6 +27,8 @@ class DesktopView : public QRhiWidget {
 public:
     explicit DesktopView(bool mock, QWidget* parent = nullptr);
     ~DesktopView() override;
+    // Call before the window is first shown, so the first session does not replace its native window.
+    static void prepareWindow(QWidget* window);
     void setFrame(QImage frame);
     void setFrame(QImage frame, FrameStamp stamp);
     bool applyUpdate(const DesktopUpdate& update);
