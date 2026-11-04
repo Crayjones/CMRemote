@@ -288,6 +288,8 @@ private:
     int titleBarHeight_ = 0;
     void setConfigMode(bool defaults, bool inheritance);
     ConnectionDefaults defaults_;
+    bool clipboardDefault_ = true;
+    void applyClipboardDefault();
     bool preferencesReady_ = false;
     ApplicationPreferences* preferences_ = nullptr;
     OpenFileList* openFiles_ = nullptr;

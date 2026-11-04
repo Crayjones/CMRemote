@@ -290,8 +290,16 @@ void MainWindow::setConfigMode(bool defaults, bool inheritance) {
         updateActions();
     });
 }
+// Connections inherit Clipboard up to Settings unless they or a folder set it.
+void MainWindow::applyClipboardDefault() {
+    const bool value = defaults_.effective().value("clipboard").toBool();
+    if (value == clipboardDefault_) return;
+    clipboardDefault_ = value; core_->set_clipboard_default(value);
+    for (const auto& doc : documents_) doc->setClipboardDefault(value);
+    rebuildFiles();
+}
 void MainWindow::applyPreferences(PreferenceValues values) {
-    defaults_ = values.defaults;
+    defaults_ = values.defaults; applyClipboardDefault();
     openh264Enabled_ = values.openh264;
     if (openh264_) openh264_->setEnabled(values.openh264);
     editor_->setCategorized(values.categorized); ui_->actionShowHelp->setChecked(values.propertyHelp);
@@ -633,7 +641,7 @@ void MainWindow::saveDraft(std::function<void()> next) {
         updateActions();
         preferences_->save(values, [this, next = std::move(next)](PreferenceReply reply) {
             if (!reply.result.ok) { autoSaveFailed(reply.result.error); return; }
-            defaults_ = reply.values.defaults; editor_->acceptDefaults(); lastError_.clear();
+            defaults_ = reply.values.defaults; editor_->acceptDefaults(); lastError_.clear(); applyClipboardDefault();
             notification("Connection defaults saved");
             autoSaveFinished(false);
             if (!reply.result.warning.isEmpty()) fail(reply.result.warning);

@@ -576,6 +576,11 @@ bool project(const Node& parent, std::vector<const Node*>& path, QJsonArray& pro
             auto localReasons = QJsonArray(); const auto local = fieldValue(node, field, localReasons);
             fieldValue(owner, field, reasons);
             overrides.insert(field.key, &owner == &node ? local : QJsonValue(QJsonValue::Null));
+            // A top-level item that inherits Clipboard has no parent to take it from; leave it
+            // unset so the application's Settings value applies (other fields keep native defaults).
+            bool inherits = false;
+            if (path.size() == 1 && QString::fromLatin1(field.key) == "clipboard" && boolean(node.attribute(inheritanceFlag(node, field)).trimmed(), inherits) && inherits)
+                overrides.remove(QString::fromLatin1(field.key));
         }
         sanitizeRdpSecurity(overrides, unsupported, protocol == "rdp");
         criticalOptions(path, protocol, unsupported);

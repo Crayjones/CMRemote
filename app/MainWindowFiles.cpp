@@ -163,6 +163,7 @@ DocumentId MainWindow::openConnectionFile(const QString& path, bool createNew) {
         if (prompt) QTimer::singleShot(0, this, [this, id] { promptFileUnlock(id); });
     }, createNew);
     auto doc = std::make_shared<DocumentContext>(id); if (const auto status = files_->status(id)) doc->updateStatus(*status);
+    doc->setClipboardDefault(clipboardDefault_);
     documents_.insert(id, doc); documentOrder_.append(id); rebuildFiles();
     if (!editor_->dirty() && !autoSaveInFlight_) selectConnectionFile(id);
     return id;

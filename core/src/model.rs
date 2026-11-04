@@ -132,7 +132,7 @@ pub struct Overrides {
     pub gateway_credentials: Option<GatewayCredentials>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sound: Option<Sound>,
-    // Text clipboard sharing; mRemoteNG RedirectClipboard. Off unless chosen.
+    // Text clipboard sharing; mRemoteNG RedirectClipboard. Unset everywhere in the chain: the Settings value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -373,7 +373,9 @@ impl Document {
         Ok(())
     }
 
-    pub fn effective(&self, id: &str) -> Result<Effective, String> {
+    pub fn effective(&self, id: &str) -> Result<Effective, String> { self.effective_with(id, true) }
+    // clipboard_default: the application's setting, used when no profile in the chain sets Clipboard.
+    pub fn effective_with(&self, id: &str, clipboard_default: bool) -> Result<Effective, String> {
         let unsupported = self.get(id)?.native.as_ref().map(|n| n.unsupported.clone()).unwrap_or_default();
         let mut chain = Vec::new();
         let mut current = Some(id);
@@ -414,7 +416,7 @@ impl Document {
             load_balance_info: overrides.load_balance_info.unwrap_or_default(), gateway_usage: overrides.gateway_usage.unwrap_or_default(),
             gateway_host: overrides.gateway_host.unwrap_or_default(), gateway_port: overrides.gateway_port.unwrap_or(443),
             gateway_username: overrides.gateway_username.unwrap_or_default(), gateway_domain: overrides.gateway_domain.unwrap_or_default(),
-            gateway_credentials: overrides.gateway_credentials.unwrap_or_default(), sound: overrides.sound.unwrap_or_default(), clipboard: overrides.clipboard.unwrap_or(false),
+            gateway_credentials: overrides.gateway_credentials.unwrap_or_default(), sound: overrides.sound.unwrap_or_default(), clipboard: overrides.clipboard.unwrap_or(clipboard_default),
             ssh_auth: overrides.ssh_auth.unwrap_or_default(), ssh_key_path: overrides.ssh_key_path.unwrap_or_default(), view_only: overrides.view_only.unwrap_or(false), sources, unsupported,
         })
     }

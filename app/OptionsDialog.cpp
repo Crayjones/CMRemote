@@ -48,7 +48,7 @@ PreferenceValues OptionsDialog::read() const {
     draft.quickConnect = ui_->quickConnect->isChecked(); draft.lockToolbars = ui_->lockToolbars->isChecked();
     draft.openh264 = ui_->openh264->isChecked(); draft.showPanels = ui_->showPanels->isChecked();
     draft.commandAsControl = ui_->commandAsControl->isChecked(); draft.autoUpdate = ui_->autoUpdate->isChecked();
-    // Same value as Config's connection defaults; untouched defaults stay unwritten.
+    // Stored with the connection defaults; connections that never set Clipboard follow it.
     if (ui_->clipboard->isChecked() != values_.defaults.effective().value("clipboard").toBool()) draft.defaults.values["clipboard"] = ui_->clipboard->isChecked();
     return draft;
 }

@@ -13,6 +13,7 @@ DocumentContext::DocumentContext(DocumentId id) : id_(id), core_(rm::detached_co
     assertGui(); Q_ASSERT(id.valid()); status_.id = id;
 }
 void DocumentContext::assertGui() const { Q_ASSERT(QCoreApplication::instance() && QThread::currentThread() == QCoreApplication::instance()->thread()); }
+void DocumentContext::setClipboardDefault(bool value) { assertGui(); core_->set_clipboard_default(value); if (loaded_) refresh(); }
 rm::Core& DocumentContext::core() { assertGui(); return *core_; }
 const rm::Core& DocumentContext::core() const { assertGui(); return *core_; }
 bool DocumentContext::canWrite() const {

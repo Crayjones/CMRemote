@@ -17,11 +17,12 @@ pub struct Core {
     loaded: bool,
     pending: Option<(String, Document)>,
     sessions: HashMap<String, Session>,
+    clipboard_default: bool,
 }
 
 impl Core {
     pub fn detached() -> Self {
-        Self { document: Document::default(), loaded: false, pending: None, sessions: HashMap::new() }
+        Self { document: Document::default(), loaded: false, pending: None, sessions: HashMap::new(), clipboard_default: true }
     }
     fn ready(&self) -> Result<(), String> {
         if !self.loaded { return Err("Connection file is not open".into()); }
@@ -38,6 +39,8 @@ impl Core {
         let document = projection::decode(json.as_bytes())?;
         self.document = document; self.loaded = true; Ok(())
     }
+    // Settings value for profiles whose chain never sets Clipboard.
+    pub fn set_clipboard_default(&mut self, value: bool) { self.clipboard_default = value; }
     pub fn stored_document(&self) -> Result<String, String> { self.ready()?; projection::encode(&self.document) }
     pub fn prepare_profile(&mut self, change: ProfileChange, input: &str) -> Result<PreparedProfile, String> {
         self.can_edit()?;
@@ -102,7 +105,7 @@ impl Core {
         self.ready()?;
         let profiles: Result<Vec<_>, String> = self.document.profiles.iter().map(|p| {
             Ok(serde_json::json!({"id":p.id,"name":p.name,"kind":p.kind,"parent":p.parent,
-                                  "overrides":p.overrides,"native":p.native,"effective":self.document.effective(&p.id)?}))
+                                  "overrides":p.overrides,"native":p.native,"effective":self.document.effective_with(&p.id, self.clipboard_default)?}))
         }).collect();
         serde_json::to_string(&serde_json::json!({"schema_version":self.document.schema_version,"profiles":profiles?})).map_err(|_| "Cannot encode profile view".into())
     }
@@ -117,14 +120,14 @@ impl Core {
     }
     pub fn preview_profile(&self, json: &str) -> Result<String, String> {
         let (candidate, id) = self.edited_document(json)?;
-        serde_json::to_string(&candidate.effective(&id)?).map_err(|_| "Cannot encode effective draft".into())
+        serde_json::to_string(&candidate.effective_with(&id, self.clipboard_default)?).map_err(|_| "Cannot encode effective draft".into())
     }
     pub fn open_session(&mut self, id: &str, mock: bool) -> Result<SessionInfo, String> {
         self.can_edit()?;
         if self.sessions.values().any(|s| s.profile.as_deref() == Some(id)) { return Err("Profile already has an open tab".into()); }
         let p = self.document.get(id)?;
         if p.kind != Kind::Connection { return Err("Folders cannot open sessions".into()); }
-        let (session, info) = Session::new(Some(id), &p.name, self.document.effective(id)?, mock)?;
+        let (session, info) = Session::new(Some(id), &p.name, self.document.effective_with(id, self.clipboard_default)?, mock)?;
         self.sessions.insert(info.id.clone(), session);
         Ok(info)
     }
@@ -159,7 +162,7 @@ impl Core {
         if previous.state != "disconnected" || previous.mock != mock { return Err("Disconnect the owning session before reconnecting".into()); }
         let profile = previous.profile.as_deref().ok_or("Temporary sessions require their captured target")?;
         let p = self.document.get(profile)?;
-        let (session, info) = Session::new(Some(profile), &p.name, self.document.effective(profile)?, mock)?;
+        let (session, info) = Session::new(Some(profile), &p.name, self.document.effective_with(profile, self.clipboard_default)?, mock)?;
         // Validation and construction precede publication. A failed reconnect
         // keeps the disconnected registration and its deletion/close guard.
         self.sessions.remove(id);
@@ -202,6 +205,25 @@ mod tests {
     fn update(c: &mut Core, profile: &Profile) {
         let candidate = c.prepare_profile(ProfileChange::Update, &serde_json::to_string(profile).unwrap()).unwrap();
         c.finish_profile(&candidate.token, true).unwrap();
+    }
+    #[test]
+    fn unset_clipboard_follows_settings_and_explicit_values_win() {
+        let mut c = loaded();
+        let folder = create(&mut c, "Folder", true, None);
+        let inherited = create(&mut c, "Inherited", false, Some(&folder));
+        let explicit = create(&mut c, "Explicit", false, None);
+        let mut off = c.document.get(&explicit).unwrap().clone(); off.overrides.clipboard = Some(false); update(&mut c, &off);
+        let clipboard = |c: &Core, id: &str| {
+            let snapshot: serde_json::Value = serde_json::from_str(&c.snapshot().unwrap()).unwrap();
+            snapshot["profiles"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap()["effective"]["clipboard"].as_bool().unwrap()
+        };
+        assert!(clipboard(&c, &inherited)); assert!(!clipboard(&c, &explicit));
+        c.set_clipboard_default(false); assert!(!clipboard(&c, &inherited));
+        let draft = c.document.get(&inherited).unwrap().clone();
+        let preview: serde_json::Value = serde_json::from_str(&c.preview_profile(&serde_json::to_string(&draft).unwrap()).unwrap()).unwrap();
+        assert_eq!(preview["clipboard"], false); assert_eq!(preview["sources"]["clipboard"], "default");
+        let mut on = c.document.get(&folder).unwrap().clone(); on.overrides.clipboard = Some(true); update(&mut c, &on);
+        assert!(clipboard(&c, &inherited)); assert!(!clipboard(&c, &explicit));
     }
     #[test]
     fn draft_effective_preview_does_not_commit() {
