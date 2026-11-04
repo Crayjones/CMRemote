@@ -253,6 +253,27 @@ private slots:
         QVERIFY(view.append("\x1b[?1049h")); keyEvent(view, Qt::Key_L, physicalControl(), "\x0c");
         QVERIFY(view.append("\x1b[?1049l")); QCOMPARE(view.screen()->historyLines(), history);
     }
+    void terminalTypingEndsScrollGestureSoMomentumCannotPullViewUp() {
+        auto clipboard = std::make_shared<FakeTerminalClipboard>(); TerminalView view; view.resize(600, 140);
+        QByteArray received; view.setInputSink([&](const QByteArray& bytes) { received += bytes; return true; });
+        QVERIFY(activateTerminal(view, view)); view.initializeTerminal(clipboard); view.setInputEnabled(true);
+        auto* scroll = view.findChild<QScrollBar*>(); QVERIFY(populate(view, 0, 79));
+        const QPoint centre(100, 50); const int row = cellSize(view).height();
+        // A trackpad flick upward: fingers down, moving, then lifted with momentum still arriving.
+        wheel(view, centre, {0, row * 4}, {0, 120}, Qt::ScrollBegin);
+        wheel(view, centre, {0, row * 4}, {0, 120}, Qt::ScrollUpdate); QVERIFY(scroll->value() < scroll->maximum());
+        QTest::keyClick(&view, Qt::Key_X, Qt::NoModifier, 'x'); QCOMPARE(scroll->value(), scroll->maximum());
+        for (int i = 0; i < 5; ++i) wheel(view, centre, {0, row * 3}, {0, 90}, Qt::ScrollMomentum);
+        wheel(view, centre, {0, row}, {0, 30}, Qt::ScrollUpdate); wheel(view, centre, {0, 0}, {0, 0}, Qt::ScrollEnd);
+        QCOMPARE(scroll->value(), scroll->maximum());
+        // The echo and further output keep the prompt in view.
+        QVERIFY(view.append("x\r\nowned-output\r\n")); QCOMPARE(scroll->value(), scroll->maximum());
+        // A new gesture, or a mouse wheel notch, scrolls normally again.
+        wheel(view, centre, {0, row * 2}, {0, 120}, Qt::ScrollBegin); QVERIFY(scroll->value() < scroll->maximum());
+        wheel(view, centre, {0, 0}, {0, 0}, Qt::ScrollEnd);
+        QTest::keyClick(&view, Qt::Key_Y, Qt::NoModifier, 'y'); QCOMPARE(scroll->value(), scroll->maximum());
+        wheel(view, centre, {}, {0, 120}); QVERIFY(scroll->value() < scroll->maximum());
+    }
     void terminalDragSelectionSpansVisibleRows() {
         auto clipboard = std::make_shared<FakeTerminalClipboard>(); TerminalView view; view.resize(600, 180); view.initializeTerminal(clipboard);
         QByteArray received; view.setInputEnabled(true); view.setInputSink([&](const QByteArray& bytes) { received += bytes; return true; });

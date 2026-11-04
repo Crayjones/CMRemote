@@ -360,7 +360,12 @@ bool TerminalView::pasteClipboard() {
     pendingPaste_ = screen_->pasteStart() + bytes + screen_->pasteEnd(); pasteOffset_ = 0; followInput(); pumpPaste(); return true;
 }
 // Typing returns a scrolled-back view to the live prompt.
-void TerminalView::followInput() { if (scroll_ && !dragging_) scroll_->setValue(scroll_->maximum()); }
+// The rest of the scroll gesture in progress, including trackpad momentum, is dropped
+// so it cannot pull the view back up; the user's next scroll starts normally.
+void TerminalView::followInput() {
+    if (!scroll_ || dragging_) return;
+    scroll_->setValue(scroll_->maximum()); pixelRemainder_ = 0; angleRemainder_ = 0; gestureFollowed_ = true;
+}
 void TerminalView::pumpPaste() {
     if (!inputEnabled_ || !inputSink_) { pendingPaste_.clear(); pasteOffset_ = 0; pasteTimer_->stop(); return; }
     // At most 128 KiB per GUI turn; overload retains the entire unaccepted suffix.
@@ -412,6 +417,11 @@ void TerminalView::mouseReleaseEvent(QMouseEvent* event) {
 }
 void TerminalView::wheelEvent(QWheelEvent* event) {
     if (!screen_) { QWidget::wheelEvent(event); return; }
+    if (gestureFollowed_) {
+        // Only a new gesture (or a plain mouse wheel notch) scrolls again after typing.
+        if (event->phase() != Qt::ScrollBegin && event->phase() != Qt::NoScrollPhase) { event->accept(); return; }
+        gestureFollowed_ = false;
+    }
     if (event->phase() == Qt::ScrollBegin) { pixelRemainder_ = 0; angleRemainder_ = 0; }
     if (dragging_) dragPosition_ = event->position().toPoint();
     const bool pixel = !event->pixelDelta().isNull();

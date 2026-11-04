@@ -224,7 +224,7 @@ private:
     QTimer* selectionTimer_ = nullptr;
     quint64 lineOrigin_ = 0, historyEnd_ = 0, contentRevision_ = 0, selectionEpoch_ = 0;
     qint64 pixelRemainder_ = 0, angleRemainder_ = 0;
-    bool inputEnabled_ = false, selection_ = false, dragging_ = false;
+    bool inputEnabled_ = false, selection_ = false, dragging_ = false, gestureFollowed_ = false;
     int pasteOffset_ = 0;
     QByteArray pendingPaste_;
 };
