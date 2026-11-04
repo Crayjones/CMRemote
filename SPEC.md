@@ -91,7 +91,7 @@ env: `CARGO_HOME`, `RUSTUP_HOME`, `CARGO_TARGET_DIR` → project-local paths
 toolenv: env wrappers + project-local prefixes, PATH scoping only launched commands
 scripts: bootstrap/build/run/test/package/clean scripts → exact commands ∈ `docs/development.md`; README → short quickstart
 linux: Docker compose + `.devcontainer` → ARM64 native, AMD64 separate config
-ui: tree double-click → labeled session tab; toolbar/menus → add/edit/connect/disconnect/delete
+ui: tree double-click/Connect → labeled session tab (existing tab focused; disconnected/ended tab reconnects in place); toolbar/menus → add/edit/connect/disconnect/delete
 bridge: Rust Core ↔ C++ via cxx → owned password-free data; existing RdpTarget APIs retained + nonsecret SshTarget/SessionInfo SSH metadata/temporary SSH registration; detached/load/prepare/finalize candidates, no disk/direct-save APIs or worker Core borrow. Authentication exception solely I.sshbackend; SessionTarget account equality includes protocol, SSH username literal/domain inactive
 shell: `app/ui/test.ui` → production MainWindow + standalone preview; obsolete root `test.ui` & `app/ui/MainWindow.ui` removed, Git history retained
 profileedit: profile/document cell commit → validate + serialized automatic save; Escape cancels cell; flush active input + await outcome before switch/connect/drag/close; failure → retained value + Retry/Revert/Cancel
@@ -352,6 +352,7 @@ B44|2026-11-04|saved SSH private-key connect always opened credentials dialog �
 B45|2026-11-04|credential dialogs focused Password even with empty Username, Tab order went through Domain/auth method; empty editable Username focused first, Tab Username → Password; tests sshEmptyUsernameTakesFocusAndTabsToPassword + qt_smoke credential prompt|I.credentials
 B46|2026-11-04|typing after a trackpad flick snapped to prompt, then remaining ScrollMomentum events pulled the view back up; input ends the gesture, later Update/Momentum/End ignored until ScrollBegin or plain wheel; test terminalTypingEndsScrollGestureSoMomentumCannotPullViewUp|I.sshterminal
 B47|2026-11-04|Settings clipboard Yes but Config No: app defaults are new-profile templates that inherit everything, core root fallback false, XML top-level items always owned their attribute (mRemoteNG default false); core clipboard default set from Settings for unset chains, top-level inherited Clipboard projects unset; tests clipboardSettingAppliesToConnectionsThatDoNotSetIt, unset_clipboard_follows_settings_and_explicit_values_win|I.xml,I.clipboard
+B48|2026-11-04|double-click/Connect on a connection with a disconnected or remotely ended tab only focused it; SessionPane::disconnected (user stop or failed/disconnected state) → focus + reconnectPane, live tab focus only; tests qt_smoke connect/double-click reconnect + disconnectedTabsBlockSubtreeDelete|I.ui,I.sessionui
 ```
 
 ## §R

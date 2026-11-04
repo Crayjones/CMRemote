@@ -674,8 +674,13 @@ void MainWindow::connectCommitted(bool mock) {
         folderConnect_ = FolderConnect{editorDocument_, id, members, currentSessions(), mock};
         continueFolderConnect(); return;
     }
+    // An open tab is shown; a disconnected one also reconnects (double-click or Connect).
     for (auto* pane : sessionPages())
-        if (pane->profile() == id && pane->document() == editorDocument_) { focusPane(pane); return; }
+        if (pane->profile() == id && pane->document() == editorDocument_) {
+            focusPane(pane);
+            if (pane->disconnected() && credentialPage_ != pane) reconnectPane(pane);
+            return;
+        }
     const auto effective = profiles_.value(id).value("effective").toObject();
     if (!mock && effective.value("protocol") != "rdp" && effective.value("protocol") != "ssh" && effective.value("protocol") != "vnc") { fail("This protocol has no network backend."); return; }
     if (profiles_.value(id).value("kind") != "connection") { fail("Folders cannot open sessions"); return; }
