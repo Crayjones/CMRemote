@@ -189,3 +189,18 @@ fn sshKeyFormatsAndKdfBoundsRejectSafely() {
     assert!(matches!(ssh::decode_private_key(Secret::new(vec![b'x'; 1024 * 1024 + 1]), &secret(b"")), Err(Failure::KeySize)));
     assert!(matches!(ssh::decode_private_key(secret(b"not a key"), &Secret::new(vec![0xff])), Err(Failure::AuthenticationBounds)));
 }
+
+#[test]
+fn sshPrivateKeyEncryptionIsDetectedBeforeConnect() {
+    let keys = OwnedKeys::new();
+    let key = PrivateKey::from(ssh_key::private::Ed25519Keypair::from_seed(&[5; 32]));
+    let plain = keys.0.join("plain"); let protected = keys.0.join("protected");
+    fs::write(&plain, key.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
+    let encrypted = key.encrypt_with(Cipher::Aes256Ctr, Kdf::Bcrypt { salt: vec![3; 16], rounds: 1 }, 0x12345678, b"synthetic-key-passphrase").unwrap();
+    fs::write(&protected, encrypted.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
+    assert!(!ssh::private_key_encrypted(plain.to_string_lossy().into_owned()).unwrap());
+    assert!(ssh::private_key_encrypted(protected.to_string_lossy().into_owned()).unwrap());
+    assert!(matches!(ssh::private_key_encrypted(keys.0.join("missing").to_string_lossy().into_owned()), Err(Failure::KeyFile)));
+    fs::write(keys.0.join("garbage"), b"not a key").unwrap();
+    assert!(matches!(ssh::private_key_encrypted(keys.0.join("garbage").to_string_lossy().into_owned()), Err(Failure::KeyFormat)));
+}

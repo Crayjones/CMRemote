@@ -15,6 +15,7 @@ OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* st
     ui_->openh264->setChecked(values.openh264); ui_->openh264Credit->setText(OpenH264::Credit);
     ui_->showPanels->setChecked(values.showPanels); ui_->autoUpdate->setChecked(values.autoUpdate);
     ui_->commandAsControl->setChecked(values.commandAsControl);
+    ui_->clipboard->setChecked(values.defaults.effective().value("clipboard").toBool());
 #ifndef Q_OS_MACOS
     ui_->keyboardTitle->hide(); ui_->commandAsControl->hide(); ui_->commandAsControlHelp->hide();
 #endif
@@ -47,6 +48,8 @@ PreferenceValues OptionsDialog::read() const {
     draft.quickConnect = ui_->quickConnect->isChecked(); draft.lockToolbars = ui_->lockToolbars->isChecked();
     draft.openh264 = ui_->openh264->isChecked(); draft.showPanels = ui_->showPanels->isChecked();
     draft.commandAsControl = ui_->commandAsControl->isChecked(); draft.autoUpdate = ui_->autoUpdate->isChecked();
+    // Same value as Config's connection defaults; untouched defaults stay unwritten.
+    if (ui_->clipboard->isChecked() != values_.defaults.effective().value("clipboard").toBool()) draft.defaults.values["clipboard"] = ui_->clipboard->isChecked();
     return draft;
 }
 void OptionsDialog::updateBusy() {

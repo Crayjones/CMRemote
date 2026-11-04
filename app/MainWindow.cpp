@@ -264,6 +264,10 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     initializeFiles();
     pollTimer_->start(16);
     preferences_ = new ApplicationPreferences(preferencesPath, this);
+    if (!preferencesPath.isEmpty()) {
+        openFiles_ = new OpenFileList(QFileInfo(preferencesPath).absoluteDir().filePath("open-files.json"), this);
+        openFiles_->load([this](QStringList paths) { restoreOpenFiles(paths); });
+    }
     // Only the real application downloads Cisco's decoder, beside its preferences.
     if (!testMode_ && !preferencesPath.isEmpty()) openh264_ = new OpenH264Codec(QFileInfo(preferencesPath).absolutePath(), this);
     ui_->actionOptions->setShortcut(preferencesShortcut());

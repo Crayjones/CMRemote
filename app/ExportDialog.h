@@ -17,6 +17,9 @@ public:
     QString path() const;
     ExportOptions options() const;
     void setPath(const QString& path);
+    // Relative names resolve against the user's Documents folder.
+    static QString resolvePath(const QString& text);
+    static QString exportDirectory();
 private:
     void browse();
     void update();

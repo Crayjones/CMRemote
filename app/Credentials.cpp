@@ -13,7 +13,9 @@ QDialog* PromptCredentialProvider::request(QWidget* parent, const CredentialRequ
     QObject::connect(ui.saveCheck, &QCheckBox::toggled, dialog, [ui](bool save) {
         ui.hintLabel->setText(save ? "The connection, username and password are saved to a connection file." : "Password is used for this session only. It is not saved.");
     });
-    ui.passwordEdit->setFocus();
+    // Username, then Tab to Password; Domain is optional and comes after.
+    QWidget::setTabOrder({ui.usernameEdit, ui.passwordEdit, ui.domainEdit, ui.clipboardCheck, ui.saveCheck, ui.buttons});
+    (ui.usernameEdit->isEnabled() && ui.usernameEdit->text().isEmpty() ? ui.usernameEdit : ui.passwordEdit)->setFocus();
     QObject::connect(dialog, &QDialog::finished, parent ? parent : dialog, [ui, saveOption = target.saveOption, complete = std::move(complete)](int answer) {
         std::optional<TransientCredentials> credentials;
         if (answer == QDialog::Accepted) {

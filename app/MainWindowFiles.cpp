@@ -6,6 +6,7 @@
 #include "ProfileEditor.h"
 #include "ConnectionIcons.h"
 #include "SessionPane.h"
+#include "SshAuthentication.h"
 #include "FilePasswordDialogs.h"
 #include "ui_test.h"
 #include <QFileDialog>
@@ -18,7 +19,9 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QStatusBar>
+#include <QThread>
 #include <QTimer>
+#include <atomic>
 #include <QTreeWidgetItemIterator>
 
 namespace {
@@ -164,6 +167,25 @@ DocumentId MainWindow::openConnectionFile(const QString& path, bool createNew) {
     if (!editor_->dirty() && !autoSaveInFlight_) selectConnectionFile(id);
     return id;
 }
+// Opened files stay in the tree across restarts until the user closes them.
+void MainWindow::restoreOpenFiles(const QStringList& paths) {
+    if (closeApproved_ || !files_) return;
+    const auto first = documentOrder_.isEmpty() ? DocumentId{} : documentOrder_.first();
+    for (const auto& path : paths) openConnectionFile(path);
+    if (!paths.isEmpty() && context(first) && !editor_->dirty()) selectConnectionFile(first);
+    rememberOpenFiles();
+}
+void MainWindow::rememberOpenFiles() {
+    if (!openFiles_ || closeApproved_) return;
+    const auto canonical = [](const QString& path) { const QFileInfo info(path); const auto real = info.canonicalFilePath(); return real.isEmpty() ? info.absoluteFilePath() : real; };
+    const auto defaultPath = canonical(dataPath_); QStringList paths;
+    for (auto id : documentOrder_) {
+        const auto doc = context(id); if (!doc) continue;
+        const auto path = doc->status().path; if (path.isEmpty() || canonical(path) == defaultPath) continue;
+        const auto absolute = QFileInfo(path).absoluteFilePath(); if (!paths.contains(absolute)) paths << absolute;
+    }
+    openFiles_->save(paths);
+}
 void MainWindow::rebuildFiles() {
     const QSignalBlocker blocker(ui_->connectionTree); const auto selected = selectedDocument(); const auto profile = selectedId();
     const auto scroll = ui_->connectionTree->verticalScrollBar()->value();
@@ -225,6 +247,7 @@ void MainWindow::rebuildFiles() {
     if (!editor_->dirty() && !autoSaveInFlight_) properties();
     if (treeOrder_) ui_->connectionTree->sortItems(0, *treeOrder_);
     filterConnections(); ui_->connectionTree->verticalScrollBar()->setValue(scroll); updateActions();
+    rememberOpenFiles();
 }
 void MainWindow::fileWarning(DocumentId id, std::function<void()> next) {
     const auto doc = context(id); if (!doc) return;
@@ -576,7 +599,8 @@ void MainWindow::beginFileCredentials(DocumentId document, const QString& profil
         attempt->console = stored && target.protocol == "rdp" && target.options.consoleSession && !stored->options.consoleSession;
     }
     credentialAttempt_ = attempt; credentialPage_ = replacement; credentialOwner_ = owner;
-    if (!document.valid() || promptOnly || (target.protocol == "ssh" && target.sshAuth == "private_key")) { promptCredentials(attempt); return; }
+    if (!document.valid() || promptOnly) { promptCredentials(attempt); return; }
+    if (target.protocol == "ssh" && target.sshAuth == "private_key") { connectSshKey(attempt); return; }
     const auto doc = context(document);
     if (!doc->status().unlocked || doc->status().reviewRequired) {
         promptFileUnlock(document, [this, attempt] {
@@ -590,6 +614,25 @@ void MainWindow::beginFileCredentials(DocumentId document, const QString& profil
         }); return;
     }
     lookupFileCredentials(attempt);
+}
+// A saved key without a passphrase connects directly; only an encrypted key asks.
+void MainWindow::connectSshKey(Attempt attempt) {
+    // Only the path and the result cross threads; the attempt stays on the GUI thread.
+    auto encrypted = std::make_shared<std::atomic_bool>(true);
+    auto* probe = QThread::create([encrypted, path = attempt->target.sshKeyPath.toStdString()] {
+        // Unreadable or unsupported keys go to the dialog; connecting then reports the error.
+        try { encrypted->store(rm::ssh::private_key_encrypted(path)); } catch (const rust::Error&) {}
+    });
+    connect(probe, &QThread::finished, probe, &QObject::deleteLater);
+    connect(probe, &QThread::finished, this, [this, attempt, encrypted] {
+        if (!validAttempt(attempt)) return;
+        const auto normalized = normalizeSshTarget(attempt->target);
+        if (encrypted->load() || !normalized || normalized->username.isEmpty()) { promptCredentials(attempt); return; }
+        try { attempt->sshAuthentication = sshPrivateKeyAuthentication(attempt->target.sshKeyPath, Secret(QByteArray())); }
+        catch (const std::exception&) { promptCredentials(attempt); return; }
+        attempt->authenticatedTarget = *normalized; finishCredentials(attempt);
+    });
+    probe->start();
 }
 void MainWindow::lookupFileCredentials(Attempt attempt) {
     if (!validAttempt(attempt)) return;

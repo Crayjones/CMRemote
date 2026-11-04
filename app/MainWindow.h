@@ -16,6 +16,7 @@
 #include "ConnectionXml.h"
 #include "ExternalTools.h"
 #include "ApplicationPreferences.h"
+#include "OpenFileList.h"
 #include "UpdateCheck.h"
 #include <memory>
 #include <functional>
@@ -166,6 +167,7 @@ private:
     void beginFileCredentials(DocumentId document, const QString& profile, SessionTarget target, QTabWidget* owner, SessionPane* replacement, bool promptOnly, const QString& folder = {});
     std::optional<SessionTarget> attemptTarget(const DocumentContext& doc, const QString& profile, const QString& folder) const;
     void lookupFileCredentials(Attempt attempt);
+    void connectSshKey(Attempt attempt);
     void promptCredentials(Attempt attempt);
     void finishCredentials(Attempt attempt);
     void saveAttempt(const Attempt& attempt, const SessionTarget& target);
@@ -288,6 +290,9 @@ private:
     ConnectionDefaults defaults_;
     bool preferencesReady_ = false;
     ApplicationPreferences* preferences_ = nullptr;
+    OpenFileList* openFiles_ = nullptr;
+    void restoreOpenFiles(const QStringList& paths);
+    void rememberOpenFiles();
     class OpenH264Codec* openh264_ = nullptr;
     bool openh264Enabled_ = true;
     QPointer<QDialog> optionsDialog_;

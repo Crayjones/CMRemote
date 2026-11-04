@@ -1,6 +1,7 @@
 #include "ExportDialog.h"
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDir>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -10,6 +11,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QStandardPaths>
 #include <QVBoxLayout>
 
 ExportDialog::ExportDialog(const QString& folderId, const QString& folderName, const QString& connectionId, const QString& connectionName, QWidget* parent)
@@ -20,6 +22,7 @@ ExportDialog::ExportDialog(const QString& folderId, const QString& folderName, c
     auto* file = new QGroupBox("Export File", this); auto* fileLayout = new QGridLayout(file);
     fileLayout->addWidget(new QLabel("Filename:", file), 0, 0, 1, 2);
     path_ = new QLineEdit(file); path_->setObjectName("exportPath"); fileLayout->addWidget(path_, 1, 0);
+    path_->setPlaceholderText("Name or full path; names save in " + QDir::toNativeSeparators(exportDirectory()));
     auto* browse = new QPushButton("Browse…", file); browse->setObjectName("exportBrowse"); fileLayout->addWidget(browse, 1, 1);
     fileLayout->addWidget(new QLabel("File Format:", file), 2, 0, 1, 2);
     format_ = new QComboBox(file); format_->setObjectName("exportFormat"); format_->addItems({"mRemoteNG XML", "mRemoteNG CSV"});
@@ -57,12 +60,27 @@ ExportDialog::ExportDialog(const QString& folderId, const QString& folderName, c
         const auto current = path_->text(); if (current.isEmpty()) return;
         const QFileInfo info(current); const auto suffix = format_->currentIndex() == 1 ? "csv" : "xml";
         if (info.suffix().compare(suffix, Qt::CaseInsensitive) != 0 && (info.suffix() == "xml" || info.suffix() == "csv"))
-            path_->setText(info.path() + "/" + info.completeBaseName() + "." + suffix);
+            path_->setText((info.path() == "." && !current.startsWith("./") ? QString() : info.path() + "/") + info.completeBaseName() + "." + suffix);
     });
     update();
 }
 
-QString ExportDialog::path() const { return path_->text().trimmed(); }
+QString ExportDialog::path() const {
+    auto path = resolvePath(path_->text());
+    // A name typed without an extension gets the chosen format's.
+    if (!path.isEmpty() && QFileInfo(path).suffix().isEmpty()) path += format_->currentIndex() == 1 ? ".csv" : ".xml";
+    return path;
+}
+QString ExportDialog::exportDirectory() {
+    const auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    return documents.isEmpty() ? QDir::homePath() : documents;
+}
+// A bare or relative name lands in Documents, not the process directory (/ for a macOS app).
+QString ExportDialog::resolvePath(const QString& text) {
+    auto path = text.trimmed(); if (path.isEmpty()) return {};
+    if (path == "~" || path.startsWith("~/")) path = QDir::homePath() + path.mid(1);
+    return QDir::cleanPath(QDir(exportDirectory()).absoluteFilePath(path));
+}
 void ExportDialog::setPath(const QString& path) { path_->setText(path); }
 
 ExportOptions ExportDialog::options() const {
@@ -76,7 +94,7 @@ ExportOptions ExportDialog::options() const {
 
 void ExportDialog::browse() {
     const bool csv = format_->currentIndex() == 1;
-    const auto chosen = QFileDialog::getSaveFileName(this, "Export to File", path(), csv ? "mRemoteNG CSV (*.csv)" : "mRemoteNG XML (*.xml)");
+    const auto chosen = QFileDialog::getSaveFileName(this, "Export to File", path().isEmpty() ? exportDirectory() : path(), csv ? "mRemoteNG CSV (*.csv)" : "mRemoteNG XML (*.xml)");
     if (chosen.isEmpty()) return;
     const auto suffix = csv ? ".csv" : ".xml";
     path_->setText(chosen.endsWith(suffix, Qt::CaseInsensitive) ? chosen : chosen + suffix);

@@ -1504,6 +1504,15 @@ private slots:
         credentials.reset(); completed = false;
         dialog = provider.request(&owner, {"test endpoint", {}}, [&](std::optional<TransientCredentials> result) { credentials = std::move(result); completed = true; });
         dialog->reject(); QVERIFY(completed); QVERIFY(!credentials.has_value());
+        // An empty username takes focus first; Tab goes straight to Password.
+        owner.show(); QVERIFY(QTest::qWaitForWindowExposed(&owner));
+        dialog = provider.request(&owner, {"test endpoint", {}}, [](std::optional<TransientCredentials>) {});
+        QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        auto* username = dialog->findChild<QLineEdit*>("usernameEdit"); QTRY_COMPARE(dialog->focusWidget(), username);
+        QCOMPARE(username->nextInFocusChain(), static_cast<QWidget*>(dialog->findChild<QLineEdit*>("passwordEdit"))); dialog->reject();
+        dialog = provider.request(&owner, {"test endpoint", "known-user"}, [](std::optional<TransientCredentials>) {});
+        QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        QTRY_COMPARE(dialog->focusWidget(), dialog->findChild<QLineEdit*>("passwordEdit")); dialog->reject();
     }
     void rhiLetterboxVerticesMatchPresentation() {
         for (const auto sizes : {std::pair{QSize(900, 650), QSize(1280, 720)}, std::pair{QSize(1120, 810), QSize(800, 600)},

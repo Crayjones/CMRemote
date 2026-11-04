@@ -1,5 +1,6 @@
 #include "SshCredentialsDialog.h"
 #include "SshAuthentication.h"
+#include <QApplication>
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -48,6 +49,18 @@ private slots:
             }, &owner);
         input = dialog->findChild<QLineEdit*>("authenticationEdit"); input->setText("synthetic-key-passphrase");
         dialog->accept(); QVERIFY(completed); input->undo(); QVERIFY(input->text().isEmpty());
+    }
+    void sshEmptyUsernameTakesFocusAndTabsToPassword() {
+        QWidget owner; owner.show(); QVERIFY(QTest::qWaitForWindowExposed(&owner));
+        auto* dialog = new SshCredentialsDialog({"owned:22", "", "password", "", true, true}, [](std::optional<TransientSshCredentials>) {}, &owner);
+        dialog->open(); QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        auto* username = dialog->findChild<QLineEdit*>("usernameEdit"); auto* password = dialog->findChild<QLineEdit*>("authenticationEdit");
+        QTRY_COMPARE(dialog->focusWidget(), username);
+        QCOMPARE(username->nextInFocusChain(), static_cast<QWidget*>(password)); dialog->reject();
+        // A known username starts at the password instead.
+        dialog = new SshCredentialsDialog({"owned:22", "literal", "password", "", true, true}, [](std::optional<TransientSshCredentials>) {}, &owner);
+        dialog->open(); QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        QTRY_COMPARE(dialog->focusWidget(), dialog->findChild<QLineEdit*>("authenticationEdit")); dialog->reject();
     }
     void sshCredentialCancelClearsInputAndCompletesOnce() {
         QWidget owner; int completed = 0;

@@ -235,6 +235,24 @@ private slots:
         QVERIFY(view.append("\x1b[?1049h")); QTest::keyClick(&view, Qt::Key_PageUp, Qt::ShiftModifier); QCOMPARE(received, QByteArray("\x1b[5;2~"));
         QCOMPARE(clipboard->reads, 0); QCOMPARE(clipboard->writes, 1);
     }
+    void terminalScrollbarShowsAndInputReturnsToPrompt() {
+        // SSH initializes after the pane is visible; the scrollbar must still appear.
+        auto clipboard = std::make_shared<FakeTerminalClipboard>(); TerminalView view; view.resize(600, 140);
+        QByteArray received; view.setInputSink([&](const QByteArray& bytes) { received += bytes; return true; });
+        QVERIFY(activateTerminal(view, view)); view.initializeTerminal(clipboard); view.setInputEnabled(true);
+        auto* scroll = view.findChild<QScrollBar*>(); QVERIFY(scroll); QVERIFY(scroll->isVisible());
+        QVERIFY(populate(view, 0, 39)); QVERIFY(scroll->maximum() > 0);
+        QTest::keyClick(&view, Qt::Key_PageUp, Qt::ShiftModifier); QVERIFY(scroll->value() < scroll->maximum());
+        QTest::keyClick(&view, Qt::Key_X, Qt::NoModifier, 'x'); QCOMPARE(received, QByteArray("x")); QCOMPARE(scroll->value(), scroll->maximum());
+        // Ctrl+L drops retained history as well as sending form feed.
+        QTest::keyClick(&view, Qt::Key_PageUp, Qt::ShiftModifier); received.clear();
+        keyEvent(view, Qt::Key_L, physicalControl(), "\x0c"); QCOMPARE(received, QByteArray("\x0c"));
+        QCOMPARE(view.screen()->historyLines(), 0); QCOMPARE(scroll->maximum(), 0); QCOMPARE(scroll->value(), 0);
+        // Full-screen programs keep Ctrl+L as redraw.
+        QVERIFY(populate(view, 40, 79)); const int history = view.screen()->historyLines(); QVERIFY(history > 0);
+        QVERIFY(view.append("\x1b[?1049h")); keyEvent(view, Qt::Key_L, physicalControl(), "\x0c");
+        QVERIFY(view.append("\x1b[?1049l")); QCOMPARE(view.screen()->historyLines(), history);
+    }
     void terminalDragSelectionSpansVisibleRows() {
         auto clipboard = std::make_shared<FakeTerminalClipboard>(); TerminalView view; view.resize(600, 180); view.initializeTerminal(clipboard);
         QByteArray received; view.setInputEnabled(true); view.setInputSink([&](const QByteArray& bytes) { received += bytes; return true; });

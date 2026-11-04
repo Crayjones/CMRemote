@@ -10,6 +10,7 @@
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -72,6 +73,32 @@ struct Unblock {
 class MultipleFilesTest : public QObject {
     Q_OBJECT
 private slots:
+    void openedFilesReopenUntilClosed() {
+        QTemporaryDir dir; const auto a = dir.filePath("a.xml"), b = dir.filePath("b.xml"), prefs = dir.filePath("preferences.json");
+        QVERIFY(fixture(a, "127.0.0.1")); QVERIFY(fixture(b, "127.0.0.2"));
+        const auto paths = [](MainWindow& window) {
+            QStringList result; auto* service = window.findChild<DocumentService*>();
+            for (auto id : window.connectionFiles()) if (const auto status = service->status(id)) result << QFileInfo(status->path).fileName();
+            return result;
+        };
+        {
+            MainWindow window(a, true, nullptr, {}, {}, {}, prefs); window.show();
+            QTRY_COMPARE(window.connectionFiles().size(), 1); window.openConnectionFile(b);
+            QTRY_COMPARE(paths(window), QStringList({"a.xml", "b.xml"}));
+            QTRY_VERIFY(contents(dir.filePath("open-files.json")).contains("b.xml"));
+            QVERIFY(!contents(dir.filePath("open-files.json")).contains("a.xml"));
+        }
+        {
+            MainWindow window(a, true, nullptr, {}, {}, {}, prefs); window.show();
+            QTRY_COMPARE(paths(window), QStringList({"a.xml", "b.xml"}));
+            auto* service = window.findChild<DocumentService*>(); const auto idB = window.connectionFiles().last();
+            QTRY_VERIFY(service->status(idB) && !service->status(idB)->busy);
+            QVERIFY(window.selectConnectionFile(idB)); window.closeConnectionFile(); QTRY_COMPARE(window.connectionFiles().size(), 1);
+            QTRY_VERIFY(!contents(dir.filePath("open-files.json")).contains("b.xml"));
+        }
+        MainWindow window(a, true, nullptr, {}, {}, {}, prefs); window.show();
+        QTRY_COMPARE(paths(window), QStringList({"a.xml"})); QTest::qWait(100); QCOMPARE(window.connectionFiles().size(), 1);
+    }
     void xmlAutoSavePreservesConfigViewport() {
         QTemporaryDir dir; const auto path = dir.filePath("viewport.xml"); QVERIFY(fixture(path, "127.0.0.1"));
         MainWindow window(path, true); window.resize(800, 480); window.show();

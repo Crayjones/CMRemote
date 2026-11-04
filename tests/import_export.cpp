@@ -1,12 +1,17 @@
 #include "ConnectionImport.h"
 #include "ConnectionXml.h"
+#include "ExportDialog.h"
 #include "ExternalTools.h"
 #include "GridDriver.h"
 #include "MainWindow.h"
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLineEdit>
+#include <QComboBox>
+#include <QStandardPaths>
 #include <QStringEncoder>
 #include <QTemporaryDir>
 #include <QTest>
@@ -85,6 +90,20 @@ private slots:
         QVERIFY(!ConnectionImport::fromFile("x.rdg", "<notrdcman/>", &error)); QVERIFY(!error.isEmpty());
         QVERIFY(!ConnectionImport::fromFile("x.csv", "Hostname\r\nhost\r\n", &error));
         QVERIFY(!ConnectionImport::fromFile("x.rdp", "username:s:alice\r\n", &error));
+    }
+    void exportNamesResolveToDocuments() {
+        const auto documents = ExportDialog::exportDirectory(); QVERIFY(QDir::isAbsolutePath(documents));
+        QCOMPARE(ExportDialog::resolvePath("  connections.xml "), QDir(documents).filePath("connections.xml"));
+        QCOMPARE(ExportDialog::resolvePath("backups/connections.csv"), QDir(documents).filePath("backups/connections.csv"));
+        QCOMPARE(ExportDialog::resolvePath("~/out.xml"), QDir::home().filePath("out.xml"));
+        const auto absolute = QDir(QDir::tempPath()).filePath("out.xml"); QCOMPARE(ExportDialog::resolvePath(absolute), QDir::cleanPath(absolute));
+        QVERIFY(ExportDialog::resolvePath("  ").isEmpty());
+        ExportDialog dialog({}, {}, {}, {}); dialog.setPath("connections");
+        QCOMPARE(dialog.path(), QDir(documents).filePath("connections.xml"));
+        dialog.findChild<QComboBox*>("exportFormat")->setCurrentIndex(1);
+        QCOMPARE(dialog.path(), QDir(documents).filePath("connections.csv"));
+        dialog.setPath("named.xml"); dialog.findChild<QComboBox*>("exportFormat")->setCurrentIndex(0); dialog.findChild<QComboBox*>("exportFormat")->setCurrentIndex(1);
+        QCOMPARE(dialog.findChild<QLineEdit*>("exportPath")->text(), QString("named.csv"));
     }
     void importIntoFolderThenExportXmlAndCsv() {
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/import-export-XXXXXX"); QVERIFY(dir.isValid());

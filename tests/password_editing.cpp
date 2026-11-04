@@ -441,6 +441,47 @@ private slots:
         QVERIFY(reply->password->takeBytes() == QByteArray("synthetic-protocol-password"));
         assertSecretFree(window, "synthetic-protocol-password");
     }
+    void everyProtocolChangeKeepsLocalPassword() {
+        // A connection made from the defaults owns its password and every setting, including Domain and SSH auth.
+        QTemporaryDir dir; const auto path = dir.filePath("protocols.xml");
+        {
+            auto xml = ConnectionXml::create(); Secret initial(QByteArray("mR3m")), master(QByteArray("synthetic file master"));
+            const QJsonObject connection{{"id", Consumer}, {"kind", "connection"}, {"name", "Local"}, {"parent", QJsonValue()},
+                {"overrides", QJsonObject{{"host", "127.0.0.1"}, {"username", "synthetic-user"}, {"domain", "SYNTHETIC"}, {"protocol", "rdp"}, {"port", 3389}, {"ssh_auth", "password"}}}};
+            const auto projection = QJsonDocument(QJsonObject{{"schema_version", 2}, {"profiles", QJsonArray{connection}}}).toJson(QJsonDocument::Compact);
+            QVERIFY(xml && xml->patch(initial, projection) && xml->changeMaster(initial, master));
+            const auto bytes = xml->serialize(master); QFile file(path); QVERIFY(bytes && file.open(QIODevice::WriteOnly) && file.write(*bytes) == bytes->size());
+        }
+        MainWindow window(path, true); window.show(); auto* files = window.findChild<DocumentService*>(); const auto id = window.connectionFiles().first();
+        QTRY_VERIFY(files->status(id) && !files->status(id)->busy); window.unlockConnectionFile(id, Secret(QByteArray("synthetic file master")));
+        QTRY_VERIFY(files->status(id)->unlocked && !files->status(id)->busy); QVERIFY(window.selectConnectionProfile({id, Consumer}));
+        setGridText(window, "password", "synthetic-local-password"); acceptReview(window); QVERIFY(settled(window, id));
+        QVERIFY(files->status(id)->passwords.value(Consumer).authorized);
+        for (const QString protocol : {"ssh", "vnc", "rdp", "vnc", "ssh", "rdp"}) {
+            QVERIFY(window.selectConnectionProfile({id, Consumer})); setGridChoice(window, "protocol", protocol); QVERIFY(settled(window, id));
+            const auto state = files->status(id)->passwords.value(Consumer);
+            QVERIFY2(state.present && state.authorized, qPrintable("password lost after changing to " + protocol));
+            SessionTarget target; target.protocol = protocol; target.host = "127.0.0.1"; target.username = "synthetic-user";
+            target.port = protocol == "ssh" ? 22 : protocol == "vnc" ? 5900 : 3389;
+            if (protocol == "rdp") target.domain = "SYNTHETIC";
+            if (protocol == "vnc") target.username.clear(); // VNC accounts are host and port only.
+            if (protocol == "ssh") target.sshAuth = "password";
+            std::optional<DocumentReply> reply; files->lookup({id, Consumer}, target, [&](DocumentReply value) { reply.emplace(std::move(value)); });
+            QTRY_VERIFY(reply.has_value()); QVERIFY2(reply->result.ok && reply->password, qPrintable("no password for " + protocol));
+            QVERIFY(reply->password->takeBytes() == QByteArray("synthetic-local-password"));
+        }
+        // Private-key SSH never uses the password, but switching back to password auth or another protocol finds it again.
+        for (const auto& [key, value] : std::vector<std::pair<QString, QString>>{{"protocol", "ssh"}, {"ssh_auth", "private_key"}, {"protocol", "rdp"}, {"protocol", "ssh"}, {"ssh_auth", "password"}}) {
+            QVERIFY(window.selectConnectionProfile({id, Consumer})); setGridChoice(window, key, value); QVERIFY(settled(window, id));
+            QVERIFY2(files->status(id)->passwords.value(Consumer).present, qPrintable("password removed after " + key + "=" + value));
+        }
+        QVERIFY2(files->status(id)->passwords.value(Consumer).authorized, "password unbound after returning to password auth");
+        SessionTarget ssh; ssh.protocol = "ssh"; ssh.host = "127.0.0.1"; ssh.port = 22; ssh.username = "synthetic-user"; ssh.sshAuth = "password";
+        std::optional<DocumentReply> reply; files->lookup({id, Consumer}, ssh, [&](DocumentReply value) { reply.emplace(std::move(value)); });
+        QTRY_VERIFY(reply.has_value()); QVERIFY(reply->result.ok && reply->password);
+        QVERIFY(reply->password->takeBytes() == QByteArray("synthetic-local-password"));
+        assertSecretFree(window, "synthetic-local-password");
+    }
     void hostChangedOutsideAppDoesNotReusePassword() {
         QTemporaryDir dir; const auto path = dir.filePath("outside.xml"); QVERIFY(fixture(path, "127.0.0.1"));
         {

@@ -120,9 +120,11 @@ private slots:
             QCOMPARE(gridValue(window, "port").toInt(), 22); QVERIFY(gridRow(window, "domain")->isHidden());
             QCOMPARE(contents(path), before); QCOMPARE(window.findChild<SessionPane*>()->target(), target);
             window.findChild<QAction*>("actionOptions")->trigger(); auto* dialog = window.findChild<OptionsDialog*>(); QVERIFY(dialog);
-            dialog->findChild<QCheckBox*>("quickConnect")->setChecked(false); dialog->accept();
+            auto* clipboard = dialog->findChild<QCheckBox*>("clipboard"); QVERIFY(clipboard && clipboard->isChecked());
+            dialog->findChild<QCheckBox*>("quickConnect")->setChecked(false); clipboard->setChecked(false); dialog->accept();
             QTRY_VERIFY(!window.findChild<QAction*>("actionViewQuickConnect")->isChecked());
-            QCOMPARE(QJsonDocument::fromJson(contents(prefs)).object().value("connection_defaults").toObject().value("values").toObject().value("icon").toString(), QString("SSH"));
+            const auto savedDefaults = QJsonDocument::fromJson(contents(prefs)).object().value("connection_defaults").toObject().value("values").toObject();
+            QCOMPARE(savedDefaults.value("icon").toString(), QString("SSH")); QCOMPARE(savedDefaults.value("clipboard"), QJsonValue(false));
             window.findChild<QAction*>("actionDefaultProperties")->trigger();
             setGridText(window, "username", "literal-user"); QVERIFY(waitGridSaved(window));
             QVERIFY(!QJsonDocument::fromJson(contents(prefs)).object().value("quick_connect").toBool());
