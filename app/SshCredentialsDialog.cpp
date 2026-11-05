@@ -43,7 +43,9 @@ SshCredentialsDialog::SshCredentialsDialog(const SshCredentialRequest& request, 
         for (auto* picker : findChildren<QFileDialog*>("sshCredentialKeyPicker")) picker->reject();
         complete(std::move(reply));
     });
-    ui_->authenticationEdit->setFocus();
+    // Username, then Tab to Password or Passphrase; the method and key file follow.
+    QWidget::setTabOrder({ui_->usernameEdit, ui_->authenticationEdit, ui_->authCombo, ui_->keyPathEdit, ui_->chooseKeyButton, ui_->saveCheck, ui_->buttonBox});
+    (ui_->usernameEdit->isEnabled() && ui_->usernameEdit->text().isEmpty() ? ui_->usernameEdit : ui_->authenticationEdit)->setFocus();
 }
 SshCredentialsDialog::~SshCredentialsDialog() { clearInput(); }
 void SshCredentialsDialog::clearInput() {

@@ -35,6 +35,8 @@ public:
     bool mock() const { return mock_; }
     SessionTarget target() const { return target_; }
     bool active() const { return active_; }
+    // Stopped by the user, or ended/failed on the remote side; Connect reconnects it.
+    bool disconnected() const { return !active_ || ended_; }
     // The pane's current status line (connection phase or failure reason).
     QString statusDetail() const;
     bool graphicalDesktop() const { return desktop_ && (target_.protocol == "rdp" || target_.protocol == "vnc"); }
@@ -84,7 +86,7 @@ private:
     QString id_, profile_;
     const DocumentId document_;
     const SessionTarget target_;
-    bool mock_, active_ = true;
+    bool mock_, active_ = true, ended_ = false;
     QLabel* status_;
     QLabel* captureHint_ = nullptr;
     IdleTimeout* idle_ = nullptr;

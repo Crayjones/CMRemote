@@ -106,6 +106,33 @@ private slots:
         QCOMPARE(gridValue(window, "description").toString(), QString("New profiles only"));
         QVERIFY(contents(prefs).contains("connection_defaults"));
     }
+    void clipboardSettingAppliesToConnectionsThatDoNotSetIt() {
+        QTemporaryDir dir; const auto path = dir.filePath("clipboard.xml"), prefs = dir.filePath("preferences.json");
+        QString inherited, explicitOff;
+        const auto settings = [](MainWindow& window, bool share) {
+            window.findChild<QAction*>("actionOptions")->trigger(); auto* dialog = window.findChild<OptionsDialog*>(); QVERIFY(dialog);
+            dialog->findChild<QCheckBox*>("clipboard")->setChecked(share); dialog->accept(); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
+        };
+        const auto shared = [](MainWindow& window, const QString& id) {
+            return window.selectConnectionProfile({window.selectedDocument(), id}) && gridValue(window, "clipboard").toBool();
+        };
+        {
+            MainWindow window(path, true, nullptr, {}, {}, {}, prefs); OPEN_CONNECTION(window); inherited = window.selectedId();
+            QTRY_VERIFY(window.findChild<QAction*>("actionOptions")->isEnabled());
+            QCOMPARE(gridValue(window, "clipboard").toBool(), true); QVERIFY(!gridLocal(window, "clipboard"));
+            window.addConnection(); QTRY_VERIFY(!documentBusy(window)); closeGridEditors(window); explicitOff = window.selectedId();
+            setGridChoice(window, "clipboard", false); QVERIFY(waitGridSaved(window)); QVERIFY(gridLocal(window, "clipboard"));
+            settings(window, false);
+            QTRY_VERIFY(!shared(window, inherited)); QVERIFY(!shared(window, explicitOff));
+        }
+        MainWindow restart(path, true, nullptr, {}, {}, {}, prefs); restart.show();
+        QTRY_COMPARE(restart.documentState(), MainWindow::DocumentState::Open); QTRY_VERIFY(restart.findChild<QAction*>("actionOptions")->isEnabled());
+        QTRY_VERIFY(!shared(restart, inherited));
+        settings(restart, true);
+        // Settings governs every connection that does not set Clipboard; an explicit No stays No.
+        QTRY_VERIFY(shared(restart, inherited)); QVERIFY(!shared(restart, explicitOff)); QVERIFY(restart.selectConnectionProfile({restart.selectedDocument(), explicitOff}));
+        QVERIFY(gridLocal(restart, "clipboard"));
+    }
     void connectionDefaultsPersistAndApplyOnlyToNewProfiles() {
         QTemporaryDir dir; const auto path = dir.filePath("defaults.xml"), prefs = dir.filePath("preferences.json"); QString existing;
         {
@@ -120,9 +147,11 @@ private slots:
             QCOMPARE(gridValue(window, "port").toInt(), 22); QVERIFY(gridRow(window, "domain")->isHidden());
             QCOMPARE(contents(path), before); QCOMPARE(window.findChild<SessionPane*>()->target(), target);
             window.findChild<QAction*>("actionOptions")->trigger(); auto* dialog = window.findChild<OptionsDialog*>(); QVERIFY(dialog);
-            dialog->findChild<QCheckBox*>("quickConnect")->setChecked(false); dialog->accept();
+            auto* clipboard = dialog->findChild<QCheckBox*>("clipboard"); QVERIFY(clipboard && clipboard->isChecked());
+            dialog->findChild<QCheckBox*>("quickConnect")->setChecked(false); clipboard->setChecked(false); dialog->accept();
             QTRY_VERIFY(!window.findChild<QAction*>("actionViewQuickConnect")->isChecked());
-            QCOMPARE(QJsonDocument::fromJson(contents(prefs)).object().value("connection_defaults").toObject().value("values").toObject().value("icon").toString(), QString("SSH"));
+            const auto savedDefaults = QJsonDocument::fromJson(contents(prefs)).object().value("connection_defaults").toObject().value("values").toObject();
+            QCOMPARE(savedDefaults.value("icon").toString(), QString("SSH")); QCOMPARE(savedDefaults.value("clipboard"), QJsonValue(false));
             window.findChild<QAction*>("actionDefaultProperties")->trigger();
             setGridText(window, "username", "literal-user"); QVERIFY(waitGridSaved(window));
             QVERIFY(!QJsonDocument::fromJson(contents(prefs)).object().value("quick_connect").toBool());

@@ -48,7 +48,7 @@ add_library(rm_frontend STATIC
     app/ProfileEditor.cpp app/ProfileEditor.h app/PropertyDelegate.cpp app/PropertyDelegate.h app/RdpTarget.cpp app/RdpTarget.h
     app/PointerCapture.cpp app/PointerCapture.h
     app/ConnectionTree.cpp app/ConnectionTree.h app/ConnectionIcons.cpp app/ConnectionIcons.h app/ThemeIcons.cpp app/ThemeIcons.h app/ConfigDescriptions.h
-    app/ApplicationPreferences.cpp app/ApplicationPreferences.h app/ConnectionDefaults.cpp app/ConnectionDefaults.h app/OptionsDialog.cpp app/OptionsDialog.h app/ui/OptionsDialog.ui
+    app/ApplicationPreferences.cpp app/ApplicationPreferences.h app/OpenFileList.cpp app/OpenFileList.h app/ConnectionDefaults.cpp app/ConnectionDefaults.h app/OptionsDialog.cpp app/OptionsDialog.h app/ui/OptionsDialog.ui
     app/SessionPane.cpp app/SessionPane.h app/IdleTimeout.h app/Views.cpp app/Views.h
     app/TerminalScreen.cpp app/TerminalScreen.h app/TerminalView.cpp
     app/TerminalAppearance.cpp app/TerminalAppearance.h app/TerminalAppearanceService.cpp app/TerminalAppearanceService.h

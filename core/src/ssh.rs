@@ -65,6 +65,7 @@ pub mod ffi {
         type Authentication;
         fn password_auth(password: Vec<u8>) -> Result<Box<Authentication>>;
         fn private_key_auth(path: String, passphrase: Vec<u8>) -> Result<Box<Authentication>>;
+        fn private_key_encrypted(path: String) -> Result<bool>;
     }
 }
 
@@ -140,6 +141,12 @@ pub fn private_key_auth(path: String, passphrase: Vec<u8>) -> Result<Box<Authent
     let passphrase = Secret::new(passphrase); authentication_bounds(&passphrase)?;
     if path.is_empty() || path.len() > 4096 || path.chars().any(char::is_control) { return Err(Failure::KeyPath); }
     Ok(Box::new(Authentication { kind: AuthenticationKind::PrivateKey { path, passphrase } }))
+}
+// Whether connecting needs a passphrase. Blocking file I/O: never call on the GUI thread.
+pub fn private_key_encrypted(path: String) -> Result<bool, Failure> {
+    let bytes = read_private_key(&path, || false)?;
+    let key = PrivateKey::from_openssh(bytes.expose()).map_err(|_| Failure::KeyFormat)?;
+    Ok(key.is_encrypted())
 }
 fn public_key_algorithm(key: &PublicKey) -> Result<usize, Failure> {
     match key.algorithm() {

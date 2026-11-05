@@ -8,7 +8,7 @@ QJsonObject baseline() {
         {"console_session", false}, {"resolution", "1024x768"}, {"automatic_resize", true}, {"color_depth", 32},
         {"cache_bitmaps", false}, {"wallpaper", true}, {"themes", true}, {"font_smoothing", true},
         {"security_protocol", "auto"}, {"server_auth", "warn"}, {"use_credssp", true}, {"idle_minutes", 0}, {"load_balance_info", ""},
-        {"gateway_usage", "never"}, {"gateway_host", ""}, {"gateway_port", 443}, {"gateway_username", ""}, {"gateway_domain", ""}, {"gateway_credentials", "same"}, {"sound", "local"}, {"clipboard", false},
+        {"gateway_usage", "never"}, {"gateway_host", ""}, {"gateway_port", 443}, {"gateway_username", ""}, {"gateway_domain", ""}, {"gateway_credentials", "same"}, {"sound", "local"}, {"clipboard", true},
         {"ssh_auth", "password"}, {"ssh_key_path", ""}, {"view_only", false}};
 }
 }

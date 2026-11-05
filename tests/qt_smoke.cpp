@@ -1055,6 +1055,18 @@ private slots:
             w.closeTab(0); QCOMPARE(w.sessionCount(),size_t(0));
             w.connectSelected(true); QCOMPARE(tabs->count(),1);
             w.disconnectCurrent(); QCOMPARE(w.sessionCount(),size_t(1));
+            // Double-clicking a disconnected tab's connection reconnects it in place (a fresh session page in the same tab).
+            const auto current = [&] { return qobject_cast<SessionPane*>(tabs->widget(0)); };
+            const auto doubleClick = [&] { QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->currentItem()).center()); };
+            QVERIFY(current() && current()->disconnected()); auto ended = current()->id();
+            doubleClick();
+            QTRY_VERIFY(current() && current()->id() != ended); QVERIFY(!current()->disconnected()); QCOMPARE(tabs->count(),1);
+            // A session that ended on the remote side reconnects the same way; a live one is only shown.
+            emit current()->state(current()->id(), "failed"); QVERIFY(current()->disconnected()); ended = current()->id();
+            doubleClick();
+            QTRY_VERIFY(current() && current()->id() != ended); QVERIFY(!current()->disconnected()); ended = current()->id();
+            doubleClick(); QTest::qWait(100); QCOMPARE(current()->id(), ended); QCOMPARE(tabs->count(),1);
+            w.disconnectCurrent(); QCOMPARE(w.sessionCount(),size_t(1));
             w.deleteSelected(); WAIT_STORE(w); QVERIFY(w.lastError().contains("Close"));
             w.reconnectCurrent(); QCOMPARE(tabs->count(),1); QCOMPARE(w.sessionCount(),size_t(1));
             QTest::qWait(50);
@@ -1355,7 +1367,10 @@ private slots:
         auto* tree = w.findChild<QTreeWidget*>("connectionTree"); tree->setCurrentItem(tree->topLevelItem(0)->child(0)); QCOMPARE(w.selectedId(), folder);
         w.deleteSelected(); WAIT_STORE(w); QVERIFY(w.lastError().contains("Close all tabs")); QCOMPARE(tree->topLevelItemCount(), 1);
         tree->setCurrentItem(tree->topLevelItem(0)->child(0)->child(0)); QCOMPARE(w.selectedId(), child);
-        groups->setCurrentIndex(0); w.connectSelected(true); QCOMPARE(groups->currentIndex(), 1); QCOMPARE(w.sessionCount(), size_t(1)); QVERIFY(!pane->active());
+        // Connect shows the disconnected tab in its panel and reconnects it there.
+        groups->setCurrentIndex(0); w.connectSelected(true); QCOMPARE(groups->currentIndex(), 1); QCOMPARE(w.sessionCount(), size_t(1));
+        QTRY_VERIFY(qobject_cast<SessionPane*>(other->widget(0)) && qobject_cast<SessionPane*>(other->widget(0))->id() != id);
+        QVERIFY(!qobject_cast<SessionPane*>(other->widget(0))->disconnected()); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 0);
         w.closeTab(0); QCOMPARE(w.sessionCount(), size_t(0)); tree->setCurrentItem(tree->topLevelItem(0)->child(0)); w.deleteSelected(); WAIT_STORE(w); QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
     }
     void panelCloseStopsAllWorkers() {
@@ -1504,6 +1519,15 @@ private slots:
         credentials.reset(); completed = false;
         dialog = provider.request(&owner, {"test endpoint", {}}, [&](std::optional<TransientCredentials> result) { credentials = std::move(result); completed = true; });
         dialog->reject(); QVERIFY(completed); QVERIFY(!credentials.has_value());
+        // An empty username takes focus first; Tab goes straight to Password.
+        owner.show(); QVERIFY(QTest::qWaitForWindowExposed(&owner));
+        dialog = provider.request(&owner, {"test endpoint", {}}, [](std::optional<TransientCredentials>) {});
+        QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        auto* username = dialog->findChild<QLineEdit*>("usernameEdit"); QTRY_COMPARE(dialog->focusWidget(), username);
+        QCOMPARE(username->nextInFocusChain(), static_cast<QWidget*>(dialog->findChild<QLineEdit*>("passwordEdit"))); dialog->reject();
+        dialog = provider.request(&owner, {"test endpoint", "known-user"}, [](std::optional<TransientCredentials>) {});
+        QVERIFY(QTest::qWaitForWindowExposed(dialog)); QApplication::setActiveWindow(dialog);
+        QTRY_COMPARE(dialog->focusWidget(), dialog->findChild<QLineEdit*>("passwordEdit")); dialog->reject();
     }
     void rhiLetterboxVerticesMatchPresentation() {
         for (const auto sizes : {std::pair{QSize(900, 650), QSize(1280, 720)}, std::pair{QSize(1120, 810), QSize(800, 600)},

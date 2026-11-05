@@ -57,6 +57,7 @@ pub mod ffi {
         fn detached_core() -> Box<Core>;
         fn load_document(self: &mut Core, json: &str) -> Result<()>;
         fn stored_document(self: &Core) -> Result<String>;
+        fn set_clipboard_default(self: &mut Core, value: bool);
         fn prepare_profile(self: &mut Core, change: ProfileChange, input: &str) -> Result<PreparedProfile>;
         fn finish_profile(self: &mut Core, token: &str, committed: bool) -> Result<()>;
         fn prepare_document(self: &mut Core) -> Result<PreparedDocument>;

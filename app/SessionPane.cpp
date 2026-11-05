@@ -24,6 +24,9 @@ SessionPane::SessionPane(const rm::SessionInfo& info, QString profile, QWidget* 
     terminalClipboard_ = clipboard ? std::move(clipboard) : systemClipboardEndpoint();
     clipboard_ = new SessionClipboard(terminalClipboard_, this);
     installEventFilter(this);
+    connect(this, &SessionPane::state, this, [this](const QString&, const QString& value) {
+        if (value == "failed" || value == "disconnected") ended_ = true; else if (value == "connected") ended_ = false;
+    });
     connect(qApp, &QApplication::focusChanged, this, [this] { refreshClipboardFocus(); });
     connect(qApp, &QGuiApplication::applicationStateChanged, this, [this] { refreshClipboardFocus(); });
     setContextMenuPolicy(Qt::PreventContextMenu);
@@ -117,7 +120,7 @@ void SessionPane::startRdp(RdpConfig config) {
     setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
     const bool clipboardConsent = config.clipboard;
     const auto generation = ++connectionGeneration_;
-    active_ = true; acceptingFrames_ = true; resizeReady_ = false;
+    active_ = true; ended_ = false; acceptingFrames_ = true; resizeReady_ = false;
     desktop_->resetRemoteCursor(); desktop_->setFrame({});
     desktop_->setPerformanceTrace(config.performance);
     layout()->activate(); config.panelSize = desktop_->size();
@@ -222,7 +225,7 @@ VncWorker* SessionPane::startVnc(rust::Box<rm::vnc::Authentication> authenticati
     if (!vncDesktop_ || mock_ || vncWorker_ || target_.protocol != "vnc") return nullptr;
     setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
     vncDesktop_->setInputEnabled(false); desktop_->resetRemoteCursor(); desktop_->setFrame({});
-    active_ = true; acceptingVncFrames_ = true; vncFailure_.clear();
+    active_ = true; ended_ = false; acceptingVncFrames_ = true; vncFailure_.clear();
     const auto generation = ++connectionGeneration_;
     auto* worker = new VncWorker(target_, std::move(authentication), generation);
     vncWorker_ = worker;
@@ -308,7 +311,7 @@ void SessionPane::afterSshRetirement(std::function<void()> complete) {
 SshWorker* SessionPane::startSsh(rust::Box<rm::ssh::Authentication> authentication, SshHostKeyService* trust) {
     if (!terminal_ || mock_ || sshWorker_ || !trust) return nullptr;
     terminal_->initializeTerminal(terminalClipboard_); terminal_->setInputEnabled(false);
-    sshTrust_ = trust; connected_ = false; active_ = true;
+    sshTrust_ = trust; connected_ = false; active_ = true; ended_ = false;
     const auto generation = ++connectionGeneration_;
     auto* worker = new SshWorker(target_, std::move(authentication), generation);
     sshWorker_ = worker;

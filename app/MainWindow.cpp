@@ -264,6 +264,10 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     initializeFiles();
     pollTimer_->start(16);
     preferences_ = new ApplicationPreferences(preferencesPath, this);
+    if (!preferencesPath.isEmpty()) {
+        openFiles_ = new OpenFileList(QFileInfo(preferencesPath).absoluteDir().filePath("open-files.json"), this);
+        openFiles_->load([this](QStringList paths) { restoreOpenFiles(paths); });
+    }
     // Only the real application downloads Cisco's decoder, beside its preferences.
     if (!testMode_ && !preferencesPath.isEmpty()) openh264_ = new OpenH264Codec(QFileInfo(preferencesPath).absolutePath(), this);
     ui_->actionOptions->setShortcut(preferencesShortcut());
@@ -286,8 +290,16 @@ void MainWindow::setConfigMode(bool defaults, bool inheritance) {
         updateActions();
     });
 }
+// Connections inherit Clipboard up to Settings unless they or a folder set it.
+void MainWindow::applyClipboardDefault() {
+    const bool value = defaults_.effective().value("clipboard").toBool();
+    if (value == clipboardDefault_) return;
+    clipboardDefault_ = value; core_->set_clipboard_default(value);
+    for (const auto& doc : documents_) doc->setClipboardDefault(value);
+    rebuildFiles();
+}
 void MainWindow::applyPreferences(PreferenceValues values) {
-    defaults_ = values.defaults;
+    defaults_ = values.defaults; applyClipboardDefault();
     openh264Enabled_ = values.openh264;
     if (openh264_) openh264_->setEnabled(values.openh264);
     editor_->setCategorized(values.categorized); ui_->actionShowHelp->setChecked(values.propertyHelp);
@@ -629,7 +641,7 @@ void MainWindow::saveDraft(std::function<void()> next) {
         updateActions();
         preferences_->save(values, [this, next = std::move(next)](PreferenceReply reply) {
             if (!reply.result.ok) { autoSaveFailed(reply.result.error); return; }
-            defaults_ = reply.values.defaults; editor_->acceptDefaults(); lastError_.clear();
+            defaults_ = reply.values.defaults; editor_->acceptDefaults(); lastError_.clear(); applyClipboardDefault();
             notification("Connection defaults saved");
             autoSaveFinished(false);
             if (!reply.result.warning.isEmpty()) fail(reply.result.warning);
@@ -662,8 +674,13 @@ void MainWindow::connectCommitted(bool mock) {
         folderConnect_ = FolderConnect{editorDocument_, id, members, currentSessions(), mock};
         continueFolderConnect(); return;
     }
+    // An open tab is shown; a disconnected one also reconnects (double-click or Connect).
     for (auto* pane : sessionPages())
-        if (pane->profile() == id && pane->document() == editorDocument_) { focusPane(pane); return; }
+        if (pane->profile() == id && pane->document() == editorDocument_) {
+            focusPane(pane);
+            if (pane->disconnected() && credentialPage_ != pane) reconnectPane(pane);
+            return;
+        }
     const auto effective = profiles_.value(id).value("effective").toObject();
     if (!mock && effective.value("protocol") != "rdp" && effective.value("protocol") != "ssh" && effective.value("protocol") != "vnc") { fail("This protocol has no network backend."); return; }
     if (profiles_.value(id).value("kind") != "connection") { fail("Folders cannot open sessions"); return; }

@@ -39,6 +39,8 @@ public:
     QByteArray encodeText(const QString& text, VTermModifier modifiers = VTERM_MOD_NONE);
     QByteArray pasteStart();
     QByteArray pasteEnd();
+    // Drops retained primary-screen scrollback; the visible grid is unchanged.
+    void clearHistory();
 signals:
     void changed();
     void appearanceChanged();

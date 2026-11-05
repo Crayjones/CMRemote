@@ -153,3 +153,8 @@ int TerminalScreen::clear(void* user) {
     auto* self = static_cast<TerminalScreen*>(user); ++self->selectionEpoch_;
     self->firstLine_ += self->history_.size(); self->history_.clear(); self->historyBytes_ = 0; return 1;
 }
+void TerminalScreen::clearHistory() {
+    Q_ASSERT(QThread::currentThread() == thread());
+    if (alternate_ || history_.empty()) return;
+    clear(this); emit changed();
+}

@@ -125,6 +125,8 @@ void TerminalView::initializeTerminal(std::shared_ptr<ClipboardEndpoint> clipboa
     if (screen_) return;
     endpoint_ = clipboard ? std::move(clipboard) : systemClipboardEndpoint();
     screen_ = new TerminalScreen(24, 80, this); screen_->setAppearance(appearance_); scroll_ = new QScrollBar(Qt::Vertical, this);
+    // SSH initializes after its pane is already visible; a late child stays hidden until shown.
+    scroll_->show();
     pasteTimer_ = new QTimer(this); pasteTimer_->setInterval(5);
     connect(pasteTimer_, &QTimer::timeout, this, &TerminalView::pumpPaste);
     connect(screen_, &TerminalScreen::changed, this, &TerminalView::refreshScreen);
@@ -283,12 +285,14 @@ void TerminalView::keyPressEvent(QKeyEvent* event) {
         event->ignore(); return;
     }
     if (inputEnabled_) {
-        const auto key = terminalKey(event->key()); const int control = (flags & Qt::ControlModifier) ? controlByte(event->key()) : -1;
+        bool typed = false; const auto key = terminalKey(event->key()); const int control = (flags & Qt::ControlModifier) ? controlByte(event->key()) : -1;
         if (control >= 0) {
-            QByteArray bytes(1, char(control)); if (flags & Qt::AltModifier) bytes.prepend('\x1b'); send(bytes);
+            QByteArray bytes(1, char(control)); if (flags & Qt::AltModifier) bytes.prepend('\x1b'); typed = send(bytes);
+            // Ctrl+L clears the shell's screen; drop the retained history above it too.
+            if (typed && control == 0x0c && !(flags & Qt::AltModifier) && !screen_->alternate()) screen_->clearHistory();
         } else if (key != VTERM_KEY_NONE) {
             auto modifier = modifiers(flags); if (event->key() == Qt::Key_Backtab) modifier = VTermModifier(modifier | VTERM_MOD_SHIFT);
-            send(screen_->encodeKey(key, modifier));
+            typed = send(screen_->encodeKey(key, modifier));
         } else {
             auto text = event->text();
             // Meta letter keys may contain a composed character, ESC, or no native text.
@@ -296,15 +300,16 @@ void TerminalView::keyPressEvent(QKeyEvent* event) {
                 if (event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z) text = QString(QChar((flags & Qt::ShiftModifier ? 'A' : 'a') + event->key() - Qt::Key_A));
                 else if (event->key() >= Qt::Key_Space && event->key() <= Qt::Key_AsciiTilde) text = QString(QChar(event->key()));
             }
-            send(screen_->encodeText(text, modifiers(flags)));
+            typed = send(screen_->encodeText(text, modifiers(flags)));
         }
+        if (typed) followInput();
     }
     event->accept();
 }
 void TerminalView::inputMethodEvent(QInputMethodEvent* event) {
     if (screen_ && inputEnabled_ && !event->commitString().isEmpty()) {
         const auto bytes = screen_->encodeText(event->commitString());
-        if (bytes.isEmpty()) emit inputError("Terminal input exceeds 4096 UTF-8 bytes."); else send(bytes);
+        if (bytes.isEmpty()) emit inputError("Terminal input exceeds 4096 UTF-8 bytes."); else if (send(bytes)) followInput();
     }
     event->accept();
 }
@@ -352,7 +357,14 @@ bool TerminalView::pasteClipboard() {
     const auto text = endpoint_->readText(); if (!text || text->isEmpty()) return false;
     if (text->size() > pasteBytes) { emit inputError("Terminal paste exceeds 1 MiB UTF-8."); return false; }
     const auto bytes = text->toUtf8(); if (bytes.size() > pasteBytes) { emit inputError("Terminal paste exceeds 1 MiB UTF-8."); return false; }
-    pendingPaste_ = screen_->pasteStart() + bytes + screen_->pasteEnd(); pasteOffset_ = 0; pumpPaste(); return true;
+    pendingPaste_ = screen_->pasteStart() + bytes + screen_->pasteEnd(); pasteOffset_ = 0; followInput(); pumpPaste(); return true;
+}
+// Typing returns a scrolled-back view to the live prompt.
+// The rest of the scroll gesture in progress, including trackpad momentum, is dropped
+// so it cannot pull the view back up; the user's next scroll starts normally.
+void TerminalView::followInput() {
+    if (!scroll_ || dragging_) return;
+    scroll_->setValue(scroll_->maximum()); pixelRemainder_ = 0; angleRemainder_ = 0; gestureFollowed_ = true;
 }
 void TerminalView::pumpPaste() {
     if (!inputEnabled_ || !inputSink_) { pendingPaste_.clear(); pasteOffset_ = 0; pasteTimer_->stop(); return; }
@@ -405,6 +417,11 @@ void TerminalView::mouseReleaseEvent(QMouseEvent* event) {
 }
 void TerminalView::wheelEvent(QWheelEvent* event) {
     if (!screen_) { QWidget::wheelEvent(event); return; }
+    if (gestureFollowed_) {
+        // Only a new gesture (or a plain mouse wheel notch) scrolls again after typing.
+        if (event->phase() != Qt::ScrollBegin && event->phase() != Qt::NoScrollPhase) { event->accept(); return; }
+        gestureFollowed_ = false;
+    }
     if (event->phase() == Qt::ScrollBegin) { pixelRemainder_ = 0; angleRemainder_ = 0; }
     if (dragging_) dragPosition_ = event->position().toPoint();
     const bool pixel = !event->pixelDelta().isNull();

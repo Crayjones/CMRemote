@@ -237,6 +237,16 @@ bool association(const Node& root, const ConnectionBindings& bindings, const QSt
     return committed && committed->sameAccount(target) && owner && ConnectionMetadata::matches(bindings, root.attribute("RmFileId"),
         consumer, owner->id, owner->attribute("Password").toLatin1(), target);
 }
+bool privateKeySsh(const std::vector<const Node*>& path);
+// A binding is held, not dropped, while its connection uses SSH private-key sign-in:
+// that account never uses a password, so nothing is released, and an in-app switch
+// back to a password account can follow it like any other protocol change.
+bool held(const Node& root, const ConnectionBinding& record) {
+    std::vector<const Node*> nodes; if (!path(root, record.consumer, nodes) || !privateKeySsh(nodes)) return false;
+    const auto* owner = passwordOwner(nodes);
+    return owner && owner->id == record.owner &&
+        QCryptographicHash::hash(QByteArray::fromBase64(owner->attribute("Password").toLatin1()), QCryptographicHash::Sha256) == record.passwordHash;
+}
 bool canary(const Node& root, const Secret& master, quint32 iterations, const ConnectionXml::Canceled& canceled) {
     if (stopped(canceled)) return false;
     auto plain = ConnectionCrypto::decrypt(master, iterations, root.attribute("Protected").toLatin1(), 4096); if (!plain) return false;
@@ -442,6 +452,15 @@ std::optional<SessionTarget> account(const std::vector<const Node*>& path) {
     if (!reasons.isEmpty()) return std::nullopt;
     return normalizeRdpTarget(target);
 }
+bool privateKeySsh(const std::vector<const Node*>& path) {
+    if (path.empty() || path.back()->attribute("Type") != "Connection") return false;
+    QJsonArray reasons;
+    const auto value = [&](const char* key) {
+        for (const auto& field : Fields) if (QString::fromLatin1(field.key) == key) return fieldValue(source(path, field, reasons), field, reasons);
+        return QJsonValue();
+    };
+    return value("protocol").toString() == "ssh" && value("ssh_auth").toString() == "private_key" && reasons.isEmpty();
+}
 QString criticalValue(const std::vector<const Node*>& nodes, const char* attribute, QJsonArray& reasons) {
     const Field field{"", attribute, "", Field::String};
     auto inherited = field; const auto flag = "Inherit" + QString::fromLatin1(attribute); const auto utf8 = flag.toUtf8(); inherited.inherit = utf8.constData();
@@ -557,6 +576,11 @@ bool project(const Node& parent, std::vector<const Node*>& path, QJsonArray& pro
             auto localReasons = QJsonArray(); const auto local = fieldValue(node, field, localReasons);
             fieldValue(owner, field, reasons);
             overrides.insert(field.key, &owner == &node ? local : QJsonValue(QJsonValue::Null));
+            // A top-level item that inherits Clipboard has no parent to take it from; leave it
+            // unset so the application's Settings value applies (other fields keep native defaults).
+            bool inherits = false;
+            if (path.size() == 1 && QString::fromLatin1(field.key) == "clipboard" && boolean(node.attribute(inheritanceFlag(node, field)).trimmed(), inherits) && inherits)
+                overrides.remove(QString::fromLatin1(field.key));
         }
         sanitizeRdpSecurity(overrides, unsupported, protocol == "rdp");
         criticalOptions(path, protocol, unsupported);
@@ -727,7 +751,7 @@ bool invalidateBindings(const Node& before, Node& after, const Secret& master, q
     auto i = bindings->records.begin();
     while (i != bindings->records.end()) {
         if (stopped(canceled)) return false;
-        if (!sameAssociation(before, after, i->consumer)) i = bindings->records.erase(i);
+        if (!sameAssociation(before, after, i->consumer) && !held(after, *i)) i = bindings->records.erase(i);
         else ++i;
     }
     if (bindings->records.size() != priorCount) {
@@ -937,7 +961,7 @@ bool ConnectionXml::rekeyMaster(const Secret& previous, const Secret& replacemen
     std::vector<bool> active;
     if (bindings) for (const auto& record : bindings->records) {
         if (stopped(canceled)) return false;
-        active.push_back(association(impl_->tree.root, *bindings, record.consumer, record.target));
+        active.push_back(association(impl_->tree.root, *bindings, record.consumer, record.target) || held(impl_->tree.root, record));
     }
     auto candidate = std::make_unique<Impl>(*impl_);
     if (!reencrypt(candidate->tree.root, previous, replacement, impl_->iterations, canceled)) return false;
@@ -1026,7 +1050,7 @@ bool ConnectionXml::reviewPasswords(const Secret& master, const std::vector<Pass
     if (impl_->bindings) bindings.version = impl_->bindings->version;
     if (impl_->bindings) for (const auto& record : impl_->bindings->records) {
         if (stopped(canceled)) return false;
-        if (association(impl_->tree.root, *impl_->bindings, record.consumer, record.target)) bindings.records.push_back(record);
+        if (association(impl_->tree.root, *impl_->bindings, record.consumer, record.target) || held(impl_->tree.root, record)) bindings.records.push_back(record);
     }
     QSet<QString> consumers;
     for (const auto& consent : reviewed) {
@@ -1053,7 +1077,7 @@ bool ConnectionXml::reviewCredentials(const Secret& master, const ConnectionBind
     auto candidate = impl_->tree;
     candidate.root.setAttribute("RmFileId", bindings->fileId);
     for (const auto& record : bindings->records)
-        if (stopped(canceled) || !association(candidate.root, *bindings, record.consumer, record.target)) return false;
+        if (stopped(canceled) || !(association(candidate.root, *bindings, record.consumer, record.target) || held(candidate.root, record))) return false;
     quint32 count = 0; if (!secrets(candidate.root, count, &master, impl_->iterations, canceled)) return false;
     const auto cipher = ConnectionCrypto::encrypt(master, impl_->iterations, *payload, ConnectionMetadata::MaxPayload);
     if (!cipher || stopped(canceled)) return false;
@@ -1143,7 +1167,7 @@ std::vector<ConnectionBinding> ConnectionXml::boundRecords(const Canceled& cance
     if (!impl_->ready || !impl_->authenticated || !impl_->bindings) return result;
     for (const auto& record : impl_->bindings->records) {
         if (stopped(canceled)) return {};
-        if (association(impl_->tree.root, *impl_->bindings, record.consumer, record.target)) result.push_back(record);
+        if (association(impl_->tree.root, *impl_->bindings, record.consumer, record.target) || held(impl_->tree.root, record)) result.push_back(record);
     }
     return result;
 }

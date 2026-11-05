@@ -20,6 +20,8 @@
 #include <QJsonDocument>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QLabel>
+#include <QProcess>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -93,6 +95,29 @@ private slots:
         QVERIFY(dialog->findChild<QLineEdit*>("keyPathEdit")->isReadOnly());
         QCOMPARE(dialog->findChild<QComboBox*>("authCombo")->currentData().toString(), QString("private_key"));
         QVERIFY(!window.findChild<QDialog*>("filePasswordDialog")); QCOMPARE(window.sessionCount(), size_t(0)); dialog->reject();
+    }
+    void savedSshKeyWithoutPassphraseConnectsWithoutPrompt() {
+        QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid());
+        // Owned keys: one without a passphrase, one with.
+        for (const auto& [name, passphrase] : {std::pair<QString, QString>{"plain-key", ""}, {"protected-key", "synthetic-key-passphrase"}}) {
+            QProcess keygen; keygen.start("ssh-keygen", {"-q", "-t", "ed25519", "-N", passphrase, "-C", "", "-f", directory.filePath(name)});
+            QVERIFY2(keygen.waitForFinished(30000) && keygen.exitCode() == 0, "Owned OpenSSH fixture generator required");
+        }
+        QTcpServer server; QVERIFY(server.listen(QHostAddress::LocalHost));
+        const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path, server.serverPort(), "private_key", directory.filePath("plain-key")));
+        {
+            MainWindow window(path, true, nullptr, {}, directory.filePath("ssh-host-keys.json")); window.show();
+            QTRY_VERIFY(window.selectConnectionProfile({window.connectionFiles().first(), profileId}));
+            window.connectSelected(); QTRY_COMPARE(window.sessionCount(), size_t(1));
+            QVERIFY(!window.findChild<SshCredentialsDialog*>()); QCOMPARE(window.findChild<SessionPane*>()->target().sshAuth, QString("private_key"));
+            window.closeTab(0);
+        }
+        QVERIFY(fixture(path, server.serverPort(), "private_key", directory.filePath("protected-key")));
+        MainWindow window(path, true, nullptr, {}, directory.filePath("ssh-host-keys.json")); window.show();
+        QTRY_VERIFY(window.selectConnectionProfile({window.connectionFiles().first(), profileId}));
+        window.connectSelected(); QTRY_VERIFY(window.findChild<SshCredentialsDialog*>());
+        auto* dialog = window.findChild<SshCredentialsDialog*>(); QCOMPARE(window.sessionCount(), size_t(0));
+        QCOMPARE(dialog->findChild<QLabel*>("authenticationLabel")->text(), QString("Passphrase")); dialog->reject();
     }
     void savedSshReconnectResolvesOwningFileAndCopiedIdsStayIndependent() {
         QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid());

@@ -157,7 +157,7 @@ public:
     void setSessionShortcutsEnabled(bool enabled) { sessionShortcuts_ = enabled; }
     void setInputSink(std::function<bool(const QByteArray&)> sink) { inputSink_ = std::move(sink); }
     // Typed input from outside the view (View > Multi SSH toolbar).
-    bool sendText(const QString& text) { return send(text.toUtf8()); }
+    bool sendText(const QString& text) { const bool sent = send(text.toUtf8()); if (sent) followInput(); return sent; }
     void selectCells(QPoint start, QPoint end);
     bool copySelection();
     bool pasteClipboard();
@@ -190,6 +190,7 @@ private:
     void updateCells();
     void refreshScreen();
     bool send(const QByteArray& bytes);
+    void followInput();
     void pumpPaste();
     struct SelectionCell {
         int column = 0;
@@ -223,7 +224,7 @@ private:
     QTimer* selectionTimer_ = nullptr;
     quint64 lineOrigin_ = 0, historyEnd_ = 0, contentRevision_ = 0, selectionEpoch_ = 0;
     qint64 pixelRemainder_ = 0, angleRemainder_ = 0;
-    bool inputEnabled_ = false, selection_ = false, dragging_ = false;
+    bool inputEnabled_ = false, selection_ = false, dragging_ = false, gestureFollowed_ = false;
     int pasteOffset_ = 0;
     QByteArray pendingPaste_;
 };

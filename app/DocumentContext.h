@@ -42,6 +42,8 @@ public:
     bool rootExpanded() const { return rootExpanded_; }
     void setRootExpanded(bool expanded) { rootExpanded_ = expanded; }
     void acknowledgeWarning() { status_.warning.clear(); }
+    // Settings' clipboard value for connections whose folders never set one.
+    void setClipboardDefault(bool value);
     QString error() const { return error_; }
 private:
     void assertGui() const;

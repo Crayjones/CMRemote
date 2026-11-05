@@ -63,6 +63,7 @@ public:
     // Binds each consumer's saved password to its committed account, as a typed password is.
     bool authorizeConsumers(const Secret& master, const QStringList& consumers, const Canceled& canceled = {});
     // Records whose saved password is currently bound to their committed account.
+    // Includes bindings held while their connection uses SSH private-key sign-in.
     std::vector<ConnectionBinding> boundRecords(const Canceled& canceled = {}) const;
     // After an in-app edit: rebinds previously bound consumers whose host or port changed while
     // their account and password did not. Never authorizes anything that was unbound before.
