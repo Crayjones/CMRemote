@@ -1055,16 +1055,17 @@ private slots:
             w.closeTab(0); QCOMPARE(w.sessionCount(),size_t(0));
             w.connectSelected(true); QCOMPARE(tabs->count(),1);
             w.disconnectCurrent(); QCOMPARE(w.sessionCount(),size_t(1));
-            // Double-clicking a disconnected tab's connection reconnects it in place.
-            auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane && pane->disconnected()); auto ended = pane->id();
-            QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->currentItem()).center());
-            QTRY_VERIFY(!pane->disconnected()); QVERIFY(pane->id() != ended); QCOMPARE(tabs->count(),1);
+            // Double-clicking a disconnected tab's connection reconnects it in place (a fresh session page in the same tab).
+            const auto current = [&] { return qobject_cast<SessionPane*>(tabs->widget(0)); };
+            const auto doubleClick = [&] { QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->currentItem()).center()); };
+            QVERIFY(current() && current()->disconnected()); auto ended = current()->id();
+            doubleClick();
+            QTRY_VERIFY(current() && current()->id() != ended); QVERIFY(!current()->disconnected()); QCOMPARE(tabs->count(),1);
             // A session that ended on the remote side reconnects the same way; a live one is only shown.
-            emit pane->state(pane->id(), "failed"); QVERIFY(pane->disconnected()); ended = pane->id();
-            QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->currentItem()).center());
-            QTRY_VERIFY(!pane->disconnected()); QVERIFY(pane->id() != ended); ended = pane->id();
-            QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualItemRect(tree->currentItem()).center());
-            QTest::qWait(50); QCOMPARE(pane->id(), ended); QCOMPARE(tabs->count(),1);
+            emit current()->state(current()->id(), "failed"); QVERIFY(current()->disconnected()); ended = current()->id();
+            doubleClick();
+            QTRY_VERIFY(current() && current()->id() != ended); QVERIFY(!current()->disconnected()); ended = current()->id();
+            doubleClick(); QTest::qWait(100); QCOMPARE(current()->id(), ended); QCOMPARE(tabs->count(),1);
             w.disconnectCurrent(); QCOMPARE(w.sessionCount(),size_t(1));
             w.deleteSelected(); WAIT_STORE(w); QVERIFY(w.lastError().contains("Close"));
             w.reconnectCurrent(); QCOMPARE(tabs->count(),1); QCOMPARE(w.sessionCount(),size_t(1));
@@ -1368,7 +1369,8 @@ private slots:
         tree->setCurrentItem(tree->topLevelItem(0)->child(0)->child(0)); QCOMPARE(w.selectedId(), child);
         // Connect shows the disconnected tab in its panel and reconnects it there.
         groups->setCurrentIndex(0); w.connectSelected(true); QCOMPARE(groups->currentIndex(), 1); QCOMPARE(w.sessionCount(), size_t(1));
-        QTRY_VERIFY(pane->active() && !pane->disconnected()); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 0);
+        QTRY_VERIFY(qobject_cast<SessionPane*>(other->widget(0)) && qobject_cast<SessionPane*>(other->widget(0))->id() != id);
+        QVERIFY(!qobject_cast<SessionPane*>(other->widget(0))->disconnected()); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 0);
         w.closeTab(0); QCOMPARE(w.sessionCount(), size_t(0)); tree->setCurrentItem(tree->topLevelItem(0)->child(0)); w.deleteSelected(); WAIT_STORE(w); QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
     }
     void panelCloseStopsAllWorkers() {
