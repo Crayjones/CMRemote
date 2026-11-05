@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build image
         run: python3 scripts/docker.py image --arch amd64
       - name: Test
@@ -34,7 +34,7 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "14.4"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Bootstrap the macOS SDK
         run: ./scripts/bootstrap-macos.sh --jobs 4
       - name: Test

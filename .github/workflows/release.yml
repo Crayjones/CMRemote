@@ -33,7 +33,7 @@ jobs:
         run: |
           echo "::error::Run releases from main (this run used ${GITHUB_REF})."
           exit 1
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Update the version
@@ -75,7 +75,7 @@ jobs:
           - arch: x64
             target: amd64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Bootstrap the macOS SDK
@@ -96,7 +96,7 @@ jobs:
         env:
           NAME: CMRemote-${{ needs.prepare.outputs.version }}-macos-${{ matrix.arch }}
         run: python3 scripts/release.py macos --arch ${{ matrix.arch }} --bundle "dist/macos/$NAME.app"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: macos-${{ matrix.arch }}
           path: dist/macos/release/*.dmg
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Allow the Flatpak sandbox
@@ -126,7 +126,7 @@ jobs:
         run: |
           python3 scripts/docker.py release-image --arch amd64
           python3 scripts/docker.py release --arch amd64 --package "dist/linux/amd64/$NAME"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: linux-x86_64
           path: |
@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
       - name: Build image
@@ -157,7 +157,7 @@ jobs:
         run: |
           python3 scripts/docker.py windows --arch amd64 python3 scripts/release.py windows --package "dist/windows/$NAME"
           cp "dist/windows/$NAME-windows.zip" "dist/windows/release/$NAME-portable.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: windows-x64
           path: |
@@ -170,10 +170,10 @@ jobs:
     needs: [prepare, macos, linux, windows]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.tag }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: assets
           merge-multiple: true
