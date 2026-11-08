@@ -2,7 +2,8 @@
 """Run the update helpers against disposable fixture installations; never a real CMRemote.
 
 macOS: real disk images from scripts/release.py around synthetic CMRemote.app bundles,
-parent-exit waiting, validation, replacement, rollback, result records and relaunch.
+copying beside the app while it runs (progress, refusals), parent-exit waiting, the
+swap, rollback, result records and relaunch.
 AppImage: the Linux helper on this host's /bin/sh, or with --linux-image inside an
 owned Linux container (dash, GNU coreutils, a relaunchable ELF fixture).
 """
@@ -58,7 +59,8 @@ def tree(path):
 
 
 class Attempt:
-    """One helper run: private session, a stand-in CMRemote process, the helper itself."""
+    """One helper run: private session, a stand-in CMRemote process, the helper itself.
+    The helper copies the new version while CMRemote runs, then reports ready or refuses."""
 
     def __init__(self, scratch, kind, package, version, target, extra=(), digest=None):
         self.updates = scratch / 'updates'
@@ -70,12 +72,28 @@ class Attempt:
         self.helper = subprocess.Popen(['/bin/sh', str(script), str(self.session), str(self.parent.pid), str(package),
                                         digest or sha256(package), version, str(target), str(self.updates), *extra],
                                        cwd=self.updates, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        wait_for(lambda: (self.session / 'ready').is_file() or self.helper.poll() is not None, 10, 'the helper to acknowledge')
-        if not (self.session / 'ready').is_file():
-            raise AssertionError('helper exited before acknowledging: ' + self.helper.communicate()[1])
+        wait_for(lambda: any((self.session / name).is_file() for name in ('ready', 'error')) or self.helper.poll() is not None,
+                 120, 'the helper to copy the new version')
+        error = self.session / 'error'
+        self.refused = error.read_text().strip() if error.is_file() else None
+        if not self.refused and not (self.session / 'ready').is_file():
+            raise AssertionError('helper exited before the update was ready: ' + self.helper.communicate()[1])
+        if not self.refused:
+            done, total = (int(n) for n in (self.session / 'progress').read_text().split())
+            check(total > 0 and done == total, 'ready before the copy finished: ' + str((done, total)))
+        self.staged = sorted(p.name for p in Path(target).parent.iterdir() if '.updating-' in p.name)
 
     def finish(self, commit, between=None):
         """CMRemote's final close (commit '0'/'1') or a canceled quit/crash (None), then its exit."""
+        if self.refused:
+            # CMRemote shows the reason and stays open; the helper changed nothing and has ended.
+            check(self.helper.wait(timeout=30) == 1, 'a refusing helper must exit')
+            check(not self.staged, 'refused but left a copy beside the application: ' + str(self.staged))
+            shutil.rmtree(self.session)
+            self.parent.kill(); self.parent.wait()
+            check(not (self.updates / 'result.json').exists(), 'a refusal is reported by CMRemote, not result.json')
+            return None
+        check(len(self.staged) == 1, 'the new version must be copied beside the application before CMRemote closes')
         time.sleep(0.3)
         check(self.helper.poll() is None, 'helper must wait while CMRemote runs')
         if between: between()
@@ -153,6 +171,12 @@ def mac_cases(scratch):
         check(version_of(target) == OLD, case + ': the previous version must remain')
         results.append(case)
 
+    def refused(case, package, text, extra=None, digest=None):
+        result, target, run = attempt(case, package, extra, digest, commit='1')
+        check(result is None and run.refused and text in run.refused, case + ': expected refusal "' + text + '", got ' + repr(run.refused))
+        check(version_of(target) == OLD, case + ': the previous version must remain')
+        results.append(case + ' (refused while open)')
+
     # Installs, removes the package and pending record, and relaunches only when asked.
     pending = None
     def seed():
@@ -178,19 +202,22 @@ def mac_cases(scratch):
     check(result is None and version_of(target) == OLD and good.exists(), 'canceled: changed something without a commit')
     results.append('canceled quit / crash before commit')
 
-    failed('identifier', *attempt('identifier', fx.image('other.dmg', NEW, identifier='com.example.Other'), commit='1')[:2], 'different application')
-    failed('version', *attempt('version', fx.image('stale.dmg', '1.5.0'), commit='1')[:2], 'does not contain CMRemote 2.0.0')
-    failed('architecture', *attempt('architecture', good, extra=(IDENTIFIER, 'ppc'), commit='1')[:2], 'does not run on ppc')
-    failed('checksum', *attempt('checksum', good, digest='0' * 64, commit='1')[:2], 'changed after it was verified')
-    failed('not an image', *attempt('not an image', scratch / 'launch-1.0.0.c', commit='1')[:2], 'Cannot open the update disk image')
+    refused('identifier', fx.image('other.dmg', NEW, identifier='com.example.Other'), 'different application')
+    refused('version', fx.image('stale.dmg', '1.5.0'), 'does not contain CMRemote 2.0.0')
+    refused('architecture', good, 'does not run on ppc', extra=(IDENTIFIER, 'ppc'))
+    refused('checksum', good, 'changed after it was verified', digest='0' * 64)
+    refused('not an image', scratch / 'launch-1.0.0.c', 'Cannot open the update disk image')
 
     folder, target = fx.installed('read-only')
-    run = Attempt(scratch / 'read-only', 'macos', good, NEW, target, (IDENTIFIER, fx.arch))
     folder.chmod(0o555)
-    try: result = run.finish('1')
+    try:
+        run = Attempt(scratch / 'read-only', 'macos', good, NEW, target, (IDENTIFIER, fx.arch))
+        result = run.finish('1')
     finally: folder.chmod(0o755)
-    failed('read-only folder', result, target, 'Cannot copy the new version')
+    check(result is None and run.refused and 'Cannot copy the new version' in run.refused, 'read-only: ' + repr(run.refused))
+    check(version_of(target) == OLD, 'read-only: the previous version must remain')
     check(sorted(p.name for p in folder.iterdir()) == ['CMRemote.app', 'Other.app', 'notes.txt'], 'read-only: leftovers')
+    results.append('read-only folder (refused while open)')
 
     folder, target = fx.installed('locked')
     run = Attempt(scratch / 'locked', 'macos', good, NEW, target, (IDENTIFIER, fx.arch))
@@ -198,6 +225,7 @@ def mac_cases(scratch):
     result = run.finish('1')
     failed('concurrent install', result, target, 'Another update is being installed')
     check((run.updates / 'install.lock').is_dir(), 'locked: removed another helper\'s lock')
+    check(sorted(p.name for p in folder.iterdir()) == ['CMRemote.app', 'Other.app', 'notes.txt'], 'locked: leftovers')
     return results
 
 
@@ -240,11 +268,11 @@ def appimage_cases(scratch):
         result = run.finish(commit)
         check((folder / 'notes.txt').read_text() == 'unrelated file', case + ': unrelated file changed')
         check(sorted(p.name for p in folder.iterdir()) == ['CMRemote.AppImage', 'notes.txt'], case + ': leftovers ' + str(list(folder.iterdir())))
-        return result, target
+        return result, target, run
 
     new = package('CMRemote-2.0.0-linux-x86_64.appimage', 'new')
     expected = new.read_bytes()
-    result, target = attempt('install', new)
+    result, target, _ = attempt('install', new)
     check(result['status'] == 'installed' and target.read_bytes() == expected, 'install: ' + repr(result))
     check(stat.S_IMODE(target.stat().st_mode) == 0o750, 'install: permissions not preserved: ' + oct(target.stat().st_mode))
     check(not new.exists(), 'install: package kept')
@@ -254,23 +282,23 @@ def appimage_cases(scratch):
     else: results.append('install (permissions preserved; relaunch not executable on this host)')
 
     new = package('CMRemote-2.0.0-linux-x86_64.appimage', 'new')
-    result, target = attempt('canceled', new, commit=None)
+    result, target, _ = attempt('canceled', new, commit=None)
     check(result is None and target.read_bytes().endswith(b'old') and new.exists(), 'canceled: changed something without a commit')
     results.append('canceled quit / crash before commit')
 
     for case, source, text, digest in (
             ('checksum', new, 'changed after it was verified', '0' * 64),
             ('not an appimage', scratch / 'appimage.c' if (scratch / 'appimage.c').exists() else Path(__file__), 'not an AppImage', None)):
-        result, target = attempt(case, source, digest=digest)
-        check(result['status'] == 'failed' and text in result['message'], case + ': ' + repr(result))
+        result, target, run = attempt(case, source, digest=digest)
+        check(result is None and run.refused and text in run.refused, case + ': ' + repr(run.refused))
         check(target.read_bytes().endswith(b'old'), case + ': previous version replaced')
-        results.append(case)
+        results.append(case + ' (refused while open)')
 
     folder, target = installed('link')
     real = folder / 'CMRemote.AppImage'; moved = scratch / 'link/real.AppImage'; real.rename(moved); real.symlink_to(moved)
     run = Attempt(scratch / 'link', 'appimage', new, NEW, real)
     result = run.finish('1')
-    check(result['status'] == 'failed' and 'is missing or is a link' in result['message'] and moved.read_bytes().endswith(b'old'), 'link: ' + repr(result))
+    check(result is None and 'is missing or is a link' in run.refused and moved.read_bytes().endswith(b'old'), 'link: ' + repr(run.refused))
     results.append('link target refused')
     return results
 

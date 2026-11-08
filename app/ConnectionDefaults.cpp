@@ -1,4 +1,5 @@
 #include "ConnectionDefaults.h"
+#include "RdpTarget.h"
 #include <QJsonDocument>
 #include <QStringList>
 
@@ -41,7 +42,7 @@ std::optional<ConnectionDefaults> ConnectionDefaults::parse(const QJsonObject& o
     const auto e = result.effective(); const auto protocol = e.value("protocol").toString();
     if (!QStringList{"rdp", "ssh", "vnc"}.contains(protocol) ||
         !QStringList{"password", "private_key"}.contains(e.value("ssh_auth").toString()) ||
-        !QStringList{"fit", "800x600", "1024x768", "1280x720", "1920x1080"}.contains(e.value("resolution").toString())) return {};
+        !rdpResolutions().contains(e.value("resolution").toString())) return {};
     const double port = e.value("port").toDouble(), colors = e.value("color_depth").toDouble();
     if (port < 1 || port > 65535 || port != int(port) || (colors != 16 && colors != 24 && colors != 32)) return {};
     const double idle = e.value("idle_minutes").toDouble(), gatewayPort = e.value("gateway_port").toDouble();

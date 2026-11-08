@@ -57,6 +57,8 @@ public:
     void setUpdateSource(const QUrl& source);
     // Packaged application only: check, download and install releases automatically.
     void enableAutomaticUpdates(const QString& dataDirectory);
+    // Why this copy cannot install updates when it has no updater (shown by Check for Updates).
+    void setUpdatesUnavailable(const QString& reason) { updatesUnavailable_ = reason; }
     // Takes ownership; tests supply an updater with fixture releases and installation.
     void attachUpdater(class AutoUpdater* updater);
     DocumentId openConnectionFile(const QString& path, bool createNew = false);
@@ -274,13 +276,19 @@ private:
     QString theme_ = "light", lightStyleSheet_;
     void applyThemeStyle();
     class AutoUpdater* updater_ = nullptr;
-    QString promptedUpdate_;
+    QString promptedUpdate_, downloadingUpdate_, updatesUnavailable_; // downloadingUpdate_: Check for Updates waits to offer it
     bool relaunchAfterUpdate_ = false, skipUpdateOnExit_ = false, updatePreferenceKnown_ = false, updateCheckRequested_ = false;
     void promptUpdateInstall(const QString& version, bool again);
+    void showUpdateProgress();
     void finishUpdatePreparation(bool ok, const QString& error);
     void showUpdateCheck(bool ok, const Updates::Release& latest, const QString& error, bool installable);
+    void showUpdateMessage(const QString& name, const QString& text, const QString& version);
     // macOS: Quick Connect sits in the title bar beside the window buttons.
     void placeQuickConnectInTitleBar();
+    // Windows/Linux: the menus live in a movable toolbar (mRemoteNG's menu strip).
+    void placeMenuBarInToolbar();
+    QList<QToolBar*> shellToolbars() const;
+    QToolBar* menuToolbar_ = nullptr;
     void fitTitleBar();
     bool titleBarDrag(QObject* watched, QEvent* event);
     bool quickConnectInTitleBar_ = false;

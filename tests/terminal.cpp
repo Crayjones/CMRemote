@@ -138,6 +138,9 @@ private slots:
             received.clear(); keyEvent(view, key, Qt::AltModifier | physicalControl(), QString());
             QCOMPARE(received, QByteArray("\x1b") + QByteArray(1, char(key - Qt::Key_A + 1)));
         }
+        received.clear(); keyEvent(view, Qt::Key_Space, Qt::ShiftModifier, " "); QCOMPARE(received, QByteArray(" "));
+        received.clear(); keyEvent(view, Qt::Key_Space, Qt::ShiftModifier | Qt::AltModifier, " "); QCOMPARE(received, QByteArray("\x1b "));
+        received.clear(); keyEvent(view, Qt::Key_ParenLeft, Qt::ShiftModifier, "("); QCOMPARE(received, QByteArray("("));
         received.clear(); keyEvent(view, Qt::Key_Backspace, Qt::AltModifier); QCOMPARE(received, QByteArray("\x1b\x7f"));
         received.clear(); keyEvent(view, Qt::Key_Return, Qt::AltModifier); QCOMPARE(received, QByteArray("\x1b\r"));
         received.clear(); keyEvent(view, Qt::Key_Up, Qt::NoModifier); QCOMPARE(received, QByteArray("\x1b[A"));
