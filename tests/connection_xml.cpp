@@ -1,5 +1,6 @@
 #include "ConnectionCrypto.h"
 #include "ConnectionXml.h"
+#include "RdpTarget.h"
 #include <QTest>
 #include <QFile>
 #include <QDir>
@@ -42,6 +43,43 @@ QByteArray attribute(const QByteArray& xml, const QString& name, const QString& 
     }
     return {};
 }
+// Every attribute mRemoteNG 1.78 (XmlConnectionNodeSerializer28) writes for a connection,
+// at its stock ConDefault* settings, apart from Name/Type/Id/Hostname/Protocol/Port.
+const char* const MremotengStock =
+    "AutomaticResize=\"true\" CacheBitmaps=\"false\" Colors=\"Colors16Bit\" ConnectToConsole=\"false\" Connected=\"false\" ConnectionFrameColor=\"None\" Descr=\"\" "
+    "DisableCursorBlinking=\"false\" DisableCursorShadow=\"false\" DisableFullWindowDrag=\"false\" DisableMenuAnimations=\"false\" DisplayThemes=\"false\" "
+    "DisplayWallpaper=\"false\" Domain=\"\" EC2InstanceId=\"\" EC2Region=\"eu-central-1\" EnableDesktopComposition=\"false\" EnableFontSmoothing=\"false\" "
+    "EnvironmentTags=\"\" Expanded=\"false\" ExtApp=\"\" ExternalAddressProvider=\"None\" ExternalCredentialProvider=\"None\" Favorite=\"false\" Icon=\"mRemoteNG\" "
+    "IsRootGroup=\"false\" LoadBalanceInfo=\"\" MacAddress=\"\" OpeningCommand=\"\" Panel=\"General\" Password=\"\" PostExtApp=\"\" PreExtApp=\"\" "
+    "PuttySession=\"Default Settings\" RDGatewayAccessToken=\"\" RDGatewayDomain=\"\" RDGatewayExternalCredentialProvider=\"None\" RDGatewayHostname=\"\" "
+    "RDGatewayPassword=\"\" RDGatewayUsageMethod=\"Never\" RDGatewayUseConnectionCredentials=\"Yes\" RDGatewayUserViaAPI=\"\" RDGatewayUsername=\"\" "
+    "RDPAlertIdleTimeout=\"false\" RDPAuthenticationLevel=\"WarnOnFailedAuth\" RDPMinutesToIdleTimeout=\"0\" RdpVersion=\"Highest\" RedirectAudioCapture=\"false\" "
+    "RedirectClipboard=\"false\" RedirectDiskDrives=\"None\" RedirectDiskDrivesCustom=\"\" RedirectKeys=\"false\" RedirectPorts=\"false\" RedirectPrinters=\"false\" "
+    "RedirectSmartCards=\"false\" RedirectSound=\"DoNotPlay\" RenderingEngine=\"EdgeChromium\" Resolution=\"SmartSize\" SSHOptions=\"\" SSHTunnelConnectionName=\"\" "
+    "SoundQuality=\"Dynamic\" StartProgram=\"\" StartProgramWorkDir=\"\" TabColor=\"\" UseCredSsp=\"true\" UseEnhancedMode=\"false\" UseRCG=\"false\" "
+    "UseRedirectionServerName=\"false\" UseRestrictedAdmin=\"false\" UseVmId=\"false\" UserField=\"\" UserViaAPI=\"\" Username=\"\" VNCAuthMode=\"AuthVNC\" "
+    "VNCColors=\"ColNormal\" VNCCompression=\"CompNone\" VNCEncoding=\"EncHextile\" VNCProxyIP=\"\" VNCProxyPassword=\"\" VNCProxyPort=\"0\" VNCProxyType=\"ProxyNone\" "
+    "VNCProxyUsername=\"\" VNCSmartSizeMode=\"SmartSAspect\" VNCViewOnly=\"false\" VaultOpenbaoMount=\"\" VaultOpenbaoRole=\"\" VaultOpenbaoSecretEngine=\"Kv\" VmId=\"\"";
+// The Inherit<name> flags it writes alongside them.
+const char* const MremotengInherited =
+    "AutomaticResize CacheBitmaps Colors ConnectionFrameColor Description DisableCursorBlinking DisableCursorShadow DisableFullWindowDrag "
+    "DisableMenuAnimations DisplayThemes DisplayWallpaper Domain EnableDesktopComposition EnableFontSmoothing EnvironmentTags ExtApp "
+    "ExternalCredentialProvider Favorite Icon LoadBalanceInfo MacAddress OpeningCommand Panel Password Port PostExtApp PreExtApp Protocol PuttySession "
+    "RDGatewayAccessToken RDGatewayDomain RDGatewayExternalCredentialProvider RDGatewayHostname RDGatewayPassword RDGatewayUsageMethod "
+    "RDGatewayUseConnectionCredentials RDGatewayUserViaAPI RDGatewayUsername RDPAlertIdleTimeout RDPAuthenticationLevel RDPMinutesToIdleTimeout RdpVersion "
+    "RedirectAudioCapture RedirectClipboard RedirectDiskDrives RedirectDiskDrivesCustom RedirectKeys RedirectPorts RedirectPrinters RedirectSmartCards "
+    "RedirectSound RenderingEngine Resolution SSHOptions SSHTunnelConnectionName SoundQuality TabColor UseConsoleSession UseCredSsp UseEnhancedMode UseRCG "
+    "UseRedirectionServerName UseRestrictedAdmin UseVmId UserField UserViaAPI Username VNCAuthMode VNCColors VNCCompression VNCEncoding VNCProxyIP "
+    "VNCProxyPassword VNCProxyPort VNCProxyType VNCProxyUsername VNCSmartSizeMode VNCViewOnly VmId";
+QXmlStreamAttributes nodeAttributes(const QByteArray& xml, const QString& id) {
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.isStartElement() && reader.name() == "Node" && reader.attributes().value("Id") == id) return reader.attributes();
+    }
+    return {};
+}
+QJsonObject firstProfile(const QByteArray& projection) { return QJsonDocument::fromJson(projection).object().value("profiles").toArray()[0].toObject(); }
 QByteArray node() { return "<Node xmlns=\"\" Type=\"Connection\" Id=\"" + Id + "\" Name=\"fixture\" Protocol=\"RDP\" Hostname=\"localhost\" Port=\"3389\" Password=\"\"/>"; }
 QByteArray xml(const QByteArray& body, const QByteArray& version = "2.8", const QByteArray& extra = {}, bool full = false) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Connections Name=\"Connections\" Export=\"false\" ConfVersion=\"" + version +
@@ -231,6 +269,45 @@ private slots:
         QVERIFY(!ConnectionXml::read(xml(damaged.toBase64(), "2.8", {}, true), &master));
         auto brokenSecret = QByteArray::fromBase64(*secret); brokenSecret.back() = char(brokenSecret.back() ^ 1);
         QVERIFY(!ConnectionXml::read(xml(QByteArray(inner).replace(*secret, brokenSecret.toBase64())), &master));
+    }
+    void suppliedMremotengFileSurvivesOpenEditSaveAndExport() {
+        // Optional: RM_INTEROP_XML names an mRemoteNG file saved with the default key;
+        // RM_INTEROP_OUT receives what CMRemote writes back, for comparison with the input.
+        const auto path = qEnvironmentVariable("RM_INTEROP_XML"), out = qEnvironmentVariable("RM_INTEROP_OUT");
+        if (path.isEmpty() || out.isEmpty()) QSKIP("Set RM_INTEROP_XML and RM_INTEROP_OUT");
+        QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+        const Secret master(QByteArray("mR3m"));
+        auto parsed = ConnectionXml::read(file.readAll(), &master); QVERIFY(parsed); QVERIFY(!parsed->needsUnlock());
+        const auto projection = parsed->projection(); QVERIFY(projection);
+        auto core = rm::detached_core(); core->load_document(rust::Str(projection->constData(), size_t(projection->size())));
+        const auto snapshot = core->snapshot();
+        const auto write = [&](const QString& name, const QByteArray& bytes) { QFile target(QDir(out).filePath(name)); return target.open(QIODevice::WriteOnly) && target.write(bytes) == bytes.size(); };
+        QVERIFY(write("projection.json", *projection)); QVERIFY(write("snapshot.json", QByteArray(snapshot.data(), qsizetype(snapshot.size()))));
+        // The app's save after an edit that changes nothing: Core's stored document patched back.
+        const auto canonical = core->stored_document();
+        QVERIFY(parsed->patch(master, QByteArray(canonical.data(), qsizetype(canonical.size()))));
+        const auto saved = parsed->serialize(master); QVERIFY(saved); QVERIFY(write("saved.xml", *saved));
+        auto renamed = QJsonDocument::fromJson(*projection).object(); auto profiles = renamed.value("profiles").toArray();
+        auto first = profiles[0].toObject(); first.insert("name", first.value("name").toString() + " (edited)"); profiles[0] = first; renamed.insert("profiles", profiles);
+        QVERIFY(parsed->patch(master, QJsonDocument(renamed).toJson(QJsonDocument::Compact)));
+        const auto edited = parsed->serialize(master); QVERIFY(edited); QVERIFY(write("edited.xml", *edited));
+        const auto exported = parsed->exportFile(master, {}); QVERIFY(exported); QVERIFY(write("exported.xml", *exported));
+        for (const auto& output : {*saved, *edited, *exported}) { auto reopened = ConnectionXml::read(output, &master); QVERIFY(reopened); QVERIFY(reopened->projection()); }
+    }
+    void writeCreatedFileForInterop() {
+        const auto out = qEnvironmentVariable("RM_INTEROP_OUT"); if (out.isEmpty()) QSKIP("Set RM_INTEROP_OUT");
+        const Secret master(QByteArray("mR3m")); auto created = ConnectionXml::create(); QVERIFY(created);
+        const auto connection = [](const char* id, const char* name, const char* protocol, const QJsonValue& parent) {
+            return QJsonObject{{"id", id}, {"name", name}, {"kind", "connection"}, {"parent", parent},
+                {"overrides", QJsonObject{{"protocol", protocol}, {"host", "10.0.0.5"}, {"username", "alice"}}}};
+        };
+        const QJsonArray profiles{QJsonObject{{"id", "11111111-1111-4111-8111-111111111111"}, {"name", "Folder"}, {"kind", "folder"}, {"parent", QJsonValue::Null}, {"overrides", QJsonObject{{"domain", "CORP"}}}},
+            connection("22222222-2222-4222-8222-222222222222", "rdp", "rdp", "11111111-1111-4111-8111-111111111111"),
+            connection("33333333-3333-4333-8333-333333333333", "ssh", "ssh", "11111111-1111-4111-8111-111111111111"),
+            connection("44444444-4444-4444-8444-444444444444", "vnc", "vnc", QJsonValue::Null)};
+        QVERIFY(created->patch(master, QJsonDocument(QJsonObject{{"schema_version", 2}, {"profiles", profiles}}).toJson(QJsonDocument::Compact)));
+        const auto saved = created->serialize(master); QVERIFY(saved);
+        QFile target(QDir(out).filePath("created.xml")); QVERIFY(target.open(QIODevice::WriteOnly)); target.write(*saved);
     }
     void unknownAttributesAndOpaqueNodesSurviveEdit() {
         const Secret master(QByteArray("Password"));
@@ -515,11 +592,11 @@ private slots:
         struct Case { const char *attribute, *before, *value, *reason; };
         const Case cases[] = {
             {"Type", "Connection", "Unrecognized", "node_type"}, {"Protocol", "RDP", "ICA", "protocol"}, {"Port", "3389", "0", "port"},
-            {"Resolution", "FitToWindow", "SmartSize", "resolution"}, {"Colors", "Colors32Bit", "Colors15Bit", "colors"},
+            {"Resolution", "FitToWindow", "Stretch", "resolution"}, {"Colors", "Colors32Bit", "Colors15Bit", "colors"},
             {"InheritUsername", nullptr, "invalid", "inheritance"}, {"RmResolution", nullptr, "invalid", "preferences"},
             // Mapped RDP security/gateway fields (V105) only disable launch for values they cannot represent.
             {"RDGatewayUseConnectionCredentials", nullptr, "SmartCard", "gateway"}, {"ExternalCredentialProvider", nullptr, "VaultOpenbao", "provider"},
-            {"UserViaAPI", nullptr, "synthetic-opaque-marker", "provider"}, {"PreExtApp", nullptr, "synthetic-opaque-marker", "command"},
+            {"ExternalAddressProvider", nullptr, "AmazonWebServices", "provider"}, {"PreExtApp", nullptr, "synthetic-opaque-marker", "command"},
             {"RDPAuthenticationLevel", "WarnOnFailedAuth", "Sometimes", "authentication"},
             {"UseRestrictedAdmin", nullptr, "true", "authentication"}, {"LoadBalanceInfo", nullptr, "&#9;synthetic-opaque-marker", "authentication"},
             {"RedirectPrinters", nullptr, "true", "redirection"}, {"RedirectDiskDrives", nullptr, "All", "redirection"},
@@ -546,6 +623,95 @@ private slots:
         QVERIFY(!reasons.contains(QString("redirection"))); // absent RedirectSound = Bring to this computer
         // Absent UseCredSsp/RDPAuthenticationLevel use secure defaults (V105), not a launch block.
         QVERIFY(!reasons.contains(QString("authentication")));
+    }
+    void mremotengStockConnectionsOpenFromEveryVersion() {
+        // A connection exactly as mRemoteNG 1.76-1.78 saves it with stock settings opens, survives
+        // a no-op save byte for byte, and keeps mRemoteNG's SmartSize.
+        const Secret master(QByteArray("Password"));
+        QByteArray inherit; for (const auto& name : QByteArray(MremotengInherited).split(' ')) inherit += " Inherit" + name + "=\"false\"";
+        struct Version { const char *conf, *extra; };
+        const Version versions[] = {{"2.6", " ICAEncryptionStrength=\"EncrBasic\" InheritICAEncryptionStrength=\"false\""}, {"2.7", ""}, {"2.8", ""},
+            {"2.9", " TerminalBackend=\"PuttyNg\" Color=\"\" InheritTerminalBackend=\"false\" InheritColor=\"false\""}};
+        struct Protocol { const char *name, *port, *model; };
+        const Protocol protocols[] = {{"RDP", "3389", "rdp"}, {"SSH2", "22", "ssh"}, {"VNC", "5900", "vnc"}};
+        for (const auto& version : versions) for (const auto& protocol : protocols) {
+            const auto label = QByteArray(version.conf) + ' ' + protocol.name;
+            const auto body = "<Node Name=\"stock\" Type=\"Connection\" Id=\"" + Id + "\" Hostname=\"localhost\" Protocol=\"" + protocol.name + "\" Port=\"" +
+                protocol.port + "\" " + MremotengStock + inherit + version.extra + "/>";
+            auto parsed = ConnectionXml::read(xml(body, version.conf), &master); QVERIFY2(parsed, label);
+            const auto projection = parsed->projection(); QVERIFY(projection); const auto profile = firstProfile(*projection);
+            QVERIFY2(profile.value("native").isObject(), label);
+            QVERIFY2(profile.value("native").toObject().value("unsupported").toArray().isEmpty(), label + ' ' + QJsonDocument(profile.value("native").toObject()).toJson(QJsonDocument::Compact));
+            const auto overrides = profile.value("overrides").toObject();
+            QCOMPARE(overrides.value("protocol").toString(), QString::fromLatin1(protocol.model)); QCOMPARE(overrides.value("resolution").toString(), QString("smart_size"));
+            auto core = rm::detached_core(); core->load_document(rust::Str(projection->constData(), size_t(projection->size())));
+            const auto session = core->open_session(rust::Str(Id.constData(), size_t(Id.size())), true); core->close_session(session.id);
+            const auto before = parsed->serialize(master); QVERIFY(before);
+            const auto canonical = core->stored_document(); QVERIFY(parsed->patch(master, QByteArray(canonical.data(), qsizetype(canonical.size()))));
+            QCOMPARE(parsed->serialize(master), before);
+            for (const auto& kept : {"Resolution=\"SmartSize\"", "EC2Region=\"eu-central-1\"", "Colors=\"Colors16Bit\""}) QVERIFY2(before->contains(kept), label + ' ' + kept);
+        }
+    }
+    void mremotengResolutionsMapBothWays() {
+        const Secret master(QByteArray("Password"));
+        const auto read = [&](const char* version, const QByteArray& value) {
+            auto parsed = ConnectionXml::read(xml(QByteArray(node()).replace("Port=", "Resolution=\"" + value + "\" Port="), version), &master);
+            if (!parsed) return QString("unreadable");
+            const auto profile = firstProfile(*parsed->projection());
+            if (profile.value("native").toObject().value("unsupported").toArray().contains(QString("resolution"))) return QString("unsupported");
+            return profile.value("overrides").toObject().value("resolution").toString();
+        };
+        QCOMPARE(read("2.8", "FitToWindow"), QString("fit")); QCOMPARE(read("2.9", "SmartSize"), QString("smart_size"));
+        QCOMPARE(read("2.8", "Fullscreen"), QString("fullscreen")); QCOMPARE(read("2.7", "Res1920x1080"), QString("1920x1080"));
+        QCOMPARE(read("2.6", "Res800x600"), QString("800x600")); QCOMPARE(read("2.7", "Res1234x567"), QString("unsupported"));
+        QCOMPARE(read("2.8", "Stretch"), QString("unsupported"));
+        // 1.78 (2.8+) has no fixed sizes: it gets FitToWindow and CMRemote keeps the size in RmResolution.
+        // 1.76/1.77 (2.6/2.7) read the size itself.
+        struct Write { const char *version, *model, *native; };
+        const Write writes[] = {{"2.8", "fit", "FitToWindow"}, {"2.8", "smart_size", "SmartSize"}, {"2.8", "fullscreen", "Fullscreen"}, {"2.8", "1366x768", "FitToWindow"},
+            {"2.7", "fit", "FitToWindow"}, {"2.7", "smart_size", "SmartSize"}, {"2.7", "fullscreen", "Fullscreen"}, {"2.7", "1366x768", "Res1366x768"},
+            {"2.6", "2560x1440", "Res2560x1440"}};
+        for (const auto& write : writes) {
+            auto parsed = ConnectionXml::read(xml(QByteArray(node()).replace("Port=", "Resolution=\"FitToWindow\" Port="), write.version), &master); QVERIFY(parsed);
+            auto request = QJsonDocument::fromJson(*parsed->projection()).object(); auto profiles = request.value("profiles").toArray();
+            auto profile = profiles[0].toObject(); auto overrides = profile.value("overrides").toObject();
+            overrides["resolution"] = QString::fromLatin1(write.model); profile["overrides"] = overrides; profiles[0] = profile; request["profiles"] = profiles;
+            QVERIFY(parsed->patch(master, QJsonDocument(request).toJson(QJsonDocument::Compact)));
+            const auto saved = parsed->serialize(master); QVERIFY(saved);
+            QCOMPARE(attribute(*saved, "Resolution", QString::fromLatin1(Id)), QByteArray(write.native));
+            if (write.model != QByteArray("fit")) QCOMPARE(attribute(*saved, "RmResolution", QString::fromLatin1(Id)), QByteArray(write.model)); // fit: unchanged, untouched
+            auto reopened = ConnectionXml::read(*saved, &master); QVERIFY(reopened);
+            QCOMPARE(firstProfile(*reopened->projection()).value("overrides").toObject().value("resolution").toString(), QString::fromLatin1(write.model));
+        }
+        RdpOptions options; const QSize panel(1000, 700), screen(2560, 1440);
+        options.resolution = "fit"; QVERIFY(options.dynamicResize()); QCOMPARE(options.initialSize(panel, screen), panel);
+        options.resolution = "smart_size"; QVERIFY(!options.dynamicResize()); QCOMPARE(options.initialSize(panel, screen), screen);
+        QCOMPARE(options.initialSize(panel), panel); // no screen known: the panel
+        options.resolution = "fullscreen"; QVERIFY(options.dynamicResize()); QCOMPARE(options.initialSize(panel, screen), screen);
+        options.resolution = "1366x768"; QCOMPARE(options.initialSize(panel, screen), QSize(1366, 768));
+        options.automaticResize = false; options.resolution = "fit"; QVERIFY(!options.dynamicResize());
+    }
+    void createdConnectionsCarryEveryMremotengAttribute() {
+        // mRemoteNG reads a missing attribute as false/0/the first enum value, not its own default,
+        // so a connection made here must be written the way mRemoteNG writes one.
+        const Secret defaultMaster(QByteArray("mR3m")); auto parsed = ConnectionXml::create(); QVERIFY(parsed);
+        QJsonArray profiles;
+        const char* const protocols[] = {"rdp", "ssh", "vnc"};
+        for (int i = 0; i < 3; ++i) profiles.append(QJsonObject{{"id", QStringLiteral("00000000-0000-4000-8000-00000000000%1").arg(i)}, {"name", protocols[i]}, {"kind", "connection"},
+            {"parent", QJsonValue(QJsonValue::Null)}, {"overrides", QJsonObject{{"protocol", protocols[i]}, {"host", "localhost"}, {"port", 3389}, {"username", ""}}}});
+        QVERIFY(parsed->patch(defaultMaster, QJsonDocument(QJsonObject{{"schema_version", 2}, {"profiles", profiles}}).toJson(QJsonDocument::Compact)));
+        const auto saved = parsed->serialize(defaultMaster); QVERIFY(saved);
+        QStringList expected{"Name", "Type", "Id", "Hostname", "Protocol", "Port"};
+        QXmlStreamReader stock("<Node " + QByteArray(MremotengStock) + "/>"); stock.readNextStartElement();
+        for (const auto& attribute : stock.attributes()) expected.append(attribute.name().toString());
+        for (const auto& name : QByteArray(MremotengInherited).split(' ')) expected.append("Inherit" + QString::fromLatin1(name));
+        for (int i = 0; i < 3; ++i) {
+            const auto attributes = nodeAttributes(*saved, QStringLiteral("00000000-0000-4000-8000-00000000000%1").arg(i)); QVERIFY(!attributes.isEmpty());
+            QStringList missing; for (const auto& name : expected) if (!attributes.hasAttribute(name)) missing.append(name);
+            QVERIFY2(missing.isEmpty(), qPrintable(QString::fromLatin1(protocols[i]) + ": " + missing.join(' ')));
+            QCOMPARE(attributes.value("EC2Region").toString(), QString("eu-central-1")); QCOMPARE(attributes.value("VNCSmartSizeMode").toString(), QString("SmartSAspect"));
+            QCOMPARE(attributes.value("PuttySession").toString(), QString("Default Settings"));
+        }
     }
     void nativeCredentialAccountMatchesProjectionSourcesAndAliases() {
         const Secret master(QByteArray("Password")); const QByteArray folder("1897a1fb-b702-45e9-bcae-884f59cc66c7");
@@ -634,7 +800,7 @@ private slots:
     }
     void xmlTamperingAndParserLimitsReject() {
         const Secret master(QByteArray("Password"));
-        for (const auto& bad : {xml(node(), "2.5"), xml(node(), "2.9"), xml(node(), "2.8", "xmlns=\"urn:wrong\""),
+        for (const auto& bad : {xml(node(), "2.5"), xml(node(), "3.0"), xml(node(), "2.8", "xmlns=\"urn:wrong\""),
             xml(node()).replace("AES", "DES"), xml(node()).replace("GCM", "CBC"), xml(node()).replace("KdfIterations=\"1000\"", "KdfIterations=\"0\""),
             xml(node()).replace("BlockCipherMode=\"GCM\"", ""), xml(node() + node()), xml(node()).replace(Id, "invalid"),
             xml(node()).replace("Name=\"fixture\"", "Name=\"fixture\" Name=\"duplicate\""), xml(node()).replace("</Connections>", ""),

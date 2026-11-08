@@ -22,7 +22,7 @@ struct RdpConfig {
     bool clipboard = false;
     QString domain;
     RdpOptions options;
-    QSize panelSize{1024, 768};
+    QSize panelSize{1024, 768}, screenSize;
     std::shared_ptr<PerformanceTrace> performance;
     RdpGraphicsPolicy graphicsPolicy = RdpGraphicsPolicy::Gfx;
 };
@@ -54,7 +54,7 @@ public:
     std::optional<ClipboardDelivery> takeClipboard();
     FrameStamp takenFrameStamp();
     static QImage copyFramebuffer(const uchar* bytes, int width, int height, int stride);
-    static bool applyProfileSettings(rdp_settings* settings, const SessionTarget& target, QSize panelSize);
+    static bool applyProfileSettings(rdp_settings* settings, const SessionTarget& target, QSize panelSize, QSize screenSize = {});
 signals:
     void frameAvailable();
     void cursorAvailable();

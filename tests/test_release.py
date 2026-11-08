@@ -167,6 +167,63 @@ class SelfUpdate(unittest.TestCase):
         failed = failed[:failed.index('FunctionEnd')]
         self.assertIn('Rename "$INSTDIR.previous" "$INSTDIR"', failed)
 
+    def test_setup_waits_for_cmremote_and_reopens_it_for_the_updater(self):
+        script = module('release').NSIS_SCRIPT
+        install = script[script.index('Section "Install"'):]
+        install = install[:install.index('SectionEnd')]
+        # CMRemote starts setup as it exits: update and silent runs retry while it finishes closing.
+        retry = install[install.index('retry:'):install.index('busy:')]
+        for step in ('StrCmp $Updating 1 wait', 'IfSilent 0 busy', 'IntCmp $0 60 busy', 'Sleep 500', 'Goto retry'):
+            self.assertIn(step, retry)
+        self.assertLess(install.index('busy:'), install.index('SetErrorLevel 2'))
+        success = script[script.index('Function .onInstSuccess'):]
+        success = success[:success.index('FunctionEnd')]
+        # /RELAUNCH reopens CMRemote through Explorer, without setup's administrator rights.
+        self.assertIn('${GetOptions} $0 "/RELAUNCH" $1', success)
+        self.assertIn('Call Launch', success)
+        launch = script[script.index('Function Launch'):]
+        launch = launch[:launch.index('FunctionEnd')]
+        self.assertIn('Exec \'"$WINDIR\\explorer.exe" "$INSTDIR\\RemoteManager.exe"\'', launch)
+        self.assertIn('!define MUI_FINISHPAGE_RUN_FUNCTION Launch', script)
+        # /UPDATE skips the folder and finish pages, shows progress with the install folder, then closes.
+        init = script[script.index('Function .onInit'):]
+        init = init[:init.index('FunctionEnd')]
+        for step in ('${GetOptions} $0 "/UPDATE" $1', 'StrCpy $Updating 1', 'SetAutoClose true'): self.assertIn(step, init)
+        self.assertEqual(script.count('!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipWhenUpdating'), 2)
+        self.assertIn('!insertmacro MUI_HEADER_TEXT "Updating ${PRODUCT}" "Installing ${PRODUCT} ${VERSION} in $INSTDIR"', script)
+
+    def test_setup_stages_beside_open_cmremote_and_swaps_after_it_exits(self):
+        script = module('release').NSIS_SCRIPT
+        # CMRemote reads this marker to know the setup can stage while it stays open.
+        self.assertIn('VIAddVersionKey "CMRemoteUpdate" "staged"', script)
+        init = script[script.index('Function .onInit'):]
+        init = init[:init.index('FunctionEnd')]
+        for step in ('${GetOptions} $0 "/SESSION=" $Session', 'SetSilent silent', '${GetOptions} $0 "/PID=" $1', "kernel32::OpenProcess"):
+            self.assertIn(step, init)
+        install = script[script.index('Section "Install" SEC_INSTALL'):]
+        install = install[:install.index('SectionEnd')]
+        order = ['StrCmp $Session "" 0 staging', 'staging:', 'StrCpy $Stage "$INSTDIR.updating-$0"', 'SectionGetSize ${SEC_INSTALL} $0',
+                 'Push "started"', 'extract:', 'SetOutPath "$Stage"', 'File /r', 'Push "ready"',
+                 "kernel32::WaitForSingleObject(p $Parent, i -1)", 'IfFileExists "$Session\\commit" commit',
+                 'commit:', 'FileRead $1 $Relaunch 1', 'Rename "$INSTDIR" "$INSTDIR.previous"', 'swap:',
+                 'Rename "$Stage" "$INSTDIR"', 'register:', 'WriteUninstaller']
+        position = 0
+        for step in order: position = install.index(step, position) + len(step)  # in this order
+        # Waiting outside the copy, so it can be renamed; no commit removes the copy and changes nothing.
+        waiting = install[install.index('Push "ready"'):install.index('commit:')]
+        self.assertIn('SetOutPath "$TEMP"', install[install.index('extracted:'):install.index('Push "ready"')])
+        for step in ('RMDir /r "$Stage"', 'RMDir /r "$Session"', 'Quit'): self.assertIn(step, waiting)
+        # A swap that cannot happen keeps the installed version and still reopens CMRemote.
+        abandon = install[install.index('abandon:'):install.index('swap:')]
+        for step in ('RMDir /r "$Stage"', 'Call Launch', 'SetErrorLevel 2', 'Quit'): self.assertIn(step, abandon)
+        swap = install[install.index('swap:'):install.index('swapped:')]
+        self.assertIn('Rename "$INSTDIR.previous" "$INSTDIR"', swap)
+        refuse = script[script.index('Function Refuse'):]
+        refuse = refuse[:refuse.index('FunctionEnd')]
+        for step in ('SetOutPath "$TEMP"', 'RMDir /r "$Stage"', 'FileOpen $1 "$Session\\error" w', 'Quit'): self.assertIn(step, refuse)
+        success = script[script.index('Function .onInstSuccess'):]
+        self.assertIn('StrCmp $Relaunch 1 launch', success[:success.index('FunctionEnd')])
+
     def test_only_published_release_packages_update_themselves(self):
         workflow = (ROOT / '.github/workflows/release.yml').read_text()
         self.assertEqual(workflow.count('--artifact-name "$NAME" --update-channel github'), 3)

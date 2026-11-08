@@ -1,4 +1,5 @@
 #include "ConnectionXml.h"
+#include "RdpTarget.h"
 #include <QCryptographicHash>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -130,7 +131,8 @@ bool boolean(const QString& value, bool& result) {
     return false;
 }
 bool header(const Node& root, QString& version, quint32& iterations, bool& full) {
-    version = root.attribute("ConfVersion"); if (version != "2.6" && version != "2.7" && version != "2.8") return false;
+    // 2.9: mRemoteNG 1.78 (adds TerminalBackend and Color, both passive here).
+    version = root.attribute("ConfVersion"); if (!QStringList{"2.6", "2.7", "2.8", "2.9"}.contains(version)) return false;
     const auto number = root.attribute("KdfIterations");
     if (number.isEmpty() || number.size() > 7) return false;
     for (auto c : number) if (c < QChar('0') || c > QChar('9')) return false;
@@ -259,7 +261,9 @@ bool rekeyable(const Node& node, bool root, const ConnectionXml::Canceled& cance
     if (node.kind != Node::Element || (!root && !node.profile())) return false;
     static const QSet<QString> rootNames{"Name", "Export", "ConfVersion", "EncryptionEngine", "BlockCipherMode", "KdfIterations",
         "FullFileEncryption", "Protected", "RmFormatVersion", "RmFileId", "RmCredentialBindings"};
-    // Plain native fields from XmlConnectionNodeSerializer28.SetElementAttributes.
+    // Plain native fields from XmlConnectionNodeSerializer28.SetElementAttributes, plus
+    // ICAEncryptionStrength (2.6 as written by mRemoteNG 1.76) and 2.9's TerminalBackend
+    // (PuTTYNG or Windows Terminal for SSH) and Color (tree color): kept, never interpreted.
     // Unknown attributes/opaque content are conservatively refused on rekey;
     // ordinary edits still preserve them without interpreting their contents.
     static const QSet<QString> nodeNames = [] {
@@ -272,7 +276,8 @@ bool rekeyable(const Node& node, bool root, const ConnectionXml::Canceled& cance
             "StartProgram StartProgramWorkDir VNCCompression VNCEncoding VNCAuthMode VNCProxyType VNCProxyIP VNCProxyPort VNCProxyUsername VNCProxyPassword "
             "VNCColors VNCSmartSizeMode VNCViewOnly RDGatewayUsageMethod RDGatewayHostname RDGatewayUseConnectionCredentials RDGatewayExternalCredentialProvider "
             "RDGatewayUserViaAPI RDGatewayUsername RDGatewayPassword RDGatewayAccessToken RDGatewayDomain UseRCG UseRestrictedAdmin UseRedirectionServerName "
-            "UserViaAPI EC2InstanceId EC2Region ExternalCredentialProvider ExternalAddressProvider VaultOpenbaoMount VaultOpenbaoRole VaultOpenbaoSecretEngine").split(' ');
+            "UserViaAPI EC2InstanceId EC2Region ExternalCredentialProvider ExternalAddressProvider VaultOpenbaoMount VaultOpenbaoRole VaultOpenbaoSecretEngine "
+            "ICAEncryptionStrength TerminalBackend Color").split(' ');
         QSet<QString> result(names.begin(), names.end());
         for (const auto& name : names) result.insert("Inherit" + name);
         result.insert("InheritDescription"); result.insert("InheritUseConsoleSession");
@@ -285,7 +290,7 @@ bool rekeyable(const Node& node, bool root, const ConnectionXml::Canceled& cance
         if (!root && (a.name.startsWith("Inherit") || (a.name.startsWith("Rm") && a.name.endsWith("Inherited")))) {
             bool value; if (!boolean(a.value.trimmed(), value)) return false;
         }
-        if (!root && a.name == "RmResolution" && !QStringList{"fit", "800x600", "1024x768", "1280x720", "1920x1080"}.contains(a.value)) return false;
+        if (!root && a.name == "RmResolution" && !rdpResolutions().contains(a.value)) return false;
     }
     for (const auto& child : node.children) if (!rekeyable(child, false, canceled)) return false;
     return true;
@@ -417,14 +422,20 @@ QJsonValue fieldValue(const Node& node, const Field& field, QJsonArray& reasons)
         if (ok && port > 0 && port <= 65535) return port;
         reason(reasons, "gateway"); return 443;
     }
-    case Field::Resolution:
+    case Field::Resolution: {
+        // mRemoteNG RDPResolutions names: 1.78 SmartSize/FitToWindow/Fullscreen; 1.76–1.77 also Res<W>x<H>.
+        // A SmartSize/Fullscreen chosen in mRemoteNG wins over CMRemote's own fixed-size preference.
+        if (trimmed == "SmartSize") return "smart_size";
+        if (trimmed == "Fullscreen") return "fullscreen";
+        if (trimmed.startsWith("Res") && trimmed.contains('x') && rdpResolutions().contains(trimmed.mid(3))) return trimmed.mid(3);
         if (node.hasAttribute("RmResolution")) {
             const auto preferred = node.attribute("RmResolution");
-            if ((trimmed == "FitToWindow" || trimmed == "1") && QStringList{"fit", "800x600", "1024x768", "1280x720", "1920x1080"}.contains(preferred)) return preferred;
+            if ((trimmed == "FitToWindow" || trimmed == "1") && rdpResolutions().contains(preferred)) return preferred;
             reason(reasons, "preferences");
         }
         if (trimmed == "FitToWindow" || trimmed == "1") return "fit";
         reason(reasons, "resolution"); return "fit";
+    }
     }
     return {};
 }
@@ -495,12 +506,10 @@ void criticalOptions(const std::vector<const Node*>& nodes, const QString& proto
         const auto text = value(name); if (!text.isEmpty() && text.compare("false", Qt::CaseInsensitive) != 0) reason(reasons, code);
     };
     const auto choice = [&](const char* name, const QStringList& safe, const char* code) { if (!safe.contains(value(name))) reason(reasons, code); };
+    // UserViaAPI, EC2InstanceId/EC2Region and VaultOpenbao* are read only once a provider is
+    // chosen; mRemoteNG writes EC2Region="eu-central-1" on every node, so they stay passive.
     for (const auto& name : {"ExternalCredentialProvider", "ExternalAddressProvider"}) choice(name, {"", "None", "0"}, "provider");
-    for (const auto& name : {"UserViaAPI", "EC2InstanceId", "EC2Region", "VaultOpenbaoMount", "VaultOpenbaoRole"}) empty(name, "provider");
-    if (protocol == "rdp") {
-        choice("RDGatewayExternalCredentialProvider", {"", "None", "0"}, "provider");
-        empty("RDGatewayUserViaAPI", "provider");
-    }
+    if (protocol == "rdp") choice("RDGatewayExternalCredentialProvider", {"", "None", "0"}, "provider");
     for (const auto& name : {"PreExtApp", "PostExtApp", "ExtApp", "StartProgram", "StartProgramWorkDir", "OpeningCommand", "SSHOptions", "SSHTunnelConnectionName"}) empty(name, "command");
     if (protocol == "rdp") {
         // Security protocol, server authentication, CredSSP, load balancing and
@@ -631,7 +640,8 @@ QJsonValue defaultValue(const Field& field, const QJsonObject& overrides) {
     }
     return {};
 }
-void patchField(Node& node, const Field& field, const QJsonValue& requested, bool root, const QJsonObject& overrides) {
+// legacyResolutions: a 2.6/2.7 file, read by mRemoteNG 1.76–1.77, which still know Res<W>x<H>.
+void patchField(Node& node, const Field& field, const QJsonValue& requested, bool root, const QJsonObject& overrides, bool legacyResolutions) {
     const bool inherited = requested.isNull() || requested.isUndefined();
     const auto flag = inheritanceFlag(node, field); node.setAttribute(flag, inherited ? "true" : "false");
     if (field.kind == Field::Resolution) {
@@ -649,7 +659,15 @@ void patchField(Node& node, const Field& field, const QJsonValue& requested, boo
     }
     case Field::Port: native = QString::number(value.toInt()); break;
     case Field::Colors: native = "Colors" + QString::number(value.toInt()) + "Bit"; break;
-    case Field::Resolution: native = "FitToWindow"; node.setAttribute("RmResolution", value.toString()); break;
+    case Field::Resolution: {
+        // mRemoteNG 1.78 has no fixed sizes: it reads FitToWindow and CMRemote keeps the size in RmResolution.
+        const auto name = value.toString();
+        if (name == "smart_size") native = "SmartSize";
+        else if (name == "fullscreen") native = "Fullscreen";
+        else if (legacyResolutions && name != "fit" && name != "1280x720") native = "Res" + name;
+        else native = "FitToWindow";
+        node.setAttribute("RmResolution", name); break;
+    }
     case Field::SecurityProtocol: native = value.toString(); break;
     case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound:
         // Write the mRemoteNG enum name (second native alias after the empty default).
@@ -661,7 +679,34 @@ void patchField(Node& node, const Field& field, const QJsonValue& requested, boo
     }
     node.setAttribute(field.attribute, native);
 }
-bool patchNodes(DetachedNodes& nodes, const Profiles& before, const Profiles& requested, const ConnectionXml::Canceled& canceled) {
+// What mRemoteNG's XmlConnectionNodeSerializer28 writes for a new connection (Settings ConDefault*),
+// beyond the fields CMRemote edits: a node created here reads in mRemoteNG exactly like its own.
+const std::pair<const char*, const char*> NativeNodeDefaults[] = {
+    {"VmId", ""}, {"UseVmId", "false"}, {"UseEnhancedMode", "false"}, {"Panel", "General"}, {"TabColor", ""}, {"ConnectionFrameColor", "None"},
+    {"RdpVersion", "Highest"}, {"SSHTunnelConnectionName", ""}, {"OpeningCommand", ""}, {"SSHOptions", ""}, {"PuttySession", "Default Settings"},
+    {"RenderingEngine", "EdgeChromium"}, {"RDPAlertIdleTimeout", "false"}, {"EnableDesktopComposition", "false"}, {"DisableFullWindowDrag", "false"},
+    {"DisableMenuAnimations", "false"}, {"DisableCursorShadow", "false"}, {"DisableCursorBlinking", "false"}, {"RedirectDiskDrives", "None"},
+    {"RedirectDiskDrivesCustom", ""}, {"RedirectPorts", "false"}, {"RedirectPrinters", "false"}, {"RedirectSmartCards", "false"},
+    {"SoundQuality", "Dynamic"}, {"RedirectAudioCapture", "false"}, {"RedirectKeys", "false"}, {"Connected", "false"}, {"PreExtApp", ""},
+    {"PostExtApp", ""}, {"MacAddress", ""}, {"UserField", ""}, {"EnvironmentTags", ""}, {"Favorite", "false"}, {"ExtApp", ""},
+    {"StartProgram", ""}, {"StartProgramWorkDir", ""}, {"VNCCompression", "CompNone"}, {"VNCEncoding", "EncHextile"}, {"VNCAuthMode", "AuthVNC"},
+    {"VNCProxyType", "ProxyNone"}, {"VNCProxyIP", ""}, {"VNCProxyPort", "0"}, {"VNCProxyUsername", ""}, {"VNCProxyPassword", ""},
+    {"VNCColors", "ColNormal"}, {"VNCSmartSizeMode", "SmartSAspect"}, {"RDGatewayExternalCredentialProvider", "None"}, {"RDGatewayUserViaAPI", ""},
+    {"RDGatewayPassword", ""}, {"RDGatewayAccessToken", ""}, {"UseRCG", "false"}, {"UseRestrictedAdmin", "false"},
+    {"UseRedirectionServerName", "false"}, {"UserViaAPI", ""}, {"EC2InstanceId", ""}, {"EC2Region", "eu-central-1"},
+    {"ExternalCredentialProvider", "None"}, {"ExternalAddressProvider", "None"}, {"VaultOpenbaoMount", ""}, {"VaultOpenbaoRole", ""},
+    {"VaultOpenbaoSecretEngine", "Kv"}, {"Expanded", "false"}, {"IsRootGroup", "false"}};
+// The Inherit* flags mRemoteNG writes for settings CMRemote does not edit; a fresh node inherits none of them.
+const char* const NativeInheritDefaults[] = {
+    "ConnectionFrameColor", "DisableCursorBlinking", "DisableCursorShadow", "DisableFullWindowDrag", "DisableMenuAnimations",
+    "EnableDesktopComposition", "EnvironmentTags", "ExtApp", "ExternalCredentialProvider", "Favorite", "MacAddress", "OpeningCommand",
+    "Panel", "PostExtApp", "PreExtApp", "PuttySession", "RDGatewayAccessToken", "RDGatewayExternalCredentialProvider", "RDGatewayPassword",
+    "RDGatewayUserViaAPI", "RDPAlertIdleTimeout", "RdpVersion", "RedirectAudioCapture", "RedirectDiskDrives", "RedirectDiskDrivesCustom",
+    "RedirectKeys", "RedirectPorts", "RedirectPrinters", "RedirectSmartCards", "RenderingEngine", "SSHOptions", "SSHTunnelConnectionName",
+    "SoundQuality", "TabColor", "UseEnhancedMode", "UseRCG", "UseRedirectionServerName", "UseRestrictedAdmin", "UseVmId", "UserField",
+    "UserViaAPI", "VNCAuthMode", "VNCColors", "VNCCompression", "VNCEncoding", "VNCProxyIP", "VNCProxyPassword", "VNCProxyPort",
+    "VNCProxyType", "VNCProxyUsername", "VNCSmartSizeMode", "VmId"};
+bool patchNodes(DetachedNodes& nodes, const Profiles& before, const Profiles& requested, bool legacyResolutions, const ConnectionXml::Canceled& canceled) {
     for (auto i = requested.begin(); i != requested.end(); ++i) {
         if (stopped(canceled)) return false;
         const auto profile = i.value(); const auto old = before.value(i.key()); const bool fresh = old.isEmpty();
@@ -672,6 +717,8 @@ bool patchNodes(DetachedNodes& nodes, const Profiles& before, const Profiles& re
             node.setAttribute("Id", node.id); node.setAttribute("Type", profile.value("kind") == "folder" ? "Container" : "Connection");
             node.setAttribute("Password", ""); node.setAttribute("InheritPassword", "false");
             node.setAttribute("UseCredSsp", "true"); node.setAttribute("RDPAuthenticationLevel", "WarnOnFailedAuth");
+            for (const auto& [name, value] : NativeNodeDefaults) node.setAttribute(name, value);
+            for (const auto* name : NativeInheritDefaults) node.setAttribute("Inherit" + QString::fromLatin1(name), "false");
             nodes.emplace(i.key(), DetachedNode{std::move(node), profile.value("parent").toString(), {{"", ""}}});
         }
         auto& node = nodes.at(i.key()).node;
@@ -686,7 +733,7 @@ bool patchNodes(DetachedNodes& nodes, const Profiles& before, const Profiles& re
             if (fresh || (!bothInherited && value != prior)) {
                 // Unsupported is a preservation sentinel, never a native RDP write.
                 if (field.kind == Field::Protocol && value == "unsupported") return false;
-                patchField(node, field, value, profile.value("parent").toString().isEmpty(), overrides);
+                patchField(node, field, value, profile.value("parent").toString().isEmpty(), overrides, legacyResolutions);
             }
         }
     }
@@ -860,7 +907,7 @@ std::optional<QByteArray> ConnectionXml::patch(const Secret& master, const QByte
     }
     auto candidate = std::make_unique<Impl>(*impl_); DetachedNodes nodes;
     const auto namespaces = namespaceContext(candidate->tree.root, {{"", ""}});
-    if (!detach(candidate->tree.root, {}, namespaces, nodes, canceled) || !patchNodes(nodes, before, requested, canceled)) return std::nullopt;
+    if (!detach(candidate->tree.root, {}, namespaces, nodes, canceled) || !patchNodes(nodes, before, requested, candidate->version == "2.6" || candidate->version == "2.7", canceled)) return std::nullopt;
     QSet<QString> placed;
     if (!compose(candidate->tree.root, {}, requested, children, nodes, placed, canceled) || placed.size() != requested.size()) return std::nullopt;
     std::vector<const Node*> path;

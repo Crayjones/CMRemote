@@ -9,7 +9,7 @@ FreeRDP 3.32.1       Apache-2.0; FreeRDP-LICENSE.txt
 OpenSSL 3.5.9        Apache-2.0; OpenSSL-LICENSE.txt
                      Source: https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
 zlib 1.3.2           zlib license; zlib-LICENSE.txt
-                     Source: https://zlib.net/zlib-1.3.2.tar.gz
+                     Source: https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
 
 OpenH264 is not included. CMRemote downloads Cisco's prebuilt binary at runtime;
 Cisco's binary license is OpenH264-Cisco-BINARY_LICENSE.txt.

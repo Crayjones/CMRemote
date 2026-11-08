@@ -33,6 +33,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QPainter>
@@ -65,8 +66,10 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     // setupUi already creates the native window.
     DesktopView::prepareWindow(this);
     ui_->setupUi(this);
-#ifndef Q_OS_MACOS
-    ui_->menubar->setNativeMenuBar(false);
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() != "cocoa") placeMenuBarInToolbar();
+#else
+    placeMenuBarInToolbar();
 #endif
     setWindowTitle("CMRemote");
     // No bottom status strip; messages go to Notifications.
@@ -378,7 +381,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
     // Before anything irreversible: the helper must be ready, or the user chooses to quit without updating.
     if (!closeApproved_ && updater_ && !skipUpdateOnExit_ && updater_->installOnExit() && !updater_->prepared()) {
-        if (!updater_->preparing()) updater_->prepare();
+        if (!updater_->preparing()) { showUpdateProgress(); updater_->prepare(); }
         event->ignore(); return;
     }
     closeApproved_ = true; cancelCredentials();
@@ -879,7 +882,9 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
                                    std::move(credentials->password), target.port, credentials->clipboard || target.options.clipboard, target.domain, target.options});
 #endif
         focusPane(pane); notification(mock ? "Opened mock session " + describeSession(pane) : "Opening " + describeSession(pane) + (replacement ? " (reconnect)" : ""));
-        if (fullscreenOnOpen_.removeAll(ProfileReference{document, profile})) fullscreenPane(pane);
+        // Connect in full screen, or an RDP connection whose mRemoteNG resolution is Fullscreen.
+        const bool requestedFullscreen = fullscreenOnOpen_.removeAll(ProfileReference{document, profile});
+        if (requestedFullscreen || (!mock && target.protocol == "rdp" && target.options.resolution == "fullscreen")) fullscreenPane(pane);
         if (!reconnectQueue_.isEmpty()) QTimer::singleShot(0, this, [this] { continueReconnectAll(); });
         updateActions();
     } catch (const rust::Error& e) { fail(QString::fromUtf8(e.what())); }
@@ -991,24 +996,35 @@ void MainWindow::showUpdateCheck(bool ok, const Updates::Release& latest, const 
     if (closeApproved_) return;
     const auto current = Updates::currentVersion(); const QString releases = QString(Updates::Repository) + "/releases";
     const auto link = [](const QString& url, const QString& text) { return "<a href=\"" + url.toHtmlEscaped() + "\">" + text.toHtmlEscaped() + "</a>"; };
-    QString text;
+    QString text, name = "updateDialog";
     if (!ok) text = "Could not check for updates: " + error.toHtmlEscaped() + "<br>" + link(releases, releases);
     else if (Updates::compareVersions(current, latest.version).value_or(0) < 0) {
+        // An installable update goes straight to the install choice, once it is downloaded and verified.
         if (installable && updater_ && updater_->offered() && updater_->readyVersion() == latest.version) { promptUpdateInstall(latest.version, true); return; }
         text = "CMRemote " + latest.version.toHtmlEscaped() + " is available. You have " + current + ".<br>";
-        if (installable) text += "It is downloading now. When it is ready, CMRemote asks whether to install it.<br>" + link(latest.url, "Release notes");
-        else {
+        if (installable) {
+            downloadingUpdate_ = latest.version; name = "updateDownloading";
+            text += "Downloading it now. CMRemote asks how to install it as soon as the download is verified.<br>" + link(latest.url, "Release notes");
+        } else {
             if (updater_ && !updater_->installation().supported()) text += updater_->installation().reason.toHtmlEscaped() + "<br>";
+            else if (!updater_ && !updatesUnavailable_.isEmpty()) text += updatesUnavailable_.toHtmlEscaped() + "<br>";
             text += link(latest.url, "Download it from GitHub");
         }
     }
-    else text = "You have the latest version, CMRemote " + current + ".";
+    else text = "CMRemote is up to date.<br>You have version " + current + ", the latest release.";
+    showUpdateMessage(name, text, ok ? latest.version : QString());
+}
+void MainWindow::showUpdateMessage(const QString& name, const QString& text, const QString& version) {
+    for (auto* previous : findChildren<QMessageBox*>("updateDownloading")) previous->close();
     auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Check for Updates", text, QMessageBox::Ok, this);
-    dialog->setObjectName("updateDialog"); dialog->setProperty("latestVersion", ok ? latest.version : QString());
+    dialog->setObjectName(name); dialog->setProperty("latestVersion", version);
+    if (name == "updateDownloading") dialog->button(QMessageBox::Ok)->setText("Hide");
     dialog->setIconPixmap(Branding::applicationIcon().pixmap(QSize(64, 64), dialog->devicePixelRatioF()));
     dialog->setTextFormat(Qt::RichText); dialog->setTextInteractionFlags(Qt::TextBrowserInteraction);
     if (auto* label = dialog->findChild<QLabel*>("qt_msgbox_label")) label->setOpenExternalLinks(true);
-    dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    // The window stays usable while the update downloads.
+    if (name == "updateDownloading") { dialog->setWindowModality(Qt::NonModal); dialog->show(); } else dialog->open();
 }
 void MainWindow::enableAutomaticUpdates(const QString& dataDirectory) {
     if (updater_ || testMode_) return;
@@ -1019,7 +1035,24 @@ void MainWindow::attachUpdater(AutoUpdater* updater) {
     if (updater_ || !updater) return;
     updater_ = updater; updater->setParent(this);
     connect(updater_, &AutoUpdater::log, this, [this](const QString& text) { notification(text); });
-    connect(updater_, &AutoUpdater::readyToInstall, this, [this](const QString& version) { promptUpdateInstall(version, false); });
+    connect(updater_, &AutoUpdater::readyToInstall, this, [this](const QString& version) {
+        // Check for Updates found it: offer it even if it was offered before in this run.
+        const bool requested = std::exchange(downloadingUpdate_, QString()) == version;
+        if (requested) for (auto* waiting : findChildren<QMessageBox*>("updateDownloading")) waiting->close();
+        promptUpdateInstall(version, requested);
+    });
+    connect(updater_, &AutoUpdater::downloadFailed, this, [this](const QString& version, const QString& error) {
+        if (closeApproved_ || std::exchange(downloadingUpdate_, QString()) != version) return;
+        const QString releases = QString(Updates::Repository) + "/releases";
+        showUpdateMessage("updateDialog", "CMRemote " + version.toHtmlEscaped() + " could not be downloaded: " + error.toHtmlEscaped() +
+            "<br>Use Check for Updates to try again, or <a href=\"" + releases + "\">download it from GitHub</a>.", version);
+    });
+    connect(updater_, &AutoUpdater::preparationProgress, this, [this](int percent) {
+        auto* progress = findChild<QProgressDialog*>("updateProgress");
+        if (!progress) return;
+        if (percent < 0) progress->setRange(0, 0);
+        else { progress->setRange(0, 100); progress->setValue(percent); }
+    });
     connect(updater_, &AutoUpdater::preparationFinished, this, &MainWindow::finishUpdatePreparation);
     connect(updater_, &AutoUpdater::checked, this, [this](bool ok, const Updates::Release& latest, const QString& error, bool installable) {
         if (std::exchange(updateCheckRequested_, false)) showUpdateCheck(ok, latest, error, installable);
@@ -1034,6 +1067,7 @@ void MainWindow::promptUpdateInstall(const QString& version, bool again) {
     QString text = "CMRemote " + version + " has been downloaded and verified. Install it?\n\n"
         "Restart & Update installs it now. Install When I Quit installs it the next time you quit. "
         "Not Now asks again next time CMRemote starts; Skip This Version waits for a newer one.";
+    if (updater_->installation().kind == Updates::Installation::WindowsSetup) text += "\n\nWindows asks for administrator permission to install it.";
     if (sessionCount()) text += "\n\nRestarting disconnects your open sessions.";
     auto* dialog = new QMessageBox(QMessageBox::NoIcon, "Update ready", text, QMessageBox::NoButton, this);
     dialog->setObjectName("updateReady"); dialog->setTextFormat(Qt::PlainText);
@@ -1059,7 +1093,19 @@ void MainWindow::promptUpdateInstall(const QString& version, bool again) {
     });
     dialog->show();
 }
+void MainWindow::showUpdateProgress() {
+    // An older Windows setup shows its own progress after CMRemote closes.
+    if (!updater_->showsInstallProgress() || findChild<QProgressDialog*>("updateProgress")) return;
+    auto* progress = new QProgressDialog("Installing CMRemote " + updater_->readyVersion() + "\u2026\n\nCMRemote " +
+        (relaunchAfterUpdate_ ? "restarts" : "quits") + " when it is done.", QString(), 0, 0, this);
+    progress->setObjectName("updateProgress"); progress->setWindowTitle("Updating CMRemote");
+    progress->setCancelButton(nullptr); progress->setWindowModality(Qt::WindowModal);
+    progress->setAutoClose(false); progress->setAutoReset(false); progress->setMinimumDuration(0);
+    progress->setMinimumWidth(380); progress->setAttribute(Qt::WA_DeleteOnClose);
+    progress->show();
+}
 void MainWindow::finishUpdatePreparation(bool ok, const QString& error) {
+    if (auto* progress = findChild<QProgressDialog*>("updateProgress")) { progress->setObjectName({}); progress->close(); }
     if (closeApproved_) return;
     if (ok) { QTimer::singleShot(0, this, [this] { close(); }); return; }
     const bool restart = std::exchange(relaunchAfterUpdate_, false);

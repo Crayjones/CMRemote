@@ -46,24 +46,30 @@ named_enum!(GatewayCredentials, "Invalid gateway credentials", Same, { Same => "
 named_enum!(Sound, "Invalid sound redirection", Local, { Local => "local", Remote => "remote", None => "none" });
 pub const MAX_IDLE_MINUTES: u16 = 240;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Resolution {
-    #[serde(rename = "fit")]
-    Fit,
-    #[serde(rename = "800x600")]
-    R800x600,
-    #[default]
-    #[serde(rename = "1024x768")]
-    R1024x768,
-    #[serde(rename = "1280x720")]
-    R1280x720,
-    #[serde(rename = "1920x1080")]
-    R1920x1080,
+// RDP desktop size. Fit, SmartSize and Fullscreen are mRemoteNG 1.78's RDPResolutions;
+// the fixed sizes are mRemoteNG 1.77's Res* values (1.78 saves them as FitToWindow).
+macro_rules! resolutions {
+    ($($variant:ident => $name:literal),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+        pub enum Resolution {
+            #[default]
+            #[serde(rename = "1024x768")]
+            R1024x768,
+            $(#[serde(rename = $name)] $variant,)*
+        }
+        impl Resolution {
+            pub fn name(self) -> &'static str {
+                match self { Self::R1024x768 => "1024x768", $(Self::$variant => $name,)* }
+            }
+        }
+    };
 }
-impl Resolution {
-    pub fn name(self) -> &'static str {
-        match self { Self::Fit => "fit", Self::R800x600 => "800x600", Self::R1024x768 => "1024x768", Self::R1280x720 => "1280x720", Self::R1920x1080 => "1920x1080" }
-    }
+resolutions! {
+    Fit => "fit", SmartSize => "smart_size", Fullscreen => "fullscreen",
+    R800x600 => "800x600", R1152x864 => "1152x864", R1280x720 => "1280x720", R1280x800 => "1280x800",
+    R1280x1024 => "1280x1024", R1366x768 => "1366x768", R1440x900 => "1440x900", R1600x900 => "1600x900", R1600x1200 => "1600x1200",
+    R1680x1050 => "1680x1050", R1920x1080 => "1920x1080", R1920x1200 => "1920x1200", R2048x1536 => "2048x1536", R2560x1440 => "2560x1440",
+    R2560x1600 => "2560x1600", R2560x2048 => "2560x2048", R3840x2160 => "3840x2160",
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QTimer>
+#include <functional>
 #include <memory>
 #include <optional>
 class QNetworkAccessManager;
@@ -14,9 +15,9 @@ class QNetworkReply;
 namespace Updates {
 // How this copy of CMRemote was installed, and whether it can replace itself.
 struct Installation {
-    enum Kind { None, MacBundle, AppImage };
+    enum Kind { None, MacBundle, AppImage, WindowsSetup };
     Kind kind = None;
-    QString target;       // the .app bundle or AppImage file the helper replaces
+    QString target;       // the .app bundle, AppImage file or setup install folder the helper replaces
     QString identifier;   // macOS bundle identifier the new bundle must carry
     QString architecture; // arm64, x64 or x86_64
     QString reason;       // why this copy cannot update itself (kind == None)
@@ -29,15 +30,22 @@ Installation detectInstallation();
 std::optional<Asset> installerFor(const QList<Asset>& assets, const QString& version, const Installation& installation);
 // "SHA256SUMS.txt" lines: "<hex>  <name>". Missing or conflicting entries → empty.
 QString checksumFor(const QByteArray& sums, const QString& name);
+// Windows, setup programs older than staged updates: starts the setup a committed update
+// chose, after CMRemote's window has closed (main() calls it last). Setup waits for CMRemote
+// to exit, installs, and reopens it.
+void runPendingSetup();
 }
 
-// Automatic updates. Checks GitHub at startup and daily while automatic updates
+// Automatic updates. Checks GitHub soon after startup and daily while automatic updates
 // are on (or once when asked), downloads the matching package into
 // <data>/updates, verifies its size and SHA-256 and records it in pending.json.
 // Nothing installs without the user's choice: accept() for the ready version (or
-// skip() it). Installation happens only after CMRemote exits: prepare() starts an inert
-// helper that waits for this process, and commit() during the final close lets
-// it replace the application. Without a commit the helper changes nothing.
+// skip() it). Installation happens only after CMRemote exits: prepare() starts a helper
+// that copies the new version beside this one while CMRemote shows its progress, then
+// waits for this process; commit() during the final close lets it swap the two. Without
+// a commit the helper removes its copy and changes nothing. On Windows the new version's
+// setup program is that helper (started with administrator permission); a setup without
+// staged updates instead runs after CMRemote has closed (runPendingSetup()).
 class AutoUpdater final : public QObject {
     Q_OBJECT
 public:
@@ -47,8 +55,9 @@ public:
         std::optional<Updates::Installation> installation; // detected when empty
         QNetworkAccessManager* network = nullptr;          // tests serve releases from local files
         qint64 parentPid = 0;                              // process the helper waits for (0: this one)
-        int firstCheckMs = 20 * 1000;
-        int helperTimeoutMs = 10 * 1000;
+        int firstCheckMs = 3 * 1000;     // soon after startup
+        int helperTimeoutMs = 10 * 1000;  // until the helper starts
+        int stagingTimeoutMs = 5 * 60 * 1000; // until the new version is copied
     };
     explicit AutoUpdater(Options options, QObject* parent = nullptr);
     ~AutoUpdater() override;
@@ -70,10 +79,13 @@ public:
     // Never offer this version again unless the user checks for updates.
     void skip();
     const Updates::Installation& installation() const { return installation_; }
+    // CMRemote shows the install progress itself (false: an older Windows setup shows its own).
+    bool showsInstallProgress() const;
     QString directory() const;
 
-    // Exit handoff: prepare() rehashes the package off the GUI thread and starts
-    // the helper; preparationFinished reports whether it acknowledged.
+    // Exit handoff: prepare() rehashes the package off the GUI thread and starts the
+    // helper; preparationProgress follows its copy, preparationFinished reports whether
+    // the new version is ready to swap in.
     void prepare();
     bool preparing() const { return preparing_; }
     bool prepared() const { return !session_.isEmpty(); }
@@ -85,6 +97,10 @@ signals:
     void readyToInstall(const QString& version);
     // Result of a manual check. installable: this copy downloads and installs it.
     void checked(bool ok, const Updates::Release& latest, const QString& error, bool installable);
+    // The download a manual check reported as installable stopped without an update.
+    void downloadFailed(const QString& version, const QString& error);
+    // Percent of the new version copied beside this one; -1 while the size is unknown.
+    void preparationProgress(int percent);
     void preparationFinished(bool ok, const QString& error);
 private:
     void recover();
@@ -97,13 +113,15 @@ private:
     void cancel();
     void discardReady();
     void fail(const QString& text);
+    void failDownload(const QString& text);
     void failPreparation(const QString& text);
     QString helperScript() const;
     void startHelper();
+    void watchHelper(const QString& session, quint64 generation, std::function<bool()> alive, std::function<void()> stop);
     Options options_;
     Updates::Installation installation_;
     bool automatic_ = false, scheduled_ = false, manual_ = false, reportCheck_ = false, hashing_ = false, preparing_ = false;
-    bool usable_ = false, checkAfterVerify_ = false;
+    bool usable_ = false, checkAfterVerify_ = false, reportDownload_ = false, legacySetup_ = false;
     quint64 generation_ = 0;
     QTimer daily_;
     QNetworkAccessManager* network_;
@@ -114,6 +132,7 @@ private:
     std::unique_ptr<QCryptographicHash> hash_;
     qint64 expectedSize_ = 0;
     std::optional<Updates::Release> latest_;
+    QString downloadVersion_;
     QString readyPath_, readyVersion_, readySha_, manualVersion_, failedVersion_, skippedVersion_, acceptedVersion_, unusable_;
     qint64 readySize_ = 0;
     QString session_;

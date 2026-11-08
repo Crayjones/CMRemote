@@ -2,6 +2,7 @@
 #include "Appearance.h"
 #include "Branding.h"
 #include "DataPaths.h"
+#include "AutoUpdate.h"
 #include "UpdateCheck.h"
 #ifdef RM_WITH_RDP
 #include "RdpSecurity.h"
@@ -50,21 +51,28 @@ int main(int argc,char** argv) {
         return 2;
     }
     try {
-        const QString path = applicationConnectionPath(directory);
-        MainWindow window(path, false, nullptr, {}, applicationSshHostKeyPath(directory), applicationTerminalAppearancePath(directory), QDir(directory).filePath("preferences.json"));
-        if (parser.isSet("demo") && parser.isSet("dev-root"))
-            QObject::connect(&window, &MainWindow::documentReady, &window, &MainWindow::seedDemo);
-        window.show();
-        // Packaged runs only; development and smoke runs never update themselves.
-        if (!parser.isSet("dev-root") && !parser.isSet("smoke")) window.enableAutomaticUpdates(directory);
-        if (parser.isSet("smoke")) {
-            // Close through MainWindow's shutdown path. QApplication::quit() goes via Cocoa's
-            // terminate on macOS, which never completes for an app launched in the background.
-            QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, [] { QCoreApplication::exit(0); });
-            QTimer::singleShot(500, &window, [&window] { window.close(); });
+        int code = 0;
+        {
+            const QString path = applicationConnectionPath(directory);
+            MainWindow window(path, false, nullptr, {}, applicationSshHostKeyPath(directory), applicationTerminalAppearancePath(directory), QDir(directory).filePath("preferences.json"));
+            if (parser.isSet("demo") && parser.isSet("dev-root"))
+                QObject::connect(&window, &MainWindow::documentReady, &window, &MainWindow::seedDemo);
+            window.show();
+            // Packaged runs only; development and smoke runs never update themselves.
+            if (!parser.isSet("dev-root") && !parser.isSet("smoke")) window.enableAutomaticUpdates(directory);
+            else if (parser.isSet("dev-root")) window.setUpdatesUnavailable("Development builds do not update themselves; the installed CMRemote app does.");
+            if (parser.isSet("smoke")) {
+                // Close through MainWindow's shutdown path. QApplication::quit() goes via Cocoa's
+                // terminate on macOS, which never completes for an app launched in the background.
+                QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app, [] { QCoreApplication::exit(0); });
+                QTimer::singleShot(500, &window, [&window] { window.close(); });
+            }
+            std::cout << rm::core_version().c_str() << '\n';
+            code = app.exec();
         }
-        std::cout << rm::core_version().c_str() << '\n';
-        return app.exec();
+        // A Windows update's setup program starts only once the window has fully closed.
+        Updates::runPendingSetup();
+        return code;
     } catch (const rust::Error& error) {
         std::cerr << error.what() << '\n';
         if (!parser.isSet("smoke")) QMessageBox::critical(nullptr,"Cannot open profiles",QString::fromUtf8(error.what()) + "\nOriginal data was not changed.");
