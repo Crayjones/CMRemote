@@ -1,0 +1,5 @@
+<!DOCTYPE RCC>
+<!-- Upstream ads.qrc bundles images/ and stylesheets/, which CMRemote does not use. DockManager still initializes this resource. -->
+<RCC version="1.0">
+    <qresource prefix="/ads"/>
+</RCC>

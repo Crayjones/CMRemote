@@ -15,7 +15,7 @@ def main():
     parser.add_argument('command', choices=['build', 'test', 'run', 'capture'])
     parser.add_argument('--offscreen', action='store_true', help='No native window required')
     parser.add_argument('--smoke', action='store_true', help='Exit after a short run')
-    parser.add_argument('--menu', choices=['tree', 'session', 'group', 'config', 'notifications', 'external-tools'],
+    parser.add_argument('--menu', choices=['tree', 'session', 'config', 'notifications', 'external-tools'],
                         help='Open this context menu for interaction or capture')
     args = parser.parse_args()
     if args.menu and args.command not in ('run', 'capture'):

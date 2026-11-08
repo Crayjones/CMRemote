@@ -20,7 +20,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTabBar>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -54,7 +54,7 @@ class SessionIntegration : public QObject {
             window.findChild<DocumentService*>()->status(window.connectionFiles().first())->metadataAvailable; }, 15000)) return nullptr;
         if (!window.selectConnectionProfile({window.connectionFiles().first(), profile_})) return nullptr;
         window.connectSelected();
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        auto tabs = sessionTabs(window);
         if (!QTest::qWaitFor([&] { return tabs->count() == 1 || window.findChild<QDialog*>("CredentialsDialog"); }, 15000) ||
             window.findChild<QDialog*>("CredentialsDialog")) return nullptr;
         auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget());
@@ -77,9 +77,7 @@ class SessionIntegration : public QObject {
         return true;
     }
     bool sharing(MainWindow& window, SessionPane* pane, bool enabled) {
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* bar = tabs->tabBar();
-        const QPoint position = bar->tabRect(tabs->indexOf(pane)).center();
-        QContextMenuEvent event(QContextMenuEvent::Mouse, position, bar->mapToGlobal(position)); QApplication::sendEvent(bar, &event);
+        auto tabs = sessionTabs(window); openTabMenu(tabs, tabs->indexOf(pane));
         auto* menu = window.findChild<QMenu*>("sessionContextMenu"); if (!menu) return false;
         auto* action = menu->findChild<QAction*>("actionSessionClipboard");
         const bool valid = action && action->isCheckable() && action->isEnabled() && action->isChecked() == pane->clipboardSharingEnabled();
@@ -102,7 +100,7 @@ class SessionIntegration : public QObject {
         QTest::mouseMove(view->window()->windowHandle(), view->mapTo(view->window(), local));
     }
 private slots:
-    void initTestCase() { applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
+    void initTestCase() { applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
     void remoteCursorsThroughShell() {
         QTemporaryDir dir; QVERIFY(dir.isValid()); const auto path = dir.filePath("confCons.xml"); QVERIFY(createConnection(path));
         auto host = std::make_shared<TestClipboardEndpoint>(); MainWindow window(path, false, nullptr, host); QVERIFY(show(window));
@@ -152,7 +150,7 @@ private slots:
         window.disconnectCurrent(); QVERIFY(!pane->clipboardSharingEnabled()); QVERIFY(!pane->clipboardSharingAvailable());
         QPointer<SessionPane> retired = pane;
         QTest::qWait(1000); // The owned xrdp desktop survives transport closure.
-        window.reconnectCurrent(); auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        window.reconnectCurrent(); auto tabs = sessionTabs(window);
         QTRY_VERIFY(tabs->count() == 1 && tabs->currentWidget() != retired.data());
         pane = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(pane);
         QVERIFY(acceptCertificate(pane)); QVERIFY(ready(pane)); QVERIFY(!pane->clipboardSharingEnabled());

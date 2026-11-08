@@ -2,14 +2,15 @@
 #include "RdpSecurity.h"
 #include "Views.h"
 #include "MainWindow.h"
-#include "PanelWindow.h"
 #include "SessionPane.h"
 #include "Appearance.h"
-#include <QDockWidget>
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
 #include "DocumentService.h"
 #include "ConnectionXml.h"
 #include "XmlTestHelpers.h"
-#include "PropertyDelegate.h"
+#include "ProfileEditor.h"
 #include "ProfileEditor.h"
 #include "GridDriver.h"
 #include "ConnectionTree.h"
@@ -31,8 +32,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QAbstractButton>
-#include <QTabWidget>
-#include <QTabBar>
+#include "SessionTabs.h"
 #include <QMenu>
 #include <QAction>
 #include <QContextMenuEvent>
@@ -46,20 +46,6 @@
 
 #define WAIT_STORE(window) do { QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open); QVERIFY(waitGridSaved(window)); } while (false)
 
-static QList<PanelWindow*> panelWindows() {
-    QList<PanelWindow*> result;
-    for (auto* widget : QApplication::topLevelWidgets()) if (auto* window = qobject_cast<PanelWindow*>(widget); window && window->isVisible()) result << window;
-    return result;
-}
-static void dragTab(QTabBar* bar, int index, const QList<QPoint>& path) {
-    QTest::mousePress(bar, Qt::LeftButton, Qt::NoModifier, bar->tabRect(index).center());
-    for (const auto& global : path) {
-        QMouseEvent move(QEvent::MouseMove, QPointF(bar->mapFromGlobal(global)), QPointF(global), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-        QApplication::sendEvent(bar, &move);
-    }
-    QMouseEvent release(QEvent::MouseButtonRelease, QPointF(bar->mapFromGlobal(path.last())), QPointF(path.last()), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(bar, &release);
-}
 class RdpIntegration : public QObject {
     Q_OBJECT
     void credentials(MainWindow& window, const QByteArray& password) {
@@ -181,18 +167,18 @@ class RdpIntegration : public QObject {
         return !window.findChild<QDialog*>("filePassword");
     }
     SessionPane* connectXml(MainWindow& window, ProfileReference reference, int count) {
-        window.connectSelected(); auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        window.connectSelected(); auto tabs = sessionTabs(window);
         if (!QTest::qWaitFor([&] { return tabs->count() == count || window.findChild<QDialog*>("CredentialsDialog"); }, 15000) ||
             window.findChild<QDialog*>("CredentialsDialog")) return nullptr;
         auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget());
         return pane && pane->reference() == reference && !pane->mock() ? pane : nullptr;
     }
     bool captureXmlWindow(MainWindow& window, const QString& filename) {
-        if (window.findChild<PropertyDelegate*>()->activeEditor()) return false;
+        if (window.findChild<ProfileEditor*>()->activeEditor()) return false;
         for (auto* dialog : window.findChildren<QDialog*>()) if (dialog->isVisible()) return false;
         window.findChild<QAction*>("actionResetLayout")->trigger();
         auto* tree = window.findChild<QTreeWidget*>("connectionTree");
-        auto* config = window.findChild<QTreeWidget*>("configTree");
+        auto* config = window.findChild<QTreeWidget*>("configView");
         if (!QTest::qWaitFor([&] { return tree->isVisible() && config->isVisible(); })) return false;
         QTest::qWait(150);
         return window.grab().save(qEnvironmentVariable("RM_BUILD_DIR") + filename);
@@ -200,16 +186,16 @@ class RdpIntegration : public QObject {
     void assertXmlSecretFree(MainWindow& window, const QByteArray& password, const QByteArray& master) {
         const auto draft = QJsonDocument(window.findChild<ProfileEditor*>()->draft()).toJson();
         QVERIFY(!draft.contains(password) && !draft.contains(master));
-        for (const auto* name : {"configTree", "connectionTree"}) {
+        for (const auto* name : {"configView", "connectionTree"}) {
             auto* tree = window.findChild<QTreeWidget*>(name); QVERIFY(tree);
             for (QTreeWidgetItemIterator it(tree); *it; ++it) for (int column = 0; column < tree->columnCount(); ++column)
-                for (int role = Qt::DisplayRole; role <= PropertyDelegate::CategoryRole; ++role) {
+                for (int role = Qt::DisplayRole; role <= Qt::UserRole; ++role) {
                     const auto value = (*it)->data(column, role).toString().toUtf8(); QVERIFY(!value.contains(password) && !value.contains(master));
                 }
         }
     }
 private slots:
-    void initTestCase() { applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
+    void initTestCase() { applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
     void init() { if (QGuiApplication::platformName() != "offscreen") QTest::failOnWarning("QRhiWidget: No QRhi"); }
     void configPasswordXmlThroughShell_data() {
         QTest::addColumn<bool>("full"); QTest::addColumn<bool>("custom");
@@ -307,7 +293,7 @@ private slots:
             auto* files = window.findChild<DocumentService*>(); QVERIFY(window.selectConnectionFile(a)); window.findChild<QAction*>("actionLockPasswords")->trigger();
             QVERIFY(!files->status(a)->unlocked && files->status(b)->unlocked); QCOMPARE(window.sessionCount(), size_t(2));
             QVERIFY(paneA->findChild<RdpWorker*>()->isRunning() && paneB->findChild<RdpWorker*>()->isRunning());
-            auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); tabs->setCurrentWidget(paneA);
+            auto tabs = sessionTabs(window); tabs->setCurrentWidget(paneA);
             shellInput(paneA, Qt::Key_E); QVERIFY(!QTest::currentTestFailed());
             QVERIFY(unlockXml(window, a, master)); QVERIFY(window.selectConnectionProfile({a, profile}));
             setGridText(window, "description", "Edited only first.xml"); QVERIFY(xmlReady(window, a));
@@ -341,7 +327,7 @@ private slots:
             QVERIFY(restart.selectConnectionProfile({a, profile})); setGridChoice(restart, "font_smoothing", !oldTarget.options.fontSmoothing); QVERIFY(xmlReady(restart, a));
             QVERIFY(paneA->target() == oldTarget && paneB->target() == otherTarget); QCOMPARE(contents(second), secondBytes);
             QVERIFY(restart.selectConnectionFile(a)); restart.findChild<QAction*>("actionLockPasswords")->trigger(); QVERIFY(!files->status(a)->unlocked && files->status(b)->unlocked);
-            QVERIFY(restart.selectConnectionFile(b)); auto* tabs = restart.findChild<QTabWidget*>("sessionTabs"); tabs->setCurrentWidget(paneA);
+            QVERIFY(restart.selectConnectionFile(b)); auto tabs = sessionTabs(restart); tabs->setCurrentWidget(paneA);
             QPointer<SessionPane> retired = paneA; restart.reconnectCurrent(); QVERIFY(enterXmlMaster(restart, master, false));
             QTRY_VERIFY(tabs->count() == 2 && !retired && qobject_cast<SessionPane*>(tabs->currentWidget())->id() != oldSession);
             paneA = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(paneA && paneA->reference() == (ProfileReference{a, profile}) && paneA->id() != oldSession);
@@ -360,7 +346,7 @@ private slots:
         window.findChild<QAction*>("actionAddConnection")->trigger(); WAIT_STORE(window); const auto profile = window.selectedId();
         setGridText(window, "host", "127.0.0.1"); WAIT_STORE(window);
         setGridPort(window, port); WAIT_STORE(window); const auto saved = contents(path); QVERIFY(!saved.isEmpty());
-        auto* tree = window.findChild<QTreeWidget*>("connectionTree"); auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        auto* tree = window.findChild<QTreeWidget*>("connectionTree"); auto tabs = sessionTabs(window);
         QCOMPARE(window.sessionCount(), size_t(0));
         QTRY_VERIFY(tree->viewport()->rect().contains(tree->visualItemRect(tree->currentItem()).center()));
         const auto point = tree->visualItemRect(tree->currentItem()).center();
@@ -399,17 +385,17 @@ private slots:
         setGridText(window, "host", "127.0.0.1"); WAIT_STORE(window); setGridPort(window, port); WAIT_STORE(window); setGridText(window, "username", "rdpfixture"); WAIT_STORE(window);
         setGridChoice(window, "resolution", "800x600"); WAIT_STORE(window); setGridChoice(window, "automatic_resize", automatic); WAIT_STORE(window);
         const auto saved = contents(path); window.connectSelected(); credentials(window, password);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(pane);
+        auto tabs = sessionTabs(window); auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(pane);
         certificate(pane); QVERIFY(!QTest::currentTestFailed()); auto* view = pane->findChild<DesktopView*>(); QTRY_VERIFY_WITH_TIMEOUT(fixtureReady(view), 30000);
         const auto target = pane->target(); const auto session = pane->id(); auto* worker = pane->findChild<RdpWorker*>(); QVERIFY(worker && worker->isRunning());
         auto* fullscreen = window.findChild<QAction*>("actionTabFullscreen"); QVERIFY(fullscreen->isEnabled()); fullscreen->trigger();
         QPointer<QMainWindow> full; QTRY_VERIFY((full = window.sessionFullscreenWindow()) && full->isFullScreen());
-        QTRY_VERIFY(full->findChild<QWidget*>("fullscreenBar")->isVisible()); QVERIFY(window.findChild<QDockWidget*>("connectionsDock")->isVisible());
+        QTRY_VERIFY(full->findChild<QWidget*>("fullscreenBar")->isVisible()); QVERIFY(window.findChild<ads::CDockWidget*>("connectionsDock")->isVisible());
         QVERIFY(!window.isFullScreen()); QVERIFY(full->isAncestorOf(pane));
         if (automatic) QTRY_COMPARE_WITH_TIMEOUT(view->frame().size(), QSize(view->width() & ~1, view->height()), 15000);
         else QCOMPARE(view->frame().size(), QSize(800, 600));
         shellInput(pane); QVERIFY(!QTest::currentTestFailed());
-        QVERIFY(!window.findChild<QDialog*>("CredentialsDialog") && !pane->findChild<QMessageBox*>("rdpCertificate") && !window.findChild<PropertyDelegate*>()->activeEditor());
+        QVERIFY(!window.findChild<QDialog*>("CredentialsDialog") && !pane->findChild<QMessageBox*>("rdpCertificate") && !window.findChild<ProfileEditor*>()->activeEditor());
         QVERIFY(full->grab().save(qEnvironmentVariable("RM_BUILD_DIR") + (automatic ? "/rdp-fullscreen-automatic.png" : "/rdp-fullscreen-fixed.png")));
         // Minimize hides only the session's window; restoring it returns to fullscreen.
         QSignalSpy pointers(view, &DesktopView::pointerInput); QTest::mouseClick(full->findChild<QToolButton*>("minimizeFullscreenConnection"), Qt::LeftButton);
@@ -418,7 +404,7 @@ private slots:
         QSignalSpy keys(view, &DesktopView::keyInput); QTest::mouseClick(full->findChild<QToolButton*>("exitSessionFullscreen"), Qt::LeftButton);
         QTRY_VERIFY(!window.sessionFullscreenWindow()); QCOMPARE(tabs->currentWidget(), pane);
         QCOMPARE(keys.size(), 0); QCOMPARE(pane->findChild<RdpWorker*>(), worker); QCOMPARE(pane->findChild<DesktopView*>(), view);
-        QTRY_VERIFY(window.findChild<QDockWidget*>("connectionsDock")->isVisible()); QCOMPARE(pane->id(), session); QCOMPARE(pane->target(), target); QCOMPARE(contents(path), saved);
+        QTRY_VERIFY(window.findChild<ads::CDockWidget*>("connectionsDock")->isVisible()); QCOMPARE(pane->id(), session); QCOMPARE(pane->target(), target); QCOMPARE(contents(path), saved);
         if (automatic) QTRY_COMPARE_WITH_TIMEOUT(view->frame().size(), QSize(view->width() & ~1, view->height()), 15000);
         else QCOMPARE(view->frame().size(), QSize(800, 600));
         fullscreen->trigger(); QTRY_VERIFY((full = window.sessionFullscreenWindow()) && full->isFullScreen());
@@ -430,13 +416,13 @@ private slots:
         const auto password = qgetenv("RM_RDP_TEST_PASSWORD"); const auto port = qEnvironmentVariableIntValue("RM_RDP_TEST_PORT"); QVERIFY(!password.isEmpty() && port > 0);
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true); window.resize(1000, 700); QVERIFY(showXmlWindow(window)); WAIT_STORE(window);
         window.quickConnect("127.0.0.1:" + QString::number(port)); credentials(window, password);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
+        auto tabs = sessionTabs(window); QPointer<SessionPane> pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
         certificate(pane); QVERIFY(!QTest::currentTestFailed());
         auto* view = pane->findChild<DesktopView*>(); QPointer<RdpWorker> worker = pane->findChild<RdpWorker*>(); const auto session = pane->id();
-        // Tear the live session into a new window: same session, worker and view, no reconnect.
-        dragTab(tabs->tabBar(), 0, {window.mapToGlobal(QPoint(500, 450)), window.mapToGlobal(QPoint(540, 470))});
-        QTRY_COMPARE(panelWindows().size(), 1); auto* popped = panelWindows().first(); QCOMPARE(tabs->count(), 0);
-        auto* moved = popped->findChild<QTabWidget*>("panelSessionTabs"); QCOMPARE(moved->widget(0), pane.data());
+        // Float the live session in a window of its own: same session, worker and view, no reconnect.
+        QVERIFY(tabMenuCommand(window, tabs, 0, "actionMoveToNewWindow"));
+        QTRY_COMPARE(floatingWindows().size(), 1); auto* popped = floatingWindows().first(); QCOMPARE(tabs->count(), 0);
+        QVERIFY(popped->isAncestorOf(pane));
         QCOMPARE(pane->id(), session); QCOMPARE(pane->findChild<RdpWorker*>(), worker.data()); QCOMPARE(pane->findChild<DesktopView*>(), view); QVERIFY(worker->isRunning());
 #ifdef Q_OS_MACOS
         if (QGuiApplication::platformName() == "cocoa") activateNativeTestApplication(popped);
@@ -444,10 +430,11 @@ private slots:
         popped->raise(); popped->activateWindow(); QTRY_VERIFY_WITH_TIMEOUT(fixtureReady(view), 15000);
         shellInput(pane); QVERIFY(!QTest::currentTestFailed());
         QVERIFY(popped->grab().save(qEnvironmentVariable("RM_BUILD_DIR") + "/rdp-dragged-window.png"));
-        // Drag it back onto the main window's tab strip: the dragged-out window disappears.
-        const auto strip = tabs->mapToGlobal(QPoint(tabs->width() / 2, tabs->tabBar()->y() + tabs->tabBar()->height() / 2));
-        dragTab(moved->tabBar(), 0, {moved->tabBar()->mapToGlobal(QPoint(10, -80)), strip});
-        QTRY_VERIFY(panelWindows().isEmpty()); QCOMPARE(tabs->indexOf(pane), 0); QCOMPARE(pane->id(), session); QVERIFY(worker && worker->isRunning());
+        // Move it back into General: the floating window disappears.
+        auto moved = panelTabs(pane); auto* back = [&] { openTabMenu(moved, 0); return window.findChildren<QMenu*>("sessionContextMenu").last(); }();
+        QAction* general = nullptr; for (auto* action : back->findChild<QMenu*>("moveSessionMenu")->actions()) if (action->text() == "General") general = action;
+        QVERIFY(general && general->isEnabled()); back->close(); general->trigger();
+        QTRY_VERIFY(floatingWindows().isEmpty()); QCOMPARE(tabs->indexOf(pane), 0); QCOMPARE(pane->id(), session); QVERIFY(worker && worker->isRunning());
         QVERIFY(showXmlWindow(window)); shellInput(pane, Qt::Key_B); QVERIFY(!QTest::currentTestFailed());
         // Ending the session after its view lived in another window must not touch a stale GPU context.
         window.closeTab(0); QTRY_VERIFY(pane.isNull()); QVERIFY(!worker); QCOMPARE(window.sessionCount(), size_t(0));
@@ -461,7 +448,7 @@ private slots:
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true); window.show(); WAIT_STORE(window); window.addConnection(); WAIT_STORE(window);
         setGridText(window, "host", "127.0.0.1"); WAIT_STORE(window); setGridPort(window, port); WAIT_STORE(window); setGridText(window, "username", "rdpfixture"); WAIT_STORE(window);
         setGridChoice(window, "resolution", "800x600"); WAIT_STORE(window); setGridChoice(window, "automatic_resize", automatic); WAIT_STORE(window); setGridChoice(window, "color_depth", automatic ? 24 : 16); WAIT_STORE(window);
-        window.connectSelected(); credentials(window, password); auto* pane = qobject_cast<SessionPane*>(window.findChild<QTabWidget*>("sessionTabs")->widget(0)); QVERIFY(pane);
+        window.connectSelected(); credentials(window, password); auto* pane = qobject_cast<SessionPane*>(sessionTabs(window)->widget(0)); QVERIFY(pane);
         // Without a certificate prompt negotiation can finish before a spy attaches; read the worker's record.
         auto* worker = pane->findChild<RdpWorker*>(); QVERIFY(worker); certificate(pane); QTRY_VERIFY_WITH_TIMEOUT(worker->negotiatedDesktop().isValid(), 30000);
         QCOMPARE(worker->negotiatedDesktop(), QSize(800, 600)); QCOMPARE(worker->negotiatedColorDepth(), automatic ? 24U : 16U);
@@ -478,7 +465,7 @@ private slots:
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true); window.resize(900, 650); window.show(); WAIT_STORE(window); window.addConnection(); WAIT_STORE(window);
         setGridText(window, "host", "127.0.0.1"); WAIT_STORE(window); setGridPort(window, port); WAIT_STORE(window); setGridText(window, "username", "rdpfixture"); WAIT_STORE(window);
         setGridChoice(window, "resolution", "1280x720"); WAIT_STORE(window); setGridChoice(window, "automatic_resize", false); WAIT_STORE(window);
-        window.connectSelected(); credentials(window, password); auto* pane = qobject_cast<SessionPane*>(window.findChild<QTabWidget*>("sessionTabs")->widget(0)); QVERIFY(pane); certificate(pane);
+        window.connectSelected(); credentials(window, password); auto* pane = qobject_cast<SessionPane*>(sessionTabs(window)->widget(0)); QVERIFY(pane); certificate(pane);
         auto* view = pane->findChild<DesktopView*>();
         auto* worker = pane->findChild<RdpWorker*>(); QVERIFY(worker);
         auto diagnostics = std::make_shared<int>(0); QPointer<DesktopView> guardedView = view;
@@ -535,7 +522,7 @@ private slots:
             QVERIFY(enterXmlMaster(window, master, false)); WAIT_STORE(window); QVERIFY(window.selectConnectionProfile({id, profile}));
             window.findChild<QAction*>("actionLockPasswords")->trigger(); QVERIFY(!files->status(id)->unlocked);
             window.connectSelected(); QVERIFY(enterXmlMaster(window, master, false));
-            auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_COMPARE(tabs->count(), 1); QVERIFY(!window.findChild<QDialog*>("CredentialsDialog"));
+            auto tabs = sessionTabs(window); QTRY_COMPARE(tabs->count(), 1); QVERIFY(!window.findChild<QDialog*>("CredentialsDialog"));
             auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); QCOMPARE(pane->profile(), profile); QCOMPARE(pane->target().username, QString("rdpfixture"));
             certificate(pane); QTRY_VERIFY_WITH_TIMEOUT(!pane->findChild<DesktopView*>()->frame().isNull(), 30000); shellInput(pane); QVERIFY(!QTest::currentTestFailed());
             QSignalSpy clipboard(pane->findChild<RdpWorker*>(), &RdpWorker::remoteClipboard); QTest::qWait(300); QVERIFY(clipboard.isEmpty());
@@ -602,7 +589,7 @@ private slots:
             QVERIFY(find(tree, folder) && find(tree, profile)); QCOMPARE(find(tree, profile)->parent(), find(tree, folder));
             tree->setCurrentItem(find(tree, profile)); QCOMPARE(gridValue(window, "description").toString(), QString("Owned loopback acceptance"));
             QCOMPARE(gridValue(window, "resolution").toString(), QString("800x600")); QVERIFY(!gridValue(window, "automatic_resize").toBool());
-            window.connectSelected(); auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_COMPARE(tabs->count(), 1);
+            window.connectSelected(); auto tabs = sessionTabs(window); QTRY_COMPARE(tabs->count(), 1);
             QVERIFY(!window.findChild<QDialog*>("CredentialsDialog")); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane && !pane->mock());
             QCOMPARE(pane->profile(), profile); QCOMPARE(pane->target().username, QString("rdpfixture")); QVERIFY(pane->target().domain.isEmpty());
             auto* worker = pane->findChild<RdpWorker*>(); QVERIFY(worker); certificate(pane); QTRY_VERIFY_WITH_TIMEOUT(worker->negotiatedDesktop().isValid(), 30000);
@@ -631,7 +618,7 @@ private slots:
         auto* prompt = window.findChild<QDialog*>("CredentialsDialog"); QVERIFY(prompt); prompt->reject(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCOMPARE(window.sessionCount(), size_t(0)); QCOMPARE(contents(path), original);
         QTest::mouseClick(button, Qt::LeftButton); credentials(window, password);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QCOMPARE(tabs->count(), 1); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane && !pane->mock());
+        auto tabs = sessionTabs(window); QCOMPARE(tabs->count(), 1); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane && !pane->mock());
         QVERIFY(pane->profile().isEmpty()); certificate(pane); QTRY_VERIFY_WITH_TIMEOUT(!pane->findChild<DesktopView*>()->frame().isNull(), 30000); shellInput(pane);
         const auto target = pane->target(); const auto old = pane->id(); const auto caption = tabs->tabText(0);
         QTest::mouseClick(button, Qt::LeftButton); credentials(window, password); QCOMPARE(tabs->count(), 1); QCOMPARE(pane->id(), old);
@@ -651,16 +638,15 @@ private slots:
         const auto password = qgetenv("RM_RDP_TEST_PASSWORD"); const auto port = qEnvironmentVariableIntValue("RM_RDP_TEST_PORT"); QVERIFY(!password.isEmpty() && port > 0);
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/close-shell-XXXXXX"); QVERIFY(dir.isValid());
         const auto path = dir.path() + "/confCons.xml"; auto window = std::make_unique<MainWindow>(path, true); window->show(); WAIT_STORE((*window));
-        window->findChild<QAction*>("actionAddPanel")->trigger();
         window->findChild<QComboBox*>("quickConnectCombo")->setEditText("127.0.0.1:" + QString::number(port));
         QTest::mouseClick(window->findChild<QToolButton*>("quickConnectButton"), Qt::LeftButton); credentials(*window, password);
-        auto* groups = window->findChild<QTabWidget*>("groupTabs"); auto* tabs = groups->currentWidget()->findChild<QTabWidget*>();
+        auto tabs = sessionTabs(*window);
         QPointer<SessionPane> pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); certificate(pane);
         auto* view = pane->findChild<DesktopView*>(); QTRY_VERIFY_WITH_TIMEOUT(!view->frame().isNull(), 30000);
         const auto held = view->frame().copy(); const auto pixel = held.pixelColor(0, 0); QPointer<RdpWorker> worker = pane->findChild<RdpWorker*>(); QVERIFY(worker && worker->isRunning());
         QSignalSpy frames(worker, &RdpWorker::frameAvailable); QTRY_VERIFY_WITH_TIMEOUT(frames.size() > 1, 10000);
         // Queue a frame/resize immediately before closing without another GUI event-loop turn.
-        groups->setCurrentIndex(0); window->quickConnect("mock.invalid", true); worker->resizeDesktop(QSize(850, 650)); window->resize(1020, 730);
+        window->quickConnect("mock.invalid", true); worker->resizeDesktop(QSize(850, 650)); window->resize(1020, 730);
         std::atomic<bool> framePending{false};
         connect(worker, &RdpWorker::frameAvailable, this, [&] { framePending = true; }, Qt::DirectConnection);
         worker->takeFrame();
@@ -678,7 +664,7 @@ private slots:
         QCOMPARE(window.sessionCount(), size_t(0)); credentials->findChild<QLineEdit*>("usernameEdit")->setText("rdpfixture");
         QVERIFY(!credentials->findChild<QCheckBox*>("clipboardCheck")->isChecked());
         credentials->findChild<QLineEdit*>("passwordEdit")->setText(QString::fromUtf8(password)); credentials->accept();
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QCOMPARE(tabs->count(), 1);
+        auto tabs = sessionTabs(window); QCOMPARE(tabs->count(), 1);
         auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
         certificate(pane); QVERIFY(!QTest::currentTestFailed());
         QPointer<RdpWorker> worker = pane->findChild<RdpWorker*>(); QVERIFY(worker && worker->isRunning());
@@ -747,8 +733,7 @@ private slots:
         const auto password = qgetenv("RM_RDP_TEST_PASSWORD"); const auto port = qEnvironmentVariableIntValue("RM_RDP_TEST_PORT"); QVERIFY(!password.isEmpty() && port > 0);
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/live-panel-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow window(dir.path() + "/confCons.xml", true); window.show(); WAIT_STORE(window);
-        window.findChild<QAction*>("actionAddPanel")->trigger(); auto* groups = window.findChild<QTabWidget*>("groupTabs"); QCOMPARE(groups->count(), 2);
-        QPointer<QWidget> panel = groups->currentWidget(); auto* tabs = panel->findChild<QTabWidget*>(); QVERIFY(tabs);
+        auto tabs = sessionTabs(window);
         window.quickConnect("127.0.0.1:" + QString::number(port)); auto* credentials = window.findChild<QDialog*>("CredentialsDialog"); QVERIFY(credentials);
         credentials->findChild<QLineEdit*>("usernameEdit")->setText("rdpfixture"); credentials->findChild<QLineEdit*>("passwordEdit")->setText(QString::fromUtf8(password)); credentials->accept();
         QPointer<SessionPane> pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
@@ -757,11 +742,9 @@ private slots:
         QPointer<RdpWorker> worker = pane->findChild<RdpWorker*>(); QVERIFY(worker && worker->isRunning());
         window.quickConnect("mock.invalid", true); QCOMPARE(tabs->count(), 2); QCOMPARE(window.sessionCount(), size_t(2));
         worker->resizeDesktop(QSize(850, 650));
-        const auto point = groups->tabBar()->tabRect(groups->indexOf(panel)).center();
-        QContextMenuEvent event(QContextMenuEvent::Mouse, point, groups->tabBar()->mapToGlobal(point)); QApplication::sendEvent(groups->tabBar(), &event);
-        auto* menu = window.findChild<QMenu*>("groupContextMenu"); QVERIFY(menu); menu->findChild<QAction*>("actionPanelClose")->trigger(); menu->close();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QVERIFY(!worker && !pane && !panel); QCOMPARE(window.sessionCount(), size_t(0)); QCOMPARE(groups->count(), 1);
+        // Qt ADS's Close Group closes every tab in the panel through the shell.
+        tabs.area()->closeArea();
+        QTRY_VERIFY(!worker && !pane); QCOMPARE(window.sessionCount(), size_t(0)); QCOMPARE(tabs->count(), 0);
         QVERIFY(!QFile::exists(dir.path() + "/confCons.xml")); QTest::qWait(1000);
     }
     void transientSecretsExcludedFromLogs() {

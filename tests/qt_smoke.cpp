@@ -16,10 +16,14 @@
 #include "DocumentService.h"
 #include "GridDriver.h"
 #include "ClipboardDriver.h"
-#include "PanelWindow.h"
+#include "FullscreenWindow.h"
+#include "SessionTabs.h"
+#include "DockOverlay.h"
 #include <QApplication>
 #include <QDialog>
-#include <QDockWidget>
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
 #include <QMenuBar>
 #include <QAction>
 #include <QTimer>
@@ -44,8 +48,7 @@ bool triggerNativePreferencesShortcut();
 #include <QWheelEvent>
 #include <QKeyEvent>
 #include <QSpinBox>
-#include <QTabWidget>
-#include <QTabBar>
+#include "SessionTabs.h"
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <QInputDialog>
@@ -66,6 +69,7 @@ bool triggerNativePreferencesShortcut();
 #include <QElapsedTimer>
 #include <QRegularExpression>
 #include <QScreen>
+#include <QScrollBar>
 #include <QWindow>
 #include <QVBoxLayout>
 #include <rhi/qrhi.h>
@@ -110,32 +114,26 @@ static QColor capturedCenter(DesktopView& view) {
 static QMainWindow* fullscreenWindow(const MainWindow& w) {
     auto* window = w.sessionFullscreenWindow(); return window && window->isFullScreen() ? window : nullptr;
 }
-static void tabMenuAction(MainWindow& w, QTabWidget* tabs, int index, const char* name) {
-    QVERIFY(tabs);
-    const auto center = tabs->tabBar()->tabRect(index).center();
-    QContextMenuEvent event(QContextMenuEvent::Mouse, center, tabs->tabBar()->mapToGlobal(center));
-    QApplication::sendEvent(tabs->tabBar(), &event);
-    const auto menus = w.findChildren<QMenu*>("sessionContextMenu"); QVERIFY(!menus.isEmpty());
-    auto* action = menus.last()->findChild<QAction*>(name); QVERIFY(action && action->isEnabled());
-    menus.last()->close(); action->trigger();
+static void tabMenuAction(MainWindow& w, const SessionTabs& tabs, int index, const char* name) {
+    QVERIFY(tabs); QVERIFY2(tabMenuCommand(w, tabs, index, name), name);
 }
-static QList<PanelWindow*> panelWindows() {
-    QList<PanelWindow*> result;
-    for (auto* widget : QApplication::topLevelWidgets()) if (auto* window = qobject_cast<PanelWindow*>(widget); window && window->isVisible()) result << window;
+// Windows other than the main one: fullscreen sessions' and floating panels'.
+static QList<QWidget*> panelWindows() {
+    QList<QWidget*> result;
+    for (auto* widget : QApplication::topLevelWidgets())
+        if ((qobject_cast<FullscreenWindow*>(widget) || qobject_cast<ads::CFloatingDockContainer*>(widget)) && widget->isVisible()) result << widget;
     return result;
 }
-// Presses a tab, then moves through the given global points and releases at the last.
-static bool dragTab(QTabBar* bar, int index, const QList<QPoint>& path, const std::function<void()>& beforeDrop = {}) {
-    const auto start = bar->tabRect(index).center(); if (start.x() < 0) return false;
-    QTest::mousePress(bar, Qt::LeftButton, Qt::NoModifier, start);
-    for (const auto& global : path) {
-        QMouseEvent move(QEvent::MouseMove, QPointF(bar->mapFromGlobal(global)), QPointF(global), Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-        QApplication::sendEvent(bar, &move);
-    }
-    if (beforeDrop) beforeDrop();
-    const auto end = path.last();
-    QMouseEvent release(QEvent::MouseButtonRelease, QPointF(bar->mapFromGlobal(end)), QPointF(end), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
-    QApplication::sendEvent(bar, &release); return release.isAccepted() && !panelWindows().isEmpty();
+static ads::CDockManager* dockManagerOf(QWidget& window) { return window.findChild<ads::CDockManager*>("dockManager"); }
+// Gives a session's tab focus, as clicking it does.
+static void focusTab(QWidget& window, SessionPane* pane) { dockManagerOf(window)->setDockWidgetFocused(sessionDockOf(pane)); }
+// Moves a session to a panel named in its tab's Move to panel menu.
+static bool moveToPanel(MainWindow& w, SessionPane* pane, const QString& panel) {
+    auto tabs = panelTabs(pane); openTabMenu(tabs, tabs->indexOf(pane));
+    const auto menus = w.findChildren<QMenu*>("sessionContextMenu"); if (menus.isEmpty()) return false;
+    QAction* target = nullptr;
+    for (auto* action : menus.last()->findChild<QMenu*>("moveSessionMenu")->actions()) if (action->text() == panel && action->isEnabled()) target = action;
+    menus.last()->close(); if (target) target->trigger(); return target;
 }
 static bool nearlyEqual(const QImage& left, const QImage& right, int tolerance) {
     const auto a = left.convertToFormat(QImage::Format_ARGB32_Premultiplied), b = right.convertToFormat(QImage::Format_ARGB32_Premultiplied);
@@ -157,23 +155,20 @@ static bool brandingAsset(const QImage& actual, int size) {
 class Smoke : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { qputenv("QT_RHI_LEAK_CHECK", "1"); applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
+    void initTestCase() { qputenv("QT_RHI_LEAK_CHECK", "1"); applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
     void firstPartyBrandingUsesSourcePixelsAndPreservesIdentity() {
         const auto applicationName = QCoreApplication::applicationName();
         const auto organizationName = QCoreApplication::organizationName();
         QTemporaryDir dir; QVERIFY(dir.isValid());
         MainWindow window(dir.filePath("confCons.xml"), true); WAIT_STORE(window);
-        PanelWindow detached(2);
+        FullscreenWindow detached;
         QCOMPARE(QCoreApplication::applicationName(), applicationName);
         QCOMPARE(QCoreApplication::organizationName(), organizationName);
         QCOMPARE(QGuiApplication::applicationDisplayName(), QString("CMRemote"));
         QCOMPARE(QGuiApplication::desktopFileName(), QString("org.remotemanager.RemoteManager"));
         QCOMPARE(window.windowTitle(), QString("CMRemote"));
-        QCOMPARE(detached.windowTitle(), QString("CMRemote — Window 2"));
-        auto* groups = window.findChild<QTabWidget*>("groupTabs"); QVERIFY(groups);
-        const int general = groups->indexOf(window.findChild<QWidget*>("generalPanel")); QVERIFY(general >= 0);
-        const QList<QIcon> icons{Branding::applicationIcon(), QGuiApplication::windowIcon(), window.windowIcon(),
-                                 groups->tabIcon(general), detached.windowIcon()};
+        QCOMPARE(detached.windowTitle(), QString("CMRemote"));
+        const QList<QIcon> icons{Branding::applicationIcon(), QGuiApplication::windowIcon(), window.windowIcon(), detached.windowIcon()};
         for (const auto& icon : icons) {
             QCOMPARE(icon.availableSizes().size(), 9);
             for (const int size : {16, 24, 32, 48, 64, 128, 256, 512, 1024}) {
@@ -184,8 +179,6 @@ private slots:
                 QVERIFY(brandingAsset(actual, size));
             }
         }
-        auto* options = detached.findChild<QToolButton*>("panelWindowMenuButton"); QVERIFY(options);
-        QVERIFY(nearlyEqual(options->icon().pixmap(QSize(16, 16), 1.0).toImage(), QIcon(":/original/Panel_16x.png").pixmap(QSize(16, 16), 1.0).toImage(), 0));
         auto* aboutAction = window.findChild<QAction*>("actionAbout"); QVERIFY(aboutAction);
         QCOMPARE(aboutAction->text(), QString("About CMRemote")); aboutAction->trigger();
         auto* about = window.findChild<QMessageBox*>("aboutDialog"); QVERIFY(about);
@@ -349,8 +342,8 @@ private slots:
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(900, 650); w.show(); WAIT_STORE(w);
         w.quickConnect("fullscreen.invalid", true); QPointer<SessionPane> pane = w.findChild<SessionPane*>(); QVERIFY(pane);
         w.quickConnect("other.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); tabs->setCurrentIndex(0);
-        auto* connections = w.findChild<QDockWidget*>("connectionsDock"); const auto geometry = w.geometry(); const auto target = pane->target();
+        auto tabs = sessionTabs(w); tabs->setCurrentIndex(0);
+        auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); const auto geometry = w.geometry(); const auto target = pane->target();
         auto* desktop = pane->findChild<DesktopView*>(); QVERIFY(desktop);
         const auto desktopParent = desktop->parentWidget(); const auto paneParent = pane->parentWidget();
         const auto margins = pane->layout()->contentsMargins(); const auto spacing = pane->layout()->spacing();
@@ -369,7 +362,7 @@ private slots:
         // New connections still open in the main window.
         w.quickConnect("third.invalid", true); QCOMPARE(tabs->count(), 2); QVERIFY(full->isAncestorOf(pane)); QCOMPARE(fullscreenWindow(w), full.data());
         full->findChild<QToolButton*>("exitSessionFullscreen")->click(); QTRY_VERIFY(!w.sessionFullscreenWindow()); QTRY_VERIFY(!full || !full->isVisible());
-        QCOMPARE(tabs->indexOf(pane), 0); QCOMPARE(tabs->count(), 3); QCOMPARE(tabs->currentWidget(), pane.data()); QVERIFY(tabs->tabBar()->isVisible());
+        QCOMPARE(tabs->indexOf(pane), 0); QCOMPARE(tabs->count(), 3); QCOMPARE(tabs->currentWidget(), pane.data()); QVERIFY(tabs->tabBarVisible());
         QCOMPARE(pane->parentWidget(), paneParent); QCOMPARE(desktop->parentWidget(), desktopParent); QCOMPARE(pane->findChild<DesktopView*>(), desktop);
         QCOMPARE(pane->target(), target); QCOMPARE(w.sessionCount(), size_t(3)); QVERIFY(panelWindows().isEmpty());
         // Application fullscreen is independent of session fullscreen.
@@ -402,8 +395,8 @@ private slots:
         // Toggling is ignored until the native enter transition finishes.
         QTRY_VERIFY_WITH_TIMEOUT(isNativeFullScreen(full), 8000); QTest::qWait(1200);
         toggleNativeFullScreen(full); QTRY_VERIFY_WITH_TIMEOUT(!w.sessionFullscreenWindow(), 8000);
-        QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->indexOf(pane), 0); QCOMPARE(pane->findChild<DesktopView*>(), desktop);
-        QVERIFY(!w.findChild<QWidget*>("fullscreenControlsRow")); QVERIFY(w.findChild<QDockWidget*>("connectionsDock")->isVisible());
+        QCOMPARE(sessionTabs(w)->indexOf(pane), 0); QCOMPARE(pane->findChild<DesktopView*>(), desktop);
+        QVERIFY(!w.findChild<QWidget*>("fullscreenControlsRow")); QVERIFY(w.findChild<ads::CDockWidget*>("connectionsDock")->isVisible());
         QVERIFY(!w.isFullScreen()); QVERIFY(!w.findChild<QAction*>("actionFullscreen")->isChecked());
 #else
         QSKIP("Native View requires macOS");
@@ -425,7 +418,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(isNativeFullScreen(full), 8000); QCOMPARE(fullscreenWindow(w), full.data()); QTest::qWait(1200);
         // Exit fullscreen returns the session and leaves no window behind.
         full->findChild<QToolButton*>("exitSessionFullscreen")->click(); QTRY_VERIFY(!w.sessionFullscreenWindow());
-        QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->indexOf(pane), 0);
+        QCOMPARE(sessionTabs(w)->indexOf(pane), 0);
         QTest::qWait(2500); QVERIFY(!full || !isNativeVisible(full)); QVERIFY(!w.isFullScreen());
 #else
         QSKIP("Native fullscreen requires macOS");
@@ -434,7 +427,7 @@ private slots:
     void fullscreenBarTargetsCapturedSession() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> first = qobject_cast<SessionPane*>(tabs->widget(0));
+        auto tabs = sessionTabs(w); QPointer<SessionPane> first = qobject_cast<SessionPane*>(tabs->widget(0));
         QPointer<SessionPane> second = qobject_cast<SessionPane*>(tabs->widget(1)); tabs->setCurrentIndex(1);
         tabMenuAction(w, tabs, 0, "actionTabFullscreen"); QPointer<QMainWindow> full; QTRY_VERIFY((full = fullscreenWindow(w)));
         QVERIFY(full->isAncestorOf(first)); QCOMPARE(tabs->currentWidget(), second.data());
@@ -445,7 +438,7 @@ private slots:
     void fullscreenMinimizeAndReplacementRestoreSafely() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); QPointer<SessionPane> pane = w.findChild<SessionPane*>();
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs");
+        auto tabs = sessionTabs(w);
         auto* action = w.findChild<QAction*>("actionTabFullscreen"); QVERIFY(action->isEnabled()); action->trigger();
         QPointer<QMainWindow> full; QTRY_VERIFY((full = fullscreenWindow(w)));
         // Minimize hides only the fullscreen session's window.
@@ -462,11 +455,11 @@ private slots:
         full->showNormal();
         QTRY_VERIFY_WITH_TIMEOUT(full->isFullScreen() && !full->isMinimized(), 8000); QCOMPARE(fullscreenWindow(w), full.data());
         QVERIFY(full->findChild<QWidget*>("fullscreenBar")->isVisible()); QVERIFY(full->isAncestorOf(pane));
-        tabMenuAction(w, full->findChild<QTabWidget*>("panelSessionTabs"), 0, "actionTabReconnect");
+        tabMenuAction(w, panelTabs(pane), 0, "actionTabReconnect");
         QTRY_VERIFY(pane.isNull()); QTRY_VERIFY(!w.sessionFullscreenWindow()); QCOMPARE(w.sessionCount(), size_t(1)); QCOMPARE(tabs->count(), 1);
-        QVERIFY(w.findChild<QDockWidget*>("connectionsDock")->isVisible());
+        QVERIFY(w.findChild<ads::CDockWidget*>("connectionsDock")->isVisible());
         action->trigger(); QTRY_VERIFY((full = fullscreenWindow(w)));
-        tabMenuAction(w, full->findChild<QTabWidget*>("panelSessionTabs"), 0, "actionTabDisconnect"); QTRY_VERIFY(!w.sessionFullscreenWindow());
+        tabMenuAction(w, panelTabs(full->findChild<SessionPane*>()), 0, "actionTabDisconnect"); QTRY_VERIFY(!w.sessionFullscreenWindow());
         QCOMPARE(tabs->count(), 1); QVERIFY(!w.findChild<SessionPane*>()->active()); QCOMPARE(w.sessionCount(), size_t(1));
         // Closing the fullscreen window ends its session.
         action->trigger(); QTRY_VERIFY((full = fullscreenWindow(w))); full->close();
@@ -475,7 +468,7 @@ private slots:
     void fullscreenLifecycleAndRequestedVisibility() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, dir.filePath("preferences.json")); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); auto* first = qobject_cast<SessionPane*>(tabs->widget(0));
+        auto tabs = sessionTabs(w); auto* first = qobject_cast<SessionPane*>(tabs->widget(0));
         auto* action = w.findChild<QAction*>("actionTabFullscreen"); tabs->setCurrentIndex(0); action->trigger();
         QPointer<QMainWindow> full; QTRY_VERIFY((full = fullscreenWindow(w)));
         QPointer<QToolButton> stale = full->findChild<QToolButton*>("closeFullscreenConnection"); QVERIFY(stale);
@@ -483,18 +476,18 @@ private slots:
         QCOMPARE(input.size(), 0); QCOMPARE(tabs->currentWidget(), first); action->trigger(); QTRY_VERIFY((full = fullscreenWindow(w)));
         if (stale) stale->click(); QCOMPARE(w.sessionCount(), size_t(2)); QVERIFY(fullscreenWindow(w));
         // The main window's docks and preferences work while a session is fullscreen.
-        auto* connections = w.findChild<QDockWidget*>("connectionsDock"); QVERIFY(connections->isVisible());
-        w.findChild<QAction*>("actionViewConnections")->setChecked(false); QVERIFY(connections->isHidden());
-        w.findChild<QAction*>("actionViewNotifications")->setChecked(true); QVERIFY(w.findChild<QDockWidget*>("notificationsDock")->isVisible());
+        auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); QVERIFY(connections->isVisible());
+        w.findChild<QAction*>("actionViewConnections")->setChecked(false); QVERIFY(connections->isClosed());
+        w.findChild<QAction*>("actionViewNotifications")->setChecked(true); QVERIFY(w.findChild<ads::CDockWidget*>("notificationsDock")->isVisible());
         auto* options = w.findChild<QAction*>("actionOptions"); QTRY_VERIFY(options->isEnabled()); options->trigger();
         auto* dialog = w.findChild<QDialog*>("optionsDialog"); QVERIFY(dialog); dialog->findChild<QCheckBox*>("quickConnect")->setChecked(false); dialog->accept();
         QTRY_VERIFY(QFile::exists(dir.filePath("preferences.json"))); QTRY_VERIFY(!w.findChild<QAction*>("actionViewQuickConnect")->isChecked());
         QVERIFY(w.findChild<QToolBar*>("quickConnectToolbar")->isHidden()); QVERIFY(fullscreenWindow(w));
         w.addPanel(); tabs->setCurrentIndex(1); QVERIFY(fullscreenWindow(w));
-        full->showNormal(); QTRY_VERIFY(!w.sessionFullscreenWindow()); QCOMPARE(tabs->count(), 2); QTRY_VERIFY(tabs->tabBar()->isVisible());
-        QVERIFY(!w.findChild<QWidget*>("fullscreenBar")); QVERIFY(connections->isHidden());
+        full->showNormal(); QTRY_VERIFY(!w.sessionFullscreenWindow()); QCOMPARE(tabs->count(), 2); QTRY_VERIFY(tabs->tabBarVisible());
+        QVERIFY(!w.findChild<QWidget*>("fullscreenBar")); QVERIFY(connections->isClosed());
         tabs->setCurrentIndex(1); action->trigger(); QTRY_VERIFY((full = fullscreenWindow(w)));
-        auto* second = qobject_cast<SessionPane*>(full->findChild<QTabWidget*>("panelSessionTabs")->widget(0)); second->event("state", "failed");
+        auto* second = full->findChild<SessionPane*>(); second->event("state", "failed");
         QTRY_VERIFY(!w.sessionFullscreenWindow()); QCOMPARE(tabs->count(), 2); QCOMPARE(tabs->indexOf(second), 1);
         action->trigger(); QTRY_VERIFY(fullscreenWindow(w));
         w.close(); QCOMPARE(w.sessionCount(), size_t(0));
@@ -526,9 +519,10 @@ private slots:
         w.quickConnect("destroyed.invalid", true); auto* pane = w.findChild<SessionPane*>(); QVERIFY(pane);
         w.findChild<QAction*>("actionTabFullscreen")->trigger(); QPointer<QMainWindow> full; QTRY_VERIFY((full = fullscreenWindow(w)));
         QPointer<QWidget> row = full->findChild<QWidget*>("fullscreenControlsRow"); QVERIFY(row);
-        delete pane;
+        // Qt ADS deletes the session's dock, and with it the session, outside the shell.
+        QPointer<SessionPane> target = pane; sessionDockOf(pane)->deleteDockWidget(); QTRY_VERIFY(target.isNull());
         QTRY_VERIFY(!w.sessionFullscreenWindow()); QTRY_VERIFY(row.isNull()); QTRY_VERIFY(panelWindows().isEmpty());
-        QVERIFY(!w.isFullScreen()); QVERIFY(w.findChild<QDockWidget*>("connectionsDock")->isVisible());
+        QVERIFY(!w.isFullScreen()); QVERIFY(w.findChild<ads::CDockWidget*>("connectionsDock")->isVisible());
     }
     void desktopShortcutsRemainRemote() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
@@ -549,81 +543,160 @@ private slots:
         }
         full->findChild<QToolButton*>("exitSessionFullscreen")->click(); QTRY_VERIFY(!w.sessionFullscreenWindow());
     }
-    void dragSessionTabOutCreatesWindowAndDragBackMerges() {
+    void movingSessionToNewWindowAndBackKeepsIt() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> second = qobject_cast<SessionPane*>(tabs->widget(1)); const auto session = second->id();
-        auto* desktop = second->findChild<DesktopView*>();
-        // Small vertical moves stay in the strip (reordering); leaving it tears the tab into a new window.
-        dragTab(tabs->tabBar(), 1, {tabs->tabBar()->mapToGlobal(tabs->tabBar()->tabRect(1).center() + QPoint(0, 10)), w.mapToGlobal(QPoint(500, 500)), w.mapToGlobal(QPoint(520, 520))});
-        QTRY_COMPARE(panelWindows().size(), 1); auto* window = panelWindows().first(); auto* groups = window->findChild<QTabWidget*>("windowGroupTabs");
-        QCOMPARE(groups->count(), 1); auto* moved = groups->widget(0)->findChild<QTabWidget*>(); QCOMPARE(moved->widget(0), second.data());
-        QCOMPARE(tabs->count(), 1); QCOMPARE(second->id(), session); QCOMPARE(second->findChild<DesktopView*>(), desktop); QCOMPARE(w.sessionCount(), size_t(2));
-        // Dragging the only tab moves the whole window; dropping it on the main strip merges it back.
-        // Past the last tab, still within the strip's row, appends.
-        const auto strip = tabs->mapToGlobal(QPoint(tabs->width() - 20, tabs->tabBar()->y() + tabs->tabBar()->height() / 2));
-        // Over a strip, the area the tab will join is highlighted, as when docking.
-        dragTab(moved->tabBar(), 0, {moved->tabBar()->mapToGlobal(QPoint(10, -60)), strip}, [&] {
-            auto* band = w.findChild<QWidget*>("tabDropHighlight"); QVERIFY(band && band->isVisible()); QCOMPARE(band->parentWidget(), &w);
-            QCOMPARE(band->geometry(), QRect(tabs->mapTo(&w, QPoint(0, 0)), tabs->size()));
-        });
-        QVERIFY(!w.findChild<QWidget*>("tabDropHighlight")->isVisible());
-        QTRY_VERIFY(panelWindows().isEmpty()); QCOMPARE(tabs->count(), 2); QCOMPARE(tabs->widget(1), second.data()); QCOMPARE(second->id(), session);
+        auto tabs = sessionTabs(w); QPointer<SessionPane> second = tabs->widget(1); const auto session = second->id();
+        auto* desktop = second->findChild<DesktopView*>(); auto* dock = sessionDockOf(second);
+        // A tab moved to a new window floats in a Qt ADS window of its own: same session, view and dock.
+        tabMenuAction(w, tabs, 1, "actionMoveToNewWindow");
+        QTRY_COMPARE(floatingWindows().size(), 1); auto* window = floatingWindows().first(); QVERIFY(window->isAncestorOf(second));
+        QCOMPARE(tabs->count(), 1); QCOMPARE(sessionDockOf(second), dock); QCOMPARE(second->id(), session); QCOMPARE(second->findChild<DesktopView*>(), desktop);
+        QCOMPARE(w.sessionCount(), size_t(2));
+        // Its only tab cannot float again; moving it back to General closes the window.
+        openTabMenu(panelTabs(second), 0); auto* menu = w.findChildren<QMenu*>("sessionContextMenu").last();
+        QVERIFY(!menu->findChild<QAction*>("actionMoveToNewWindow")->isEnabled()); menu->close();
+        QVERIFY(moveToPanel(w, second, "General"));
+        QTRY_VERIFY(floatingWindows().isEmpty()); QCOMPARE(tabs->count(), 2); QCOMPARE(tabs->widget(1), second.data()); QCOMPARE(second->id(), session);
         QCOMPARE(w.sessionCount(), size_t(2));
     }
-    void dragSessionTabOntoAnotherPanel() {
-        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
-        auto* groups = w.findChild<QTabWidget*>("groupTabs"); w.addPanel(); QPointer<QWidget> panel = groups->currentWidget(); auto* panelTabs = panel->findChild<QTabWidget*>();
-        groups->setCurrentIndex(0); w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> first = qobject_cast<SessionPane*>(tabs->widget(0));
-        const auto panelTab = groups->tabBar()->mapToGlobal(groups->tabBar()->tabRect(1).center());
-        dragTab(tabs->tabBar(), 0, {panelTab}, [&] {
-            // Only the panel tab the session joins is highlighted.
-            auto* band = w.findChild<QWidget*>("tabDropHighlight"); QVERIFY(band && band->isVisible());
-            const auto tab = groups->tabBar()->tabRect(1); QCOMPARE(band->geometry(), QRect(groups->tabBar()->mapTo(&w, tab.topLeft()), tab.size()));
-        });
-        QTRY_COMPARE(panelTabs->indexOf(first), 0); QCOMPARE(tabs->count(), 1); QVERIFY(panelWindows().isEmpty());
-        // Emptying a panel by dragging its last tab away removes the panel; General stays.
-        groups->setCurrentWidget(panel); const auto generalTab = groups->tabBar()->mapToGlobal(groups->tabBar()->tabRect(0).center());
-        dragTab(panelTabs->tabBar(), 0, {generalTab});
-        QTRY_VERIFY(panel.isNull()); QCOMPARE(tabs->count(), 2); QCOMPARE(groups->count(), 1); QCOMPARE(w.sessionCount(), size_t(2));
+    void droppedWindowOfSessionsGetsRoomBesideSidePanes_data() {
+        QTest::addColumn<int>("side"); QTest::addColumn<bool>("generalKeepsOne");
+        for (const bool keep : {false, true})
+            for (const auto side : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea})
+                QTest::newRow(qPrintable(QString("%1%2").arg(int(side)).arg(keep ? "-general-has-one" : ""))) << int(side) << keep;
     }
-    void dragPanelOutAndBack() {
+    void droppedWindowOfSessionsGetsRoomBesideSidePanes() {
+        QFETCH(int, side); QFETCH(bool, generalKeepsOne);
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
-        auto* groups = w.findChild<QTabWidget*>("groupTabs"); w.addPanel(); QPointer<QWidget> panel = groups->currentWidget();
-        w.quickConnect("panel.invalid", true); QPointer<SessionPane> pane = panel->findChild<SessionPane*>(); QVERIFY(pane);
-        QVERIFY(!dragTab(groups->tabBar(), 0, {w.mapToGlobal(QPoint(500, 500))})); QVERIFY(panelWindows().isEmpty());
-        dragTab(groups->tabBar(), 1, {w.mapToGlobal(QPoint(500, 500)), w.mapToGlobal(QPoint(520, 520))});
-        QTRY_COMPARE(panelWindows().size(), 1); auto* windowGroups = panelWindows().first()->findChild<QTabWidget*>("windowGroupTabs");
-        QCOMPARE(windowGroups->indexOf(panel), 0); QCOMPARE(groups->count(), 1); QCOMPARE(panel->findChild<SessionPane*>(), pane.data());
-        const auto mainPanels = groups->mapToGlobal(QPoint(groups->width() - 20, groups->tabBar()->y() + groups->tabBar()->height() / 2));
-        dragTab(windowGroups->tabBar(), 0, {windowGroups->tabBar()->mapToGlobal(QPoint(10, -60)), mainPanels}, [&] {
-            auto* band = w.findChild<QWidget*>("tabDropHighlight"); QVERIFY(band && band->isVisible());
-            QCOMPARE(band->geometry().y(), groups->tabBar()->mapTo(&w, QPoint(0, 0)).y()); QCOMPARE(band->width(), groups->width());
-        });
-        QTRY_VERIFY(panelWindows().isEmpty()); QCOMPARE(groups->indexOf(panel), 1); QCOMPARE(w.sessionCount(), size_t(1));
+        for (const auto* host : {"first.invalid", "second.invalid"}) w.quickConnect(host, true);
+        auto general = sessionTabs(w); QPointer<SessionPane> first = general->widget(0), second = general->widget(1);
+        auto* manager = dockManagerOf(w); auto* sidePane = w.findChild<ads::CDockWidget*>("connectionsDock")->dockAreaWidget(); const int sideWidth = sidePane->width();
+        // Sessions moved out into a window of their own; General keeps one or is left empty.
+        QVERIFY(tabMenuCommand(w, general, 0, "actionMoveToNewWindow")); QTRY_COMPARE(floatingWindows().size(), 1); auto* floating = floatingWindows().first();
+        if (!generalKeepsOne) { manager->addDockWidgetTabToArea(sessionDockOf(second), panelTabs(first).area()); QTRY_COMPARE(general->count(), 0); }
+        // The main window still shows General with real room; the side panes did not take its space.
+        QTRY_VERIFY2(general.area()->isVisible() && general.area()->width() >= 150, qPrintable(QString::number(general.area()->width())));
+        QCOMPARE(sidePane->width(), sideWidth);
+        // The dock manager's overlays and their arrow crosses, in creation order: dock area, then whole window.
+        const auto overlays = manager->findChildren<ads::CDockOverlay*>(QString(), Qt::FindDirectChildrenOnly); QCOMPARE(overlays.size(), 2);
+        const auto crosses = manager->findChildren<ads::CDockOverlayCross*>(QString(), Qt::FindDirectChildrenOnly); QCOMPARE(crosses.size(), 2);
+        const auto arrow = [](ads::CDockOverlayCross* cross, int area) {
+            for (auto* label : cross->findChildren<QLabel*>()) if (label->property("dockWidgetArea").toInt() == area && label->isVisible()) return label->mapToGlobal(label->rect().center());
+            return QPoint();
+        };
+        // The side panes offer no arrows: sessions never dock inside their column.
+        for (const auto* name : {"connectionsDock", "configDock"}) {
+            auto* area = w.findChild<ads::CDockWidget*>(name)->dockAreaWidget(); QCOMPARE(area->allowedAreas(), ads::DockWidgetAreas(ads::NoDockWidgetArea));
+            overlays.at(0)->setAllowedAreas(area->allowedAreas()); overlays.at(0)->showOverlay(area);
+            for (const auto target : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea, ads::CenterDockWidgetArea})
+                QVERIFY2(arrow(crosses.at(0), target).isNull(), name);
+            overlays.at(0)->hideOverlay();
+        }
+        // Dropped on an edge arrow of the window, as Qt ADS does on release.
+        overlays.at(1)->setAllowedAreas(ads::OuterDockAreas); overlays.at(1)->showOverlay(manager);
+        const auto point = arrow(crosses.at(1), side); QVERIFY(!point.isNull());
+        struct Drop : ads::CDockContainerWidget { using ads::CDockContainerWidget::dropFloatingWidget; };
+        (manager->*&Drop::dropFloatingWidget)(floating, point); overlays.at(1)->hideOverlay();
+        QTRY_VERIFY(floatingWindows().isEmpty());
+        auto panel = panelTabs(first); QVERIFY(panel.area()); QCOMPARE(panel.area()->window(), &w);
+        // The sessions get real room, taken from General, never from the side panes.
+        QTRY_VERIFY2(panel.area()->width() >= 150 && panel.area()->height() >= 150,
+                      qPrintable(QString("%1x%2, side %3").arg(panel.area()->width()).arg(panel.area()->height()).arg(sidePane->width())));
+        if (side == ads::LeftDockWidgetArea || side == ads::RightDockWidgetArea) QCOMPARE(sidePane->width(), sideWidth);
+    }
+    void pulledOutTabRejoinsTabBarUnderCursor() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        for (const auto* host : {"first.invalid", "second.invalid", "third.invalid"}) w.quickConnect(host, true);
+        auto general = sessionTabs(w); QPointer<SessionPane> first = general->widget(0), second = general->widget(1), third = general->widget(2);
+        w.findChild<QAction*>("actionAddPanel")->trigger(); QPointer<ads::CDockAreaWidget> panel = panelTabs(third).area();
+        QVERIFY(panel && panel != general.area()); QCOMPARE(general->count(), 2);
+        const auto centre = [](QWidget* widget) { return widget->mapToGlobal(widget->rect().center()); };
+        const auto at = [&](const QPoint& global) { return w.mapFromGlobal(global); };
+        const auto preview = [] {
+            for (auto* widget : QApplication::topLevelWidgets()) if (qobject_cast<ads::CFloatingDragPreview*>(widget) && widget->isVisible()) return true;
+            return false;
+        };
+        // Pulled down out of Panel 1, the tab becomes a floating preview.
+        auto start = centre(sessionDockOf(third)->tabWidget()); QTest::mousePress(w.windowHandle(), Qt::LeftButton, {}, at(start));
+        for (int y = 4; y <= 80; y += 4) QTest::mouseMove(w.windowHandle(), at(start + QPoint(0, y)));
+        QVERIFY(preview());
+        // Over General's tab bar, in the right part of the first tab, it rejoins there as a tab between the first and second.
+        auto* firstTab = sessionDockOf(first)->tabWidget(); const auto over = firstTab->mapToGlobal(QPoint(firstTab->width() - 6, firstTab->height() / 2));
+        QTest::mouseMove(w.windowHandle(), at(over + QPoint(0, 40))); QTest::mouseMove(w.windowHandle(), at(over));
+        QTRY_VERIFY(!preview()); QCOMPARE(panelTabs(third).area(), general.area()); QCOMPARE(general->indexOf(third), 1); QTRY_VERIFY(panel.isNull());
+        // It keeps following the mouse as a tab: past the second tab's centre it moves after it.
+        const int beyond = centre(sessionDockOf(second)->tabWidget()).x() + 20;
+        for (int x = over.x(); x <= beyond; x += 4) QTest::mouseMove(w.windowHandle(), at(QPoint(x, over.y())));
+        QCOMPARE(general->indexOf(third), 2);
+        QTest::mouseRelease(w.windowHandle(), Qt::LeftButton, {}, at(QPoint(beyond, over.y())));
+        QVERIFY(floatingWindows().isEmpty()); QCOMPARE(general->count(), 3); QCOMPARE(general->currentWidget(), third.data());
+        // A tab pulled out of General and brought straight back stays in General.
+        start = centre(sessionDockOf(first)->tabWidget()); QTest::mousePress(w.windowHandle(), Qt::LeftButton, {}, at(start));
+        for (int y = 4; y <= 80; y += 4) QTest::mouseMove(w.windowHandle(), at(start + QPoint(0, y)));
+        QVERIFY(preview()); QTest::mouseMove(w.windowHandle(), at(start));
+        QTRY_VERIFY(!preview()); QTest::mouseRelease(w.windowHandle(), Qt::LeftButton, {}, at(start));
+        QVERIFY(floatingWindows().isEmpty()); QCOMPARE(general->count(), 3); QCOMPARE(general->indexOf(first), 0); QCOMPARE(w.sessionCount(), size_t(3));
+    }
+    void sessionTabsSplitIntoPanelsAndMerge() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        auto* placeholder = w.findChild<ads::CDockWidget*>("documentsDock"); auto general = sessionTabs(w);
+        // An empty window shows General without a tab or title bar.
+        QVERIFY(!placeholder->isClosed()); QVERIFY(!general->tabBarVisible()); QVERIFY(!w.findChild<QAction*>("actionAddPanel")->isEnabled());
+        w.quickConnect("first.invalid", true); QPointer<SessionPane> first = general->widget(0);
+        QVERIFY(placeholder->isClosed()); QTRY_VERIFY(general->tabBarVisible()); QVERIFY(general->tab(0)->isVisible());
+        QVERIFY(isSessionDock(sessionDockOf(first))); QVERIFY(!w.findChild<QAction*>("actionAddPanel")->isEnabled());
+        w.quickConnect("second.invalid", true); QPointer<SessionPane> second = general->widget(1);
+        auto* side = w.findChild<ads::CDockWidget*>("connectionsDock")->dockAreaWidget(); const int sideWidth = side->width();
+        // View > New Panel moves the current tab into a panel of its own beside General, splitting General in half.
+        auto* add = w.findChild<QAction*>("actionAddPanel"); QVERIFY(add->isEnabled()); add->trigger();
+        auto panel = panelTabs(second); QVERIFY(panel.area() && panel.area() != general.area()); QCOMPARE(general->count(), 1); QCOMPARE(panel->count(), 1);
+        QTRY_VERIFY(qAbs(panel.area()->width() - general.area()->width()) <= 2); QCOMPARE(side->width(), sideWidth);
+        QVERIFY(panel.area()->x() > general.area()->x()); QVERIFY(!add->isEnabled());
+        auto* panels = w.findChild<QMenu*>("menuConnectionPanels"); emit panels->aboutToShow();
+        QStringList names; for (auto* action : panels->actions()) names << action->text(); QCOMPARE(names, QStringList({"General", "Panel 1"}));
+        // New sessions open in the panel used last.
+        w.quickConnect("third.invalid", true); QCOMPARE(panel->count(), 2); QCOMPARE(general->count(), 1);
+        focusTab(w, first); QTRY_VERIFY(w.findChild<QAction*>("actionAddPanel")->isEnabled() == false);
+        w.quickConnect("fourth.invalid", true); QCOMPARE(general->count(), 2); QCOMPARE(panel->count(), 2);
+        // Moving a panel's tabs back to General removes the panel.
+        QPointer<ads::CDockAreaWidget> area = panel.area(); QPointer<SessionPane> third = panel->widget(1);
+        QVERIFY(moveToPanel(w, second, "General")); QVERIFY(moveToPanel(w, third, "General"));
+        QTRY_VERIFY(area.isNull()); QCOMPARE(general->count(), 4); QCOMPARE(w.sessionCount(), size_t(4));
+        // The side panes never absorb the closed panel's space.
+        QCOMPARE(side->width(), sideWidth);
+        // Closing every session shows the empty General again.
+        while (w.sessionCount()) w.closeTab(0);
+        QTRY_VERIFY(!placeholder->isClosed()); QVERIFY(!general->tabBarVisible());
+    }
+    void closingPanelEndsItsSessions() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        w.quickConnect("general.invalid", true); w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
+        auto general = sessionTabs(w); QPointer<SessionPane> kept = general->widget(0), one = general->widget(1), two = general->widget(2);
+        tabMenuAction(w, general, 2, "actionMoveToNewPanelBelow"); QVERIFY(moveToPanel(w, one, "Panel 1"));
+        auto panel = panelTabs(two); QCOMPARE(panel->count(), 2); QVERIFY(panel.area()->y() > general.area()->y());
+        // Qt ADS's Close Group asks the shell to close each tab, ending its session.
+        QPointer<ads::CDockAreaWidget> area = panel.area(); area->closeArea();
+        QTRY_VERIFY(!one && !two); QTRY_VERIFY(area.isNull()); QCOMPARE(w.sessionCount(), size_t(1)); QVERIFY(kept && kept->active());
+        QCOMPARE(general->count(), 1);
     }
     void newSessionsOpenInLastUsedWindowAndWindowCloseEndsItsSessions() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
         w.quickConnect("main.invalid", true); w.quickConnect("moved.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> kept = qobject_cast<SessionPane*>(tabs->widget(0));
-        dragTab(tabs->tabBar(), 1, {w.mapToGlobal(QPoint(500, 500)), w.mapToGlobal(QPoint(520, 520))}); QTRY_COMPARE(panelWindows().size(), 1);
-        auto* window = panelWindows().first(); auto* moved = window->findChild<QTabWidget*>("panelSessionTabs");
-        // Pressing a window's tab makes it the target for new connections.
-        QTest::mousePress(moved->tabBar(), Qt::LeftButton, Qt::NoModifier, moved->tabBar()->tabRect(0).center());
-        QTest::mouseRelease(moved->tabBar(), Qt::LeftButton, Qt::NoModifier, moved->tabBar()->tabRect(0).center());
-        w.quickConnect("third.invalid", true); QCOMPARE(moved->count(), 2); QCOMPARE(tabs->count(), 1);
-        QTest::mousePress(tabs->tabBar(), Qt::LeftButton, Qt::NoModifier, tabs->tabBar()->tabRect(0).center());
-        QTest::mouseRelease(tabs->tabBar(), Qt::LeftButton, Qt::NoModifier, tabs->tabBar()->tabRect(0).center());
-        w.quickConnect("fourth.invalid", true); QCOMPARE(tabs->count(), 2); QCOMPARE(w.sessionCount(), size_t(4));
+        auto tabs = sessionTabs(w); QPointer<SessionPane> kept = tabs->widget(0), floated = tabs->widget(1);
+        tabMenuAction(w, tabs, 1, "actionMoveToNewWindow"); QTRY_COMPARE(floatingWindows().size(), 1);
+        auto* window = floatingWindows().first(); auto moved = panelTabs(floated);
+        // Using a window's tab makes it the target for new connections.
+        focusTab(w, floated); w.quickConnect("third.invalid", true); QCOMPARE(moved->count(), 2); QCOMPARE(tabs->count(), 1);
+        focusTab(w, kept); w.quickConnect("fourth.invalid", true); QCOMPARE(tabs->count(), 2); QCOMPARE(w.sessionCount(), size_t(4));
         // A tab in another window goes fullscreen in its own window and returns to that window.
-        moved->setCurrentIndex(0); QPointer<SessionPane> inWindow = qobject_cast<SessionPane*>(moved->widget(0));
+        QPointer<SessionPane> inWindow = moved->widget(0);
         tabMenuAction(w, moved, 0, "actionTabFullscreen"); QPointer<QMainWindow> full; QTRY_VERIFY((full = fullscreenWindow(w)));
-        QVERIFY(full != window); QVERIFY(!window->isFullScreen()); QVERIFY(!w.isFullScreen()); QVERIFY(full->isAncestorOf(inWindow)); QCOMPARE(moved->count(), 1);
+        QVERIFY(static_cast<QWidget*>(full.data()) != window); QVERIFY(!window->isFullScreen()); QVERIFY(!w.isFullScreen()); QVERIFY(full->isAncestorOf(inWindow)); QCOMPARE(moved->count(), 1);
         full->findChild<QToolButton*>("exitSessionFullscreen")->click(); QTRY_VERIFY(!w.sessionFullscreenWindow());
-        QCOMPARE(moved->indexOf(inWindow), 0); QCOMPARE(moved->count(), 2); QTRY_COMPARE(panelWindows().size(), 1);
+        QCOMPARE(moved->indexOf(inWindow), 0); QCOMPARE(moved->count(), 2); QVERIFY(window->isAncestorOf(inWindow));
         // Closing the window ends only its sessions.
-        window->close(); QTRY_VERIFY(panelWindows().isEmpty()); QVERIFY(inWindow.isNull()); QVERIFY(kept && kept->active()); QCOMPARE(w.sessionCount(), size_t(2));
+        window->close(); QTRY_VERIFY(floatingWindows().isEmpty()); QVERIFY(inWindow.isNull()); QVERIFY(kept && kept->active()); QCOMPARE(w.sessionCount(), size_t(2));
     }
     void optionsApplyCancelAndRestart() {
         QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json"), connections = dir.filePath("profiles.json");
@@ -646,7 +719,7 @@ private slots:
         QTRY_VERIFY(restart.findChild<QAction*>("actionOptions")->isEnabled());
         QVERIFY(!restart.findChild<ProfileEditor*>()->categorized()); QVERIFY(restart.findChild<QToolBar*>("quickConnectToolbar")->isHidden());
         QVERIFY(restart.findChild<QWidget*>("configHelp")->isHidden()); QVERIFY(!restart.findChild<QToolBar*>("quickConnectToolbar")->isMovable());
-        QVERIFY(restart.findChild<QDockWidget*>("notificationsDock")->isHidden());
+        QVERIFY(restart.findChild<ads::CDockWidget*>("notificationsDock")->isClosed());
     }
     void darkIconsSwapGlyphsAndRestore() {
         QImage glyph(16, 16, QImage::Format_ARGB32); glyph.fill(QColor("#f6f6f6"));
@@ -675,15 +748,43 @@ private slots:
             QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128); const auto icon = w.findChild<QAction*>("actionOptions")->icon().cacheKey(); choose(w, "dark");
             QVERIFY(w.findChild<QAction*>("actionOptions")->icon().cacheKey() != icon);
             QVERIFY(qApp->palette().color(QPalette::Window).lightness() < 128);
-            QVERIFY(w.styleSheet().contains("#2b2b2b")); QVERIFY(!w.styleSheet().contains("#f0f0f0"));
+            // One global stylesheet; the window has none of its own. Dark is Visual Studio's #252526.
+            QVERIFY(w.styleSheet().isEmpty()); QVERIFY(!qApp->styleSheet().isEmpty()); QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#252526"));
         }
         QFile stored(preferences); QVERIFY(stored.open(QIODevice::ReadOnly));
         QCOMPARE(QJsonDocument::fromJson(stored.readAll()).object().value("theme"), QJsonValue("dark"));
         MainWindow restart(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); restart.show(); WAIT_STORE(restart);
-        QTRY_VERIFY(restart.styleSheet().contains("#2b2b2b"));
+        QTRY_COMPARE(qApp->palette().color(QPalette::Window), QColor("#252526"));
         const auto darkIcon = restart.findChild<QAction*>("actionOptions")->icon(); QCOMPARE(QColor(darkIcon.pixmap(16, 16).toImage().pixel(8, 8)).lightness() >= 0, true);
         choose(restart, "light"); QVERIFY(qApp->palette().color(QPalette::Window).lightness() > 128);
-        QVERIFY(restart.findChild<QAction*>("actionOptions")->icon().cacheKey() != darkIcon.cacheKey()); QVERIFY(restart.styleSheet().contains("#f0f0f0"));
+        QVERIFY(restart.findChild<QAction*>("actionOptions")->icon().cacheKey() != darkIcon.cacheKey()); QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#f0f0f0"));
+    }
+    void pickedThemeShowsAtOnceAndCancelRestoresIt() {
+        QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
+        MainWindow w(dir.filePath("profiles.json"), true, nullptr, {}, {}, {}, preferences); w.show(); WAIT_STORE(w);
+        const auto open = [&] {
+            auto* action = w.findChild<QAction*>("actionOptions"); [&] { QTRY_VERIFY(action->isEnabled()); }(); action->trigger();
+            return w.findChild<QDialog*>("optionsDialog");
+        };
+        QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#f0f0f0"));
+        // Picking Dark shows it before anything is saved; Cancel goes back to the saved Light.
+        auto* dialog = open(); auto* combo = dialog->findChild<QComboBox*>("theme");
+        combo->setCurrentIndex(combo->findData("dark")); QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#252526")); QVERIFY(!QFile::exists(preferences));
+        dialog->reject(); QTRY_VERIFY(!w.findChild<QDialog*>("optionsDialog")); QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#f0f0f0"));
+        // OK keeps the picked theme.
+        dialog = open(); combo = dialog->findChild<QComboBox*>("theme"); combo->setCurrentIndex(combo->findData("dark"));
+        dialog->accept(); QTRY_VERIFY(!w.findChild<QDialog*>("optionsDialog")); QCOMPARE(qApp->palette().color(QPalette::Window), QColor("#252526"));
+        applyTheme(*qApp, "light");
+    }
+    void scrollBarHandleStandsOutInBothThemes() {
+        for (const auto* theme : {"light", "dark"}) {
+            applyTheme(*qApp, theme);
+            QScrollBar bar(Qt::Vertical); bar.setRange(0, 100); bar.setPageStep(25); bar.resize(bar.sizeHint().width(), 200);
+            const auto image = bar.grab().toImage(); const int x = image.width() / 2;
+            const QColor handle = image.pixelColor(x, 20), track = image.pixelColor(x, image.height() - 10);
+            QVERIFY2(qAbs(handle.lightness() - track.lightness()) >= 40, theme);
+        }
+        applyTheme(*qApp, "light");
     }
     void openh264OptionCreditsCiscoAndPersists() {
         QTemporaryDir dir; const auto preferences = dir.filePath("preferences.json");
@@ -739,19 +840,21 @@ private slots:
     }
     void notificationsHiddenOnLaunchAndReset() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
-        auto* dock = w.findChild<QDockWidget*>("notificationsDock"); auto* action = w.findChild<QAction*>("actionViewNotifications");
-        QVERIFY(dock->isHidden()); QVERIFY(!action->isChecked());
+        auto* dock = w.findChild<ads::CDockWidget*>("notificationsDock"); auto* action = w.findChild<QAction*>("actionViewNotifications");
+        QVERIFY(dock->isClosed()); QVERIFY(!action->isChecked());
         w.quickConnect("first.invalid", true); QTRY_VERIFY(w.findChild<QListWidget*>("notificationsList")->count() > 0);
-        QVERIFY(dock->isHidden()); action->trigger(); QTRY_VERIFY(dock->isVisible());
+        QVERIFY(dock->isClosed()); action->trigger(); QTRY_VERIFY(dock->isVisible());
         w.quickConnect("second.invalid", true); QVERIFY(dock->isVisible());
-        w.findChild<QAction*>("actionResetLayout")->trigger(); QTRY_VERIFY(dock->isHidden()); QVERIFY(!action->isChecked());
+        w.findChild<QAction*>("actionResetLayout")->trigger(); QTRY_VERIFY(dock->isClosed()); QVERIFY(!action->isChecked());
     }
     void firstSessionPreservesDockLayout() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(900, 650); w.show(); WAIT_STORE(w);
-        auto* connections = w.findChild<QDockWidget*>("connectionsDock"); auto* config = w.findChild<QDockWidget*>("configDock");
+        auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = w.findChild<ads::CDockWidget*>("configDock");
         QTRY_VERIFY(connections->isVisible() && config->isVisible());
-        QCOMPARE(connections->x(), config->x()); QCOMPARE(connections->width(), config->width());
-        QVERIFY(connections->geometry().bottom() < config->geometry().top());
+        // Each pane sits in its own dock area: compare where they are in the window.
+        const QRect upper(connections->mapTo(&w, QPoint()), connections->size()), lower(config->mapTo(&w, QPoint()), config->size());
+        QCOMPARE(upper.x(), lower.x()); QCOMPARE(upper.width(), lower.width());
+        QVERIFY(upper.bottom() < lower.top());
         w.quickConnect("first.invalid", true); QTest::qWait(80);
         QVERIFY(connections->isVisible() && config->isVisible()); QCOMPARE(connections->x(), config->x());
         QVERIFY(connections->width() >= 200 && config->height() >= 130);
@@ -763,7 +866,7 @@ private slots:
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(900, 650); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); QTest::qWait(80);
         auto* pane = w.findChild<SessionPane*>(); QVERIFY(pane);
-        auto* connections = w.findChild<QDockWidget*>("connectionsDock"); auto* config = w.findChild<QDockWidget*>("configDock");
+        auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = w.findChild<ads::CDockWidget*>("configDock");
         const auto width = w.width(); const auto dockWidth = connections->width();
         pane->event("state", QString(2048, 'x')); QVERIFY(pane->minimumSizeHint().width() < 700); QTest::qWait(80);
         QCOMPARE(w.width(), width); QCOMPARE(connections->width(), dockWidth); QVERIFY(config->isVisible());
@@ -811,7 +914,7 @@ private slots:
         QStringList top; for (auto* action : w.menuBar()->actions()) top << action->text().remove('&');
         QCOMPARE(top, QStringList({"File", "View", "Tools", "Help"}));
         QStringList order; for (auto* action : w.findChild<QMenu*>("menuView")->actions()) order << (action->isSeparator() ? "|" : action->text());
-        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "Panel Tabs", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
+        QCOMPARE(order, QStringList({"New Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
         auto* file = w.findChild<QMenu*>("menuFile");
         for (const auto* name : {"actionSaveAsConnection", "actionSaveFile", "actionSaveFileAs", "actionCloseFile"})
             QVERIFY(file->actions().contains(w.findChild<QAction*>(name)));
@@ -821,34 +924,38 @@ private slots:
     void jumpToFocusesExistingTargetsWithoutConnecting() {
         QTemporaryDir dir; const auto path = dir.filePath("confCons.xml"); MainWindow w(path, true); w.show(); WAIT_STORE(w);
         w.quickConnect("localhost:3391", true); w.quickConnect("localhost:3392", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); auto* groups = w.findChild<QTabWidget*>("groupTabs");
-        auto* first = qobject_cast<SessionPane*>(tabs->widget(0)); auto* second = qobject_cast<SessionPane*>(tabs->widget(1)); QVERIFY(first); QVERIFY(second);
-        const auto firstId = first->id(), secondId = second->id(); const auto count = w.sessionCount(); w.addPanel(); auto* panel = groups->currentWidget(); auto* general = groups->widget(0);
+        auto tabs = sessionTabs(w);
+        auto* first = tabs->widget(0); auto* second = tabs->widget(1); QVERIFY(first); QVERIFY(second);
+        const auto firstId = first->id(), secondId = second->id(); const auto count = w.sessionCount();
+        w.addPanel(); auto panel = panelTabs(second); QVERIFY(panel.area() != tabs.area());
         auto* jump = w.findChild<QMenu*>("menuJumpTo"); QVERIFY(jump); jump->popup(w.mapToGlobal(w.rect().center())); QTRY_VERIFY(jump->actions().size() >= 9); jump->hide();
         QAction *toFirst = nullptr, *toGeneral = nullptr, *toConnections = nullptr;
         for (auto* action : jump->actions()) {
             if (action->data().toString() == firstId) toFirst = action;
-            if (action->data().value<QWidget*>() == general) toGeneral = action;
+            if (action->data().toString() == "General") toGeneral = action;
             if (action->data().toString() == "connectionsDock") toConnections = action;
         }
         QVERIFY(toFirst); QVERIFY(toGeneral); QVERIFY(toConnections);
-        tabs->tabBar()->moveTab(0, 1); groups->tabBar()->moveTab(0, 1); toFirst->trigger(); QCOMPARE(tabs->currentWidget(), first); QCOMPARE(groups->currentWidget(), general);
+        focusTab(w, second); toFirst->trigger(); QCOMPARE(tabs->currentWidget(), first); QTRY_VERIFY(w.focusWidget() == first || first->isAncestorOf(w.focusWidget()));
         QCOMPARE(first->id(), firstId); QCOMPARE(second->id(), secondId); QCOMPARE(w.sessionCount(), count); QVERIFY(!QFile::exists(path)); QVERIFY(!QFile::exists(path + ".vault"));
-        groups->setCurrentWidget(panel); toGeneral->trigger(); QCOMPARE(groups->currentWidget(), general);
-        auto* dock = w.findChild<QDockWidget*>("connectionsDock"); dock->hide(); toConnections->trigger(); QTRY_VERIFY(dock->isVisible());
-        const auto point = tabs->tabBar()->tabRect(tabs->indexOf(first)).center();
-        QContextMenuEvent context(QContextMenuEvent::Mouse, point, tabs->tabBar()->mapToGlobal(point)); QApplication::sendEvent(tabs->tabBar(), &context);
-        auto* popup = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(popup); auto* move = popup->findChild<QMenu*>("moveSessionMenu"); QVERIFY(move);
-        for (auto* action : move->actions()) if (action->isEnabled()) { action->trigger(); break; } popup->close();
-        auto* other = panel->findChild<QTabWidget*>(); QCOMPARE(other->widget(0), first); groups->setCurrentWidget(general); toFirst->trigger(); QCOMPARE(groups->currentWidget(), panel); QCOMPARE(other->currentWidget(), first);
-        QVERIFY(w.focusWidget() == first || first->isAncestorOf(w.focusWidget()));
-        w.closeTab(other->indexOf(first)); const auto afterClose = w.sessionCount(); toFirst->trigger(); QCOMPARE(w.sessionCount(), afterClose); QCOMPARE(tabs->count(), 1); QCOMPARE(second->id(), secondId);
+        focusTab(w, second); toGeneral->trigger(); QTRY_VERIFY(w.focusWidget() == first || first->isAncestorOf(w.focusWidget()));
+        auto* dock = w.findChild<ads::CDockWidget*>("connectionsDock"); dock->toggleView(false); toConnections->trigger(); QTRY_VERIFY(dock->isVisible());
+        // Move to panel lists every panel; the first is moved beside the second.
+        QVERIFY(moveToPanel(w, first, "Panel 1")); QCOMPARE(panel->widget(0), second); QCOMPARE(panel->widget(1), first); QCOMPARE(tabs->count(), 0);
+        focusTab(w, second); toFirst->trigger(); QCOMPARE(panel->currentWidget(), first);
+        QTRY_VERIFY(w.focusWidget() == first || first->isAncestorOf(w.focusWidget()));
+        w.closeTab(panel->indexOf(first)); const auto afterClose = w.sessionCount(); toFirst->trigger(); QCOMPARE(w.sessionCount(), afterClose); QCOMPARE(panel->count(), 1); QCOMPARE(second->id(), secondId);
     }
     void visibilityChecksTrackDocksAndToolbars() {
         QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.show(); WAIT_STORE(w);
         for (const auto& pair : {qMakePair("connectionsDock", "actionViewConnections"), qMakePair("configDock", "actionViewConfig"), qMakePair("notificationsDock", "actionViewNotifications"), qMakePair("quickConnectToolbar", "actionViewQuickConnect"), qMakePair("externalToolsToolbar", "actionViewExternalTools"), qMakePair("multiSshToolbar", "actionViewMultiSsh")}) {
             auto* target = w.findChild<QWidget*>(pair.first); auto* action = w.findChild<QAction*>(pair.second); QVERIFY(target); QVERIFY(action);
-            target->show(); QTRY_VERIFY(action->isChecked()); target->hide(); QTRY_VERIFY(!action->isChecked()); action->trigger(); QTRY_VERIFY(target->isVisible());
+            // Docks open and close through the dock manager; toolbars show and hide.
+            auto* dock = qobject_cast<ads::CDockWidget*>(target);
+            if (dock) dock->toggleView(true); else target->show();
+            QTRY_VERIFY(action->isChecked());
+            if (dock) dock->toggleView(false); else target->hide();
+            QTRY_VERIFY(!action->isChecked()); action->trigger(); QTRY_VERIFY(target->isVisible());
         }
         w.findChild<QAction*>("actionResetLayout")->trigger(); QVERIFY(w.findChild<QAction*>("actionViewConnections")->isChecked()); QVERIFY(w.findChild<QAction*>("actionViewQuickConnect")->isChecked()); QVERIFY(!w.findChild<QAction*>("actionViewExternalTools")->isChecked());
     }
@@ -884,14 +991,38 @@ private slots:
         w.setQuickConnectProtocol("ssh"); QCOMPARE(combo->currentText(), QString("server:22"));
         w.setQuickConnectProtocol("vnc"); QCOMPARE(combo->currentText(), QString("server:5900"));
     }
-    void panelTabsHiddenByDefaultAndToggle() {
+    void sessionTabsAreDocksWithSessionMenus() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
-        auto* action = w.findChild<QAction*>("actionViewPanels"); auto* groups = w.findChild<QTabWidget*>("groupTabs");
-        QVERIFY(action && action->isEnabled() && !action->isChecked()); QVERIFY(groups->tabBar()->isHidden());
-        action->trigger(); QVERIFY(!groups->tabBar()->isHidden());
-        action->trigger(); QVERIFY(groups->tabBar()->isHidden());
-        // Adding a panel shows the row so the new panel can be reached.
-        w.addPanel(); QVERIFY(action->isChecked()); QVERIFY(!groups->tabBar()->isHidden());
+        QVERIFY(!w.findChild<QAction*>("actionViewPanels")); QVERIFY(!w.findChild<QTabWidget*>());
+        w.quickConnect("first.invalid", true); auto tabs = sessionTabs(w); auto* dock = tabs->dock(0);
+        // A session is a closable, movable, floatable dock that stays out of the pinned side bars.
+        QVERIFY(dock->features().testFlag(ads::CDockWidget::DockWidgetClosable)); QVERIFY(dock->features().testFlag(ads::CDockWidget::DockWidgetFloatable));
+        QVERIFY(dock->features().testFlag(ads::CDockWidget::CustomCloseHandling)); QVERIFY(!dock->features().testFlag(ads::CDockWidget::DockWidgetPinnable));
+        QCOMPARE(dock->windowTitle(), tabs->tabText(0)); QVERIFY(dock->windowTitle().startsWith("MOCK"));
+        // Its tab opens the session menu, not Qt ADS's.
+        openTabMenu(tabs, 0); auto* menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu); QVERIFY(menu->findChild<QMenu*>("moveSessionMenu")); menu->close();
+        // Its close button closes the session.
+        QPointer<SessionPane> pane = tabs->widget(0); dock->requestCloseDockWidget(); QTRY_VERIFY(pane.isNull()); QCOMPARE(w.sessionCount(), size_t(0));
+    }
+    void draggedSessionTabReordersWhileMoving() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 600); w.show(); WAIT_STORE(w);
+        for (const auto* host : {"first.invalid", "second.invalid", "third.invalid"}) w.quickConnect(host, true);
+        auto tabs = sessionTabs(w); QCOMPARE(tabs->count(), 3); auto* first = tabs->widget(0); auto* second = tabs->widget(1);
+        tabs->setCurrentIndex(0); QTRY_VERIFY(first->isVisible());
+        auto* tab = tabs->tab(0); const auto start = tab->mapToGlobal(tab->rect().center());
+        const auto send = [&](QEvent::Type type, const QPoint& global, Qt::MouseButtons buttons) {
+            QMouseEvent event(type, tab->mapFromGlobal(global), global, Qt::LeftButton, buttons, Qt::NoModifier); QApplication::sendEvent(tab, &event);
+        };
+        send(QEvent::MouseButtonPress, start, Qt::LeftButton);
+        // Past the second tab's centre, the order changes before the mouse is released.
+        const int past = tabs->tab(1)->mapToGlobal(tabs->tab(1)->rect().center()).x() - start.x() + 4;
+        for (int x = 0; x <= past; x += 4) send(QEvent::MouseMove, start + QPoint(x, 0), Qt::LeftButton);
+        QCOMPARE(tabs->indexOf(first), 1); QCOMPARE(tabs->indexOf(second), 0);
+        QCOMPARE(tabs->tab(0)->geometry().left(), 0);
+        // The dragged session stays on screen the whole time and remains current.
+        QVERIFY(first->isVisible()); QCOMPARE(tabs->currentWidget(), first);
+        send(QEvent::MouseButtonRelease, start + QPoint(past, 0), Qt::NoButton);
+        QCOMPARE(tabs->indexOf(first), 1); QCOMPARE(tabs->tab(1)->geometry().left(), tabs->tab(0)->geometry().right() + 1);
     }
     void quickConnectSessionsOfferSaveBesideCopyPaste() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
@@ -946,7 +1077,7 @@ private slots:
         if (QGuiApplication::platformName() != "cocoa") QSKIP("AppKit requires Cocoa");
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
         auto* options = w.findChild<QAction*>("actionOptions"); QTRY_VERIFY(options->isEnabled());
-        auto* config = w.findChild<QAction*>("actionViewConfig"); auto* dock = w.findChild<QDockWidget*>("configDock");
+        auto* config = w.findChild<QAction*>("actionViewConfig"); auto* dock = w.findChild<ads::CDockWidget*>("configDock");
         QSignalSpy opened(options, &QAction::triggered); QSignalSpy toggled(config, &QAction::triggered);
         dock->hide(); QTRY_VERIFY(!config->isChecked());
         activateNativeTestApplication(&w); w.raise(); w.activateWindow(); QVERIFY(QTest::qWaitForWindowActive(&w));
@@ -981,7 +1112,7 @@ private slots:
         for (const auto* title : {"View", "Tools"}) QVERIFY(nativeMenuTitles().contains(title));
         QVERIFY(!nativeMenuTitles().contains("Help"));
         QTRY_VERIFY(nativeApplicationMenuTitles().contains("Check for Updates…"));
-        const auto view = nativeMenuTitles("View"); QVERIFY(view.contains("Config")); QVERIFY(view.contains("Jump To")); QVERIFY(!view.contains("Screenshots")); QCOMPARE(view.first(), QString("Add Connection Panel"));
+        const auto view = nativeMenuTitles("View"); QVERIFY(view.contains("Config")); QVERIFY(view.contains("Jump To")); QVERIFY(!view.contains("Screenshots")); QCOMPARE(view.first(), QString("New Panel"));
         const auto file = nativeMenuTitles("File");
         for (const auto* title : {"Open connection file…", "Save connection file", "Save connection file as…", "Save as connection…"}) QVERIFY(file.contains(title));
         QVERIFY(nativeMenuTitles("Tools").contains(w.findChild<QAction*>("actionDifferentCredentials")->text()));
@@ -993,16 +1124,16 @@ private slots:
         const QString base = qEnvironmentVariable("RM_BUILD_DIR") + "/test-data";
         QDir().mkpath(base); QTemporaryDir dir(base + "/shell-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow w(dir.path() + "/confCons.xml", true); w.show(); WAIT_STORE(w);
-        QVERIFY(w.findChild<QDockWidget*>("connectionsDock"));
-        QVERIFY(w.findChild<QDockWidget*>("configDock"));
+        QVERIFY(w.findChild<ads::CDockWidget*>("connectionsDock"));
+        QVERIFY(w.findChild<ads::CDockWidget*>("configDock"));
         QCOMPARE(w.findChild<QAction*>("actionViewConfig")->menuRole(), QAction::NoRole);
         QCOMPARE(w.findChild<QAction*>("actionOptions")->menuRole(), QAction::PreferencesRole);
-        QVERIFY(w.findChild<QDockWidget*>("notificationsDock"));
-        auto* groups = w.findChild<QTabWidget*>("groupTabs"); QVERIFY(groups); QCOMPARE(groups->count(), 1);
-        QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->count(), 0);
+        QVERIFY(w.findChild<ads::CDockWidget*>("notificationsDock"));
+        QVERIFY(w.findChild<ads::CDockWidget*>("documentsDock")); QVERIFY(!w.findChild<ads::CDockWidget*>("documentsDock")->isClosed());
+        QCOMPARE(sessionTabs(w)->count(), 0);
         QCOMPARE(w.findChild<QTreeWidget*>("connectionTree")->topLevelItemCount(), 1);
         QCOMPARE(w.sessionCount(), size_t(0)); QVERIFY(!QFile::exists(dir.path() + "/confCons.xml"));
-        auto* config = w.findChild<QTreeWidget*>("configTree");
+        auto* config = w.findChild<QTreeWidget*>("configView");
         for (int row = 0; row < config->topLevelItemCount(); ++row)
             QVERIFY(!config->itemWidget(config->topLevelItem(row), 0));
         QCOMPARE(w.windowTitle(), QString("CMRemote"));
@@ -1016,7 +1147,7 @@ private slots:
             QTRY_VERIFY(nativeMenuTitles("View").contains("Connections"));
             QTRY_VERIFY(nativeMenuTitles().contains("File"));
             for (const auto* title : {"View", "Tools"}) QVERIFY(nativeMenuTitles().contains(title));
-            auto* dock = w.findChild<QDockWidget*>("connectionsDock"); QTRY_VERIFY(dock->isVisible());
+            auto* dock = w.findChild<ads::CDockWidget*>("connectionsDock"); QTRY_VERIFY(dock->isVisible());
             QVERIFY(triggerNativeMenuItem("View", "Connections")); QTRY_VERIFY(!dock->isVisible());
             QVERIFY(triggerNativeMenuItem("View", "Connections")); QTRY_VERIFY(dock->isVisible());
         }
@@ -1038,7 +1169,7 @@ private slots:
             setGridText(w, "host", "127.0.0.1"); WAIT_STORE(w);
             QCOMPARE(gridValue(w, "username").toString(), QString("alice")); QVERIFY(!gridLocal(w, "username"));
             auto* tree = w.findChild<QTreeWidget*>("connectionTree");
-            auto* tabs = w.findChild<QTabWidget*>("sessionTabs");
+            auto tabs = sessionTabs(w);
             QTest::qWait(50);
             const QPoint target = tree->visualItemRect(tree->currentItem()).center();
             QVERIFY(tree->viewport()->rect().contains(target));
@@ -1205,12 +1336,12 @@ private slots:
         setGridText(w, "host", "127.0.0.1"); WAIT_STORE(w);
 #ifdef RM_WITH_RDP
         w.connectSelected(false); QTRY_VERIFY(w.findChild<QDialog*>("CredentialsDialog")); auto* dialog = w.findChild<QDialog*>("CredentialsDialog");
-        QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->count(), 0);
+        QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(sessionTabs(w)->count(), 0);
         dialog->reject(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->count(), 0);
+        QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(sessionTabs(w)->count(), 0);
         w.quickConnect("127.0.0.1:3389", false); dialog = w.findChild<QDialog*>("CredentialsDialog"); QVERIFY(dialog);
         QPointer<QDialog> pending = dialog; w.close(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QVERIFY(!pending); QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(w.findChild<QTabWidget*>("sessionTabs")->count(), 0);
+        QVERIFY(!pending); QCOMPARE(w.sessionCount(), size_t(0)); QCOMPARE(sessionTabs(w)->count(), 0);
 #else
         w.connectSelected(false); QCOMPARE(w.sessionCount(), size_t(0)); QVERIFY(!w.findChild<QDialog*>("CredentialsDialog"));
 #endif
@@ -1218,7 +1349,7 @@ private slots:
     void temporaryReconnectPreservesTarget() {
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/temporary-XXXXXX"); QVERIFY(dir.isValid());
         const auto path = dir.path() + "/confCons.xml"; MainWindow w(path, true); w.show(); WAIT_STORE(w);
-        w.quickConnect("[2001:0db8::1]:3391", true); auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QCOMPARE(tabs->count(), 1);
+        w.quickConnect("[2001:0db8::1]:3391", true); auto tabs = sessionTabs(w); QCOMPARE(tabs->count(), 1);
         auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); QVERIFY(pane->profile().isEmpty());
         const auto target = pane->target(); const auto old = pane->id(); const auto caption = tabs->tabText(0);
         QCOMPARE(target.host, QString("2001:db8::1")); QCOMPARE(target.port, quint16(3391));
@@ -1240,7 +1371,7 @@ private slots:
         setGridText(w, "host", "127.0.0.1"); WAIT_STORE(w);
         setGridText(w, "username", "alice"); WAIT_STORE(w); setGridText(w, "domain", "EXAMPLE"); WAIT_STORE(w);
         setGridChoice(w, "resolution", "1280x720"); WAIT_STORE(w); setGridChoice(w, "automatic_resize", false); WAIT_STORE(w);
-        w.connectSelected(true); auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0));
+        w.connectSelected(true); auto tabs = sessionTabs(w); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0));
         const auto old = pane->id(); const auto captured = pane->target();
         QCOMPARE(captured.domain, QString("EXAMPLE")); QCOMPARE(captured.options.resolution, QString("1280x720")); QVERIFY(!captured.options.automaticResize);
         setGridText(w, "host", "changed.invalid"); WAIT_STORE(w); setGridText(w, "domain", "OTHER"); WAIT_STORE(w);
@@ -1257,7 +1388,7 @@ private slots:
         setGridText(w, "username", "inherited-user"); WAIT_STORE(w); setGridText(w, "domain", "INHERITED"); WAIT_STORE(w);
         setGridChoice(w, "resolution", "1920x1080"); WAIT_STORE(w); setGridChoice(w, "automatic_resize", false); WAIT_STORE(w);
         setGridChoice(w, "color_depth", 16); WAIT_STORE(w); setGridChoice(w, "cache_bitmaps", true); WAIT_STORE(w);
-        w.quickConnect("localhost:3391", true); auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
+        w.quickConnect("localhost:3391", true); auto tabs = sessionTabs(w); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
         const auto captured = pane->target(); w.saveAsConnection(); auto* save = w.findChild<QDialog*>("saveAsConnection"); QVERIFY(save);
         auto* parent = save->findChild<QComboBox*>("connectionParent");
         const auto folderIndex = parent->findData(QVariant::fromValue(ProfileReference{w.selectedDocument(), folder})); QVERIFY(folderIndex >= 0);
@@ -1279,7 +1410,7 @@ private slots:
         setGridText(window, "host", "localhost"); WAIT_STORE(window);
         setGridPort(window, 22); WAIT_STORE(window);
         window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_COMPARE(tabs->count(), 1);
+        auto tabs = sessionTabs(window); QTRY_COMPARE(tabs->count(), 1);
         auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); QCOMPARE(pane->profile(), profile);
         QVERIFY(tabs->tabText(0).startsWith("MOCK")); QVERIFY(!pane->findChild<DesktopView*>());
         auto* terminal = pane->findChild<TerminalView*>(); QVERIFY(terminal);
@@ -1300,7 +1431,7 @@ private slots:
     void disconnectKeepsTabCloseRemovesIt() {
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/disconnect-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow w(dir.path() + "/confCons.xml", true); w.show(); WAIT_STORE(w); w.resize(1100, 850); w.quickConnect("127.0.0.1:3392", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); QCOMPARE(tabs->count(), 1);
+        auto tabs = sessionTabs(w); QCOMPARE(tabs->count(), 1);
         auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
         auto* status = pane->findChild<QLabel*>("sessionStatus"); auto* view = pane->findChild<DesktopView*>(); QVERIFY(status && view);
         QTRY_VERIFY(status->isVisible()); QTRY_VERIFY(status->height() <= status->sizeHint().height());
@@ -1313,40 +1444,33 @@ private slots:
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/moved-tabs-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow w(dir.path() + "/confCons.xml", true); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        auto* tabs = w.findChild<QTabWidget*>("sessionTabs"); auto* groups = w.findChild<QTabWidget*>("groupTabs");
-        auto* first = qobject_cast<SessionPane*>(tabs->widget(0)); auto* second = qobject_cast<SessionPane*>(tabs->widget(1));
-        auto context = [&](QTabWidget* owner, QWidget* page) {
-            const auto point = owner->tabBar()->tabRect(owner->indexOf(page)).center();
-            QContextMenuEvent event(QContextMenuEvent::Mouse, point, owner->tabBar()->mapToGlobal(point));
-            QApplication::sendEvent(owner->tabBar(), &event);
-        };
-        context(tabs, first); auto* menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
+        auto tabs = sessionTabs(w);
+        auto* first = tabs->widget(0); auto* second = tabs->widget(1);
+        openTabMenu(tabs, tabs->indexOf(first)); auto* menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
         QVERIFY(!menu->findChild<QAction*>("actionTabDuplicate")); QVERIFY(!menu->findChild<QAction*>("actionTabSmartSize"));
-        tabs->tabBar()->moveTab(0, 1); tabs->setCurrentWidget(second);
+        // Reordering tabs after the menu opened still targets the clicked session.
+        tabs.area()->dockManager()->addDockWidgetTabToArea(sessionDockOf(first), tabs.area(), -1); QCOMPARE(tabs->indexOf(first), 1); tabs->setCurrentWidget(second);
         menu->findChild<QAction*>("actionTabDisconnect")->trigger(); menu->close();
         QVERIFY(!first->active()); QVERIFY(second->active()); QCOMPARE(tabs->count(), 2);
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        context(tabs, first); menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
+        openTabMenu(tabs, tabs->indexOf(first)); menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
         menu->findChild<QAction*>("actionTabRename")->trigger(); menu->close();
         auto* rename = w.findChild<QInputDialog*>("renamePage"); QVERIFY(rename); rename->setTextValue("Same caption"); rename->accept();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QCOMPARE(tabs->tabText(tabs->indexOf(first)), QString("Same caption"));
-        w.findChild<QAction*>("actionAddPanel")->trigger(); QCOMPARE(groups->count(), 2);
-        auto* other = groups->currentWidget()->findChild<QTabWidget*>(); QVERIFY(other);
-        groups->setCurrentIndex(0); context(tabs, first); menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
-        auto* move = menu->findChild<QMenu*>("moveSessionMenu"); QVERIFY(move); QCOMPARE(move->actions().size(), 2);
-        move->actions().at(1)->trigger(); menu->close(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QCOMPARE(other->widget(0), first); QCOMPARE(tabs->count(), 1);
-        groups->setCurrentIndex(0); w.quickConnect("FIRST.invalid", true);
-        QCOMPARE(groups->currentIndex(), 1); QCOMPARE(other->widget(0), first); QCOMPARE(w.sessionCount(), size_t(2));
+        tabMenuAction(w, tabs, tabs->indexOf(first), "actionMoveToNewPanelRight"); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        auto other = panelTabs(first); QVERIFY(other.area() != tabs.area()); QCOMPARE(other->widget(0), first); QCOMPARE(tabs->count(), 1);
+        // Quick Connect to an open target shows its tab in its panel.
+        focusTab(w, second); w.quickConnect("FIRST.invalid", true);
+        QCOMPARE(other->currentWidget(), first); QCOMPARE(w.sessionCount(), size_t(2));
         QVERIFY(!first->active()); QVERIFY(second->active());
-        const auto previous = first->id(); w.reconnectCurrent(); auto* fresh = qobject_cast<SessionPane*>(other->widget(0)); QVERIFY(fresh->id() != previous); QVERIFY(fresh->active());
+        const auto previous = first->id(); w.reconnectCurrent(); auto* fresh = other->widget(0); QVERIFY(fresh->id() != previous); QVERIFY(fresh->active());
         QCOMPARE(other->tabText(0), QString("Same caption"));
         w.resize(w.width() + 40, w.height() + 40);
         QTRY_VERIFY(fresh->findChild<QLabel*>("sessionStatus")->text().contains("viewport"));
         fresh->findChild<DesktopView*>()->setFocus(); QTest::keyClick(fresh->findChild<DesktopView*>(), Qt::Key_A);
         QTRY_VERIFY(fresh->findChild<QLabel*>("sessionStatus")->text().contains("Key"));
-        context(other, fresh); menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
+        openTabMenu(other, 0); menu = w.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
         QPointer<SessionPane> gone = fresh; menu->findChild<QAction*>("actionTabClose")->trigger(); menu->close();
         QVERIFY(!gone); QCOMPARE(other->count(), 0); QVERIFY(second->active());
         menu->findChild<QAction*>("actionTabClose")->trigger(); QCOMPARE(tabs->count(), 1);
@@ -1357,45 +1481,32 @@ private slots:
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/subtree-tabs-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow w(dir.path() + "/confCons.xml", true); w.show(); WAIT_STORE(w); w.addFolder(); WAIT_STORE(w); const auto folder = w.selectedId();
         WAIT_STORE(w); w.addConnection(); WAIT_STORE(w); const auto child = w.selectedId(); w.connectSelected(true);
-        auto* groups = w.findChild<QTabWidget*>("groupTabs"); auto* general = w.findChild<QTabWidget*>("sessionTabs");
-        auto* pane = qobject_cast<SessionPane*>(general->widget(0)); const auto id = pane->id();
-        w.findChild<QAction*>("actionAddPanel")->trigger(); QCOMPARE(groups->count(), 2);
-        auto* other = groups->currentWidget()->findChild<QTabWidget*>(); QVERIFY(other);
-        general->removeTab(0); other->addTab(pane, "Renamed");
-        w.connectSelected(true); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 0); QCOMPARE(pane->id(), id);
-        w.disconnectCurrent(); QCOMPARE(w.sessionCount(), size_t(1)); QVERIFY(!pane->active());
+        auto general = sessionTabs(w);
+        auto* pane = general->widget(0); const auto id = pane->id();
+        // A second tab, so the first can move to a panel of its own.
+        w.quickConnect("spare.invalid", true); QPointer<SessionPane> spare = general->widget(1);
+        tabMenuAction(w, general, 0, "actionMoveToNewPanelRight"); auto other = panelTabs(pane); QVERIFY(other.area() != general.area());
+        w.connectSelected(true); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 1); QCOMPARE(pane->id(), id);
+        w.disconnectCurrent(); QCOMPARE(w.sessionCount(), size_t(2)); QVERIFY(!pane->active());
         auto* tree = w.findChild<QTreeWidget*>("connectionTree"); tree->setCurrentItem(tree->topLevelItem(0)->child(0)); QCOMPARE(w.selectedId(), folder);
         w.deleteSelected(); WAIT_STORE(w); QVERIFY(w.lastError().contains("Close all tabs")); QCOMPARE(tree->topLevelItemCount(), 1);
         tree->setCurrentItem(tree->topLevelItem(0)->child(0)->child(0)); QCOMPARE(w.selectedId(), child);
         // Connect shows the disconnected tab in its panel and reconnects it there.
-        groups->setCurrentIndex(0); w.connectSelected(true); QCOMPARE(groups->currentIndex(), 1); QCOMPARE(w.sessionCount(), size_t(1));
-        QTRY_VERIFY(qobject_cast<SessionPane*>(other->widget(0)) && qobject_cast<SessionPane*>(other->widget(0))->id() != id);
-        QVERIFY(!qobject_cast<SessionPane*>(other->widget(0))->disconnected()); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 0);
-        w.closeTab(0); QCOMPARE(w.sessionCount(), size_t(0)); tree->setCurrentItem(tree->topLevelItem(0)->child(0)); w.deleteSelected(); WAIT_STORE(w); QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
+        focusTab(w, spare); w.connectSelected(true); QCOMPARE(w.sessionCount(), size_t(2));
+        QTRY_VERIFY(other->widget(0) && other->widget(0)->id() != id);
+        QVERIFY(!other->widget(0)->disconnected()); QCOMPARE(other->count(), 1); QCOMPARE(general->count(), 1);
+        w.closeTab(0); QCOMPARE(w.sessionCount(), size_t(1)); w.closeTab(0); QCOMPARE(w.sessionCount(), size_t(0));
+        tree->setCurrentItem(tree->topLevelItem(0)->child(0)); w.deleteSelected(); WAIT_STORE(w); QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
     }
     void panelCloseStopsAllWorkers() {
         QTemporaryDir dir(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data/panel-close-XXXXXX"); QVERIFY(dir.isValid());
         MainWindow w(dir.path() + "/confCons.xml", true); w.show(); WAIT_STORE(w);
-        auto* groups = w.findChild<QTabWidget*>("groupTabs");
-        auto context = [&](QWidget* page) {
-            const auto point = groups->tabBar()->tabRect(groups->indexOf(page)).center();
-            QContextMenuEvent event(QContextMenuEvent::Mouse, point, groups->tabBar()->mapToGlobal(point)); QApplication::sendEvent(groups->tabBar(), &event);
-        };
-        auto* general = groups->widget(0); groups->setTabText(0, "Renamed General"); context(general);
-        auto* menu = w.findChild<QMenu*>("groupContextMenu"); QVERIFY(menu); QVERIFY(!menu->findChild<QAction*>("actionPanelClose")->isEnabled());
-        menu->close(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        w.findChild<QAction*>("actionAddPanel")->trigger(); QCOMPARE(groups->count(), 2);
-        QPointer<QWidget> panel = groups->currentWidget(); w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
-        const auto panes = panel->findChildren<SessionPane*>(); QCOMPARE(panes.size(), 2); QPointer<SessionPane> one = panes.at(0), two = panes.at(1);
-        context(panel); menu = w.findChild<QMenu*>("groupContextMenu"); QVERIFY(menu); menu->findChild<QAction*>("actionPanelClose")->trigger(); menu->close();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); QVERIFY(!one && !two && !panel); QCOMPARE(groups->count(), 1); QCOMPARE(w.sessionCount(), size_t(0));
-#ifdef RM_WITH_RDP
-        w.findChild<QAction*>("actionAddPanel")->trigger(); panel = groups->currentWidget(); w.quickConnect("127.0.0.1:1");
-        QPointer<QDialog> credentials = w.findChild<QDialog*>("CredentialsDialog"); QVERIFY(credentials);
-        context(panel); menu = w.findChild<QMenu*>("groupContextMenu"); QVERIFY(menu); menu->findChild<QAction*>("actionPanelClose")->trigger(); menu->close();
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete); QVERIFY(!credentials); QCOMPARE(w.sessionCount(), size_t(0));
-#endif
-        w.quickConnect("general.invalid", true); w.findChild<QAction*>("actionAddPanel")->trigger(); w.quickConnect("other.invalid", true);
+        w.quickConnect("first.invalid", true); w.quickConnect("second.invalid", true);
+        auto general = sessionTabs(w); QPointer<SessionPane> one = general->widget(0), two = general->widget(1);
+        // General's Close Group ends its sessions but General itself stays.
+        general.area()->closeArea(); QTRY_VERIFY(!one && !two); QCOMPARE(w.sessionCount(), size_t(0));
+        QVERIFY(general.area()); QVERIFY(!w.findChild<ads::CDockWidget*>("documentsDock")->isClosed());
+        w.quickConnect("general.invalid", true); w.quickConnect("other.invalid", true); w.addPanel();
         QCOMPARE(w.sessionCount(), size_t(2)); w.close(); QCOMPARE(w.sessionCount(), size_t(0)); QVERIFY(w.findChildren<SessionPane*>().isEmpty());
     }
     void contextDraftGuardsAndSupportedCommands() {
@@ -1418,8 +1529,9 @@ private slots:
         QVERIFY(menu->findChild<QAction*>("actionTreeDuplicate")->isEnabled()); QVERIFY(menu->findChild<QMenu*>("connectOptionsMenu")); menu->close();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         for (const auto* action : {"actionReconnectAll", "actionDefaultInheritance"}) QVERIFY(!w.findChild<QAction*>(action)->isEnabled());
-        auto* dock = w.findChild<QDockWidget*>("configDock"); w.findChild<QAction*>("actionViewConfig")->trigger(); QVERIFY(!dock->isVisible());
-        w.findChild<QAction*>("actionResetLayout")->trigger(); QVERIFY(dock->isVisible()); QVERIFY(w.findChild<QAction*>("actionViewConfig")->isChecked());
+        auto* dock = w.findChild<ads::CDockWidget*>("configDock"); w.findChild<QAction*>("actionViewConfig")->trigger(); QVERIFY(!dock->isVisible());
+        w.findChild<QAction*>("actionResetLayout")->trigger();
+        QTRY_VERIFY(dock->isVisible()); QVERIFY(w.findChild<QAction*>("actionViewConfig")->isChecked());
         w.deleteSelected(); WAIT_STORE(w); auto* list = w.findChild<QListWidget*>("notificationsList"); QVERIFY(list->count() > 0);
         list->clearSelection(); QContextMenuEvent event(QContextMenuEvent::Keyboard, {}, list->mapToGlobal(list->rect().center())); QApplication::sendEvent(list, &event);
         menu = w.findChild<QMenu*>("notificationContextMenu"); QVERIFY(menu); QVERIFY(menu->findChild<QAction*>("actionNotificationCopy")->isEnabled());
@@ -1671,7 +1783,7 @@ private slots:
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true);
         window.resize(1000, 750); window.show(); WAIT_STORE(window); QTest::qWait(100);
         window.quickConnect("renderer.invalid", true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        auto tabs = sessionTabs(window);
         auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(pane);
         auto* view = pane->findChild<DesktopView*>(); QVERIFY(view);
         QSignalSpy submitted(view, &DesktopView::framePresented), failed(view, &DesktopView::renderFailed);
@@ -1781,7 +1893,7 @@ private slots:
         REQUIRE_RHI();
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true);
         window.resize(1000, 750); window.show(); WAIT_STORE(window);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        auto tabs = sessionTabs(window);
         window.quickConnect("one.invalid", true); auto* first = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(first);
         auto* a = first->findChild<DesktopView*>(); QVERIFY(a); a->setFrame(solidFrame(Qt::red));
         QSignalSpy shownA(a, &DesktopView::framePresented); QTRY_VERIFY(revisionSubmitted(shownA, a->frameRevision()));
@@ -1797,11 +1909,11 @@ private slots:
         }
         // Move an entire session subtree to a second, already shown top-level host.
         QWidget other; auto* layout = new QVBoxLayout(&other); other.resize(500, 400); other.show();
-        tabs->removeTab(tabs->indexOf(second)); shownB.clear(); layout->addWidget(second); second->show(); b->update();
+        auto* secondDock = sessionDockOf(second); secondDock->takeWidget(); shownB.clear(); layout->addWidget(second); second->show(); b->update();
         QTRY_VERIFY(revisionSubmitted(shownB, b->frameRevision())); QCOMPARE(capturedCenter(*b), QColor(Qt::blue));
         tabs->setCurrentWidget(first); a->update(); QTRY_VERIFY(revisionSubmitted(shownA, a->frameRevision()));
         QCOMPARE(capturedCenter(*a), QColor(Qt::red));
-        tabs->addTab(second, "Moved back"); tabs->setCurrentWidget(second);
+        secondDock->setWidget(second, ads::CDockWidget::ForceNoScrollArea); tabs->setCurrentWidget(second);
         QPointer<SessionPane> dead = second; window.closeTab(tabs->indexOf(second)); QVERIFY(!dead);
         window.closeTab(tabs->indexOf(first));
         for (int i = 0; i < 8; ++i) {
@@ -1912,7 +2024,7 @@ private slots:
     void sessionFramesRejectDisconnectedGenerations() {
         QTemporaryDir dir; MainWindow window(dir.filePath("confCons.xml"), true); window.show(); WAIT_STORE(window);
         window.quickConnect("generation.invalid", true);
-        auto* pane = qobject_cast<SessionPane*>(window.findChild<QTabWidget*>("sessionTabs")->currentWidget()); QVERIFY(pane);
+        auto* pane = qobject_cast<SessionPane*>(sessionTabs(window)->currentWidget()); QVERIFY(pane);
         auto* view = pane->findChild<DesktopView*>(); QVERIFY(view);
         auto config = [&] { RdpConfig c; c.host = "127.0.0.1"; c.port = 1; c.configDirectory = dir.path(); return c; };
         pane->startRdp(config()); auto* old = pane->findChild<RdpWorker*>(); QVERIFY(old);

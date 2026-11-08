@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ConnectionsPane</class>
+ <widget class="QWidget" name="connectionsContents">
+  <property name="minimumSize"><size><width>226</width><height>130</height></size></property>
+  <layout class="QVBoxLayout" name="connectionsLayout">
+   <property name="spacing"><number>0</number></property>
+   <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+   <item><widget class="QToolBar" name="connectionsToolbar">
+    <property name="iconSize"><size><width>16</width><height>16</height></size></property>
+    <property name="movable"><bool>false</bool></property>
+   </widget></item>
+   <item><widget class="ConnectionTree" name="connectionTree">
+    <property name="headerHidden"><bool>true</bool></property>
+    <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
+    <property name="indentation"><number>16</number></property>
+    <column><property name="text"><string>Connections</string></property></column>
+    <item><property name="text"><string>Connections</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ASPWebSite_16x.png</normaloff>:/original/ASPWebSite_16x.png</iconset></property>
+     <item><property name="text"><string>server01</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Connection.ico</normaloff>:/original/Connection.ico</iconset></property></item>
+    </item>
+    <item><property name="text"><string>PuTTY Saved Sessions</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/PuttySessions.png</normaloff>:/original/PuttySessions.png</iconset></property></item>
+   </widget></item>
+   <item><widget class="QLineEdit" name="searchEdit"><property name="placeholderText"><string>Search</string></property><property name="clearButtonEnabled"><bool>true</bool></property></widget></item>
+  </layout>
+ </widget>
+ <customwidgets><customwidget><class>ConnectionTree</class><extends>QTreeWidget</extends><header>ConnectionTree.h</header></customwidget></customwidgets>
+ <resources><include location="preview-icons.qrc"/></resources>
+ <connections/>
+</ui>

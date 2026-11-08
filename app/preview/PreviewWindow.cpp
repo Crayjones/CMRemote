@@ -3,21 +3,27 @@
 #include "ProfileEditor.h"
 #include "QuickConnect.h"
 #include <QSignalBlocker>
-#include "ui_test.h"
+#include "Shell.h"
+#include "ConnectionDefaults.h"
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
+#include "DockContainerWidget.h"
+#include "DockWidgetTab.h"
+#include "qttreepropertybrowser_p.h"
 #include <QActionGroup>
 #include <QHeaderView>
 #include <QMenu>
 #include <QMessageBox>
 #include "PreviewData.h"
 #include <QPointer>
-#include <QTabBar>
 #include <QTreeWidgetItemIterator>
 #include <functional>
 
 using namespace preview;
 
 PreviewWindow::PreviewWindow(QWidget* parent)
-    : QMainWindow(parent), ui(std::make_unique<Ui::MainWindow>()) {
+    : QMainWindow(parent), ui(std::make_unique<ShellUi>()) {
     Branding::initialize();
     static const bool resources = [] { Q_INIT_RESOURCE(preview_icons); return true; }();
     Q_UNUSED(resources);
@@ -92,9 +98,6 @@ PreviewWindow::PreviewWindow(QWidget* parent)
         }
     }
     ui->searchEdit->addAction(icon("Search_16x.png"), QLineEdit::LeadingPosition)->setEnabled(false);
-    ui->connectionsDock->setWindowIcon(icon("ASPWebSite_16x.png"));
-    ui->configDock->setWindowIcon(icon("Settings_16x.png"));
-    ui->notificationsDock->setWindowIcon(icon("StatusInformation_16x.png"));
 
     const auto assets = qEnvironmentVariable("RM_PREVIEW_ASSET_DIR");
     if (!assets.isEmpty()) {
@@ -104,10 +107,10 @@ PreviewWindow::PreviewWindow(QWidget* parent)
         if (!external.isNull()) ui->actionTabExternalTools->setIcon(external);
     }
 
-    auto bindDock = [this](QDockWidget* dock, QAction* action) {
-        connect(action, &QAction::toggled, dock, &QWidget::setVisible);
-        connect(dock, &QDockWidget::visibilityChanged, action, [dock, action] {
-            const QSignalBlocker blocker(action); action->setChecked(!dock->isHidden());
+    auto bindDock = [this](ads::CDockWidget* dock, QAction* action) {
+        connect(action, &QAction::toggled, dock, [dock](bool visible) { if (visible == dock->isClosed()) dock->toggleView(visible); });
+        connect(dock, &ads::CDockWidget::viewToggled, action, [action](bool open) {
+            const QSignalBlocker blocker(action); action->setChecked(open);
         });
     };
     bindDock(ui->connectionsDock, ui->actionViewConnections);
@@ -139,25 +142,23 @@ PreviewWindow::PreviewWindow(QWidget* parent)
         dialog->setTextFormat(Qt::PlainText); dialog->setAttribute(Qt::WA_DeleteOnClose); dialog->open();
     });
     connect(ui->actionAddPanel, &QAction::triggered, this, &PreviewWindow::addPanel);
-    connect(ui->actionGeneralPanel, &QAction::triggered, this, [this] {
-        ui->groupTabs->setCurrentWidget(ui->generalPanel);
+    for (int direction : {1, -1}) connect(direction > 0 ? ui->actionNextSession : ui->actionPreviousSession, &QAction::triggered, this, [this, direction] {
+        const auto docks = panelDocks(currentPanel()); if (docks.isEmpty()) return;
+        const int index = std::max<int>(0, docks.indexOf(currentPanel()->currentDockWidget()));
+        docks.at((index + docks.size() + direction) % docks.size())->setAsCurrentTab();
     });
-    connect(ui->actionNextSession, &QAction::triggered, this, [this] {
-        auto* tabs = currentSessions();
-        if (tabs && tabs->count()) tabs->setCurrentIndex((tabs->currentIndex() + 1) % tabs->count());
+    connect(ui->menuConnectionPanels, &QMenu::aboutToShow, this, &PreviewWindow::rebuildPanelsMenu);
+    connect(ui->dockManager, &ads::CDockManager::focusedDockWidgetChanged, this, [this](ads::CDockWidget*, ads::CDockWidget* now) {
+        if (isSessionDock(now)) lastSession = now;
     });
-    connect(ui->actionPreviousSession, &QAction::triggered, this, [this] {
-        auto* tabs = currentSessions();
-        if (tabs && tabs->count()) tabs->setCurrentIndex((tabs->currentIndex() + tabs->count() - 1) % tabs->count());
-    });
-    configureTabs(ui->sessionTabs);
-    ui->serverTab->setProperty("previewTitle", "server01");
-    ui->serverTab->setProperty("previewProtocol", "RDP");
-    ui->sessionTabs->setTabIcon(0, nodeIcon("connection"));
-    ui->groupTabs->setTabIcon(0, Branding::applicationIcon());
-    ui->generalPanel->setProperty("isGeneralPanel", true);
-    ui->generalPanel->setProperty("panelAction", QVariant::fromValue(ui->actionGeneralPanel));
-    ui->groupTabs->tabBar()->installEventFilter(this);
+    // Dragging tabs changes panels; keep General's placeholder and panel styling current.
+    const auto relayout = [this] { QMetaObject::invokeMethod(this, [this] { updateSessionLayout(); }, Qt::QueuedConnection); };
+    connect(ui->dockManager, &ads::CDockManager::dockAreaCreated, this, relayout);
+    connect(ui->dockManager, &ads::CDockManager::dockWidgetRemoved, this, relayout);
+    connect(ui->dockManager, &ads::CDockManager::floatingWidgetCreated, this, relayout);
+    connect(ui->dockManager, &ads::CDockContainerWidget::dockAreasRemoved, this, relayout);
+    // The sample session the preview opens with.
+    createPreview(ui->generalPanel(), "server01", "RDP", "server01", false);
 
     auto* root = ui->connectionTree->topLevelItem(0);
     root->setData(0, KindRole, "root");
@@ -210,19 +211,18 @@ PreviewWindow::PreviewWindow(QWidget* parent)
         sorting->addAction(action);
         connect(action, &QAction::triggered, this, [this] { showProperties(); });
     }
-    ui->configTree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
-    ui->configTree->header()->setSectionResizeMode(1, QHeaderView::Stretch);
-    ui->configTree->setColumnWidth(0, 115);
-    connect(ui->configTree, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* row) {
-        if (documentEditor && documentEditor->documentRoot()) return;
-        ui->configHelpTitle->setText(row ? row->text(0) : QString());
-        ui->configHelpText->setText(row ? row->data(0, Qt::UserRole).toString() : QString());
-    });
-    documentEditor = new ProfileEditor(ui->configTree);
+    documentEditor = new ProfileEditor(ui->configGrid);
     connect(documentEditor, &ProfileEditor::helpChanged, this, [this](const QString& title, const QString& text) {
-        if (!documentEditor->documentRoot()) return;
         ui->configHelpTitle->setText(title);
         ui->configHelpText->setText(text);
+    });
+    // Edits stay in this grid. Applying the overrides locally lets Protocol show
+    // and hide its settings the way the application's model does.
+    connect(documentEditor, &ProfileEditor::changed, this, [this] {
+        if (documentEditor->documentRoot() || documentEditor->defaultsMode() || documentEditor->id().isEmpty()) return;
+        auto effective = previewEffective; const auto overrides = documentEditor->draft().value("overrides").toObject();
+        for (auto it = overrides.begin(); it != overrides.end(); ++it) if (!it.value().isNull()) effective[it.key()] = it.value();
+        documentEditor->preview(effective);
     });
     ui->connectionTree->setCurrentItem(root);
     ui->notificationSplitter->setSizes({226, 899});
@@ -236,7 +236,7 @@ PreviewWindow::PreviewWindow(QWidget* parent)
         ui->externalToolsToolbar->setToolButtonStyle(text ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonIconOnly);
     });
     ui->externalToolsToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    for (auto* tree : QList<QTreeWidget*>{ui->connectionTree, ui->configTree}) {
+    for (auto* tree : QList<QTreeWidget*>{ui->connectionTree, documentEditor->view()}) {
         tree->installEventFilter(this);
         tree->viewport()->installEventFilter(this);
     }
@@ -248,22 +248,13 @@ PreviewWindow::PreviewWindow(QWidget* parent)
     resetLayout();
 }
 
-PreviewWindow::~PreviewWindow() = default;
+PreviewWindow::~PreviewWindow() {
+    // The grid reports help changes while it tears down, after the forms are gone.
+    if (documentEditor) documentEditor->disconnect(this);
+}
 
 void PreviewWindow::resetLayout() {
-    setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea);
-    setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
-    for (auto* dock : {ui->connectionsDock, ui->configDock, ui->notificationsDock}) {
-        dock->setFloating(false);
-        removeDockWidget(dock);
-    }
-    addDockWidget(Qt::LeftDockWidgetArea, ui->connectionsDock);
-    splitDockWidget(ui->connectionsDock, ui->configDock, Qt::Vertical);
-    addDockWidget(Qt::BottomDockWidgetArea, ui->notificationsDock);
-    ui->connectionsDock->show(); ui->configDock->show(); ui->notificationsDock->hide();
-    resizeDocks({ui->connectionsDock}, {226}, Qt::Horizontal);
-    resizeDocks({ui->connectionsDock, ui->configDock}, {185, 215}, Qt::Vertical);
-    resizeDocks({ui->notificationsDock}, {105}, Qt::Vertical);
+    ui->resetDocks();
     for (auto* toolbar : {ui->quickConnectToolbar, ui->multiSshToolbar, ui->externalToolsToolbar}) {
         removeToolBar(toolbar);
         addToolBar(Qt::TopToolBarArea, toolbar);
@@ -274,58 +265,91 @@ void PreviewWindow::resetLayout() {
     ui->externalToolsToolbar->hide();
 }
 
-QTabWidget* PreviewWindow::currentSessions() const {
-    auto* panel = ui->groupTabs->currentWidget();
-    return panel ? panel->findChild<QTabWidget*>() : nullptr;
+QList<ads::CDockWidget*> PreviewWindow::panelDocks(ads::CDockAreaWidget* panel) const {
+    QList<ads::CDockWidget*> result;
+    if (panel) for (auto* dock : panel->dockWidgets()) if (isSessionDock(dock)) result.append(dock);
+    return result;
+}
+QList<ads::CDockAreaWidget*> PreviewWindow::sessionPanels() const {
+    QList<ads::CDockAreaWidget*> result;
+    auto collect = [&](ads::CDockContainerWidget* container) {
+        for (int i = 0; i < container->dockAreaCount(); ++i) if (!panelDocks(container->dockArea(i)).isEmpty()) result.append(container->dockArea(i));
+    };
+    collect(ui->dockManager);
+    for (auto* floating : ui->dockManager->floatingWidgets()) collect(floating->dockContainer());
+    if (result.removeAll(ui->generalPanel())) result.prepend(ui->generalPanel());
+    return result;
+}
+QList<ads::CDockWidget*> PreviewWindow::sessionDocks() const {
+    QList<ads::CDockWidget*> result;
+    for (auto* panel : sessionPanels()) result += panelDocks(panel);
+    return result;
+}
+QString PreviewWindow::panelName(ads::CDockAreaWidget* panel) const {
+    if (panel == ui->generalPanel()) return "General";
+    if (panel->property("panelName").toString().isEmpty()) panel->setProperty("panelName", QString("Panel %1").arg(nextPanel++));
+    return panel->property("panelName").toString();
+}
+ads::CDockAreaWidget* PreviewWindow::currentPanel() const {
+    if (lastSession && isSessionDock(lastSession)) if (auto* area = lastSession->dockAreaWidget()) return area;
+    return ui->generalPanel();
 }
 
 void PreviewWindow::openPreview(const QString& endpoint, const QString& selectedProtocol, const QString& title) {
-    auto* tabs = currentSessions();
-    if (!tabs) return;
-    for (int i = 0; i < tabs->count(); ++i) {
-        if (tabs->widget(i)->property("previewTitle").toString() == endpoint &&
-            tabs->widget(i)->property("previewProtocol").toString() == selectedProtocol) {
-            tabs->setCurrentIndex(i);
+    for (auto* dock : sessionDocks()) {
+        if (dock->widget()->property("previewTitle").toString() == endpoint &&
+            dock->widget()->property("previewProtocol").toString() == selectedProtocol) {
+            dock->setAsCurrentTab(); lastSession = dock;
             return;
         }
     }
-    createPreview(tabs, endpoint, selectedProtocol, title.isEmpty() ? endpoint : title);
+    createPreview(currentPanel(), endpoint, selectedProtocol, title.isEmpty() ? endpoint : title);
 }
 
-void PreviewWindow::createPreview(QTabWidget* tabs, const QString& endpoint,
-                                  const QString& selectedProtocol, const QString& title) {
-    auto* page = new QWidget(tabs);
+void PreviewWindow::createPreview(ads::CDockAreaWidget* panel, const QString& endpoint,
+                                  const QString& selectedProtocol, const QString& title, bool announce) {
+    if (!panel) panel = ui->generalPanel();
+    auto* page = new QWidget;
     // The reuse key is independent of the mutable tab caption.
     page->setProperty("previewTitle", endpoint);
     page->setProperty("previewProtocol", selectedProtocol);
-    page->setStyleSheet("background: #191919; color: #dddddd;");
+    page->setObjectName("sessionSurface"); page->setWindowTitle(title);
     auto* layout = new QVBoxLayout(page);
     auto* text = new QLabel(endpoint + " · " + selectedProtocol + "\n\nUI preview only — no network connection", page);
+    text->setObjectName("sessionMessage");
     text->setTextFormat(Qt::PlainText);
     text->setAlignment(Qt::AlignCenter);
     text->setWordWrap(true);
     layout->addWidget(text);
-    tabs->setCurrentIndex(tabs->addTab(page, nodeIcon("connection"), title));
+    auto* dock = createSessionDock(ui->dockManager, page, QString("previewSession%1").arg(nextSession++));
+    dock->setIcon(nodeIcon("connection"));
+    dock->tabWidget()->installEventFilter(this);
+    connect(dock, &ads::CDockWidget::closeRequested, this, [this, target = QPointer<ads::CDockWidget>(dock)] {
+        if (target) closeSession(target);
+    }, Qt::QueuedConnection);
+    panel->dockManager()->addDockWidgetTabToArea(dock, panel);
+    dock->setAsCurrentTab(); lastSession = dock;
+    updateSessionLayout();
+    if (!announce) return;
     new QListWidgetItem(icon("StatusInformation_16x.png"),
                         "Opened local preview tab: " + title + " (" + selectedProtocol + ")", ui->notificationsList);
     ui->notificationsList->setCurrentRow(ui->notificationsList->count() - 1, QItemSelectionModel::ClearAndSelect);
 }
 
-void PreviewWindow::configureTabs(QTabWidget* tabs) {
-    tabs->setDocumentMode(true);
-    tabs->setTabsClosable(true);
-    tabs->setMovable(true);
-    tabs->tabBar()->installEventFilter(this);
-    connect(tabs, &QTabWidget::tabCloseRequested, this, [this, tabs](int index) {
-        closeSession(tabs, tabs->widget(index));
-    });
+void PreviewWindow::closeSession(ads::CDockWidget* dock) {
+    if (!isSessionDock(dock)) return;
+    if (auto* manager = dock->dockManager()) manager->removeDockWidget(dock);
+    dock->deleteLater();
+    updateSessionLayout();
 }
 
-void PreviewWindow::closeSession(QTabWidget* tabs, QWidget* page) {
-    const int index = tabs->indexOf(page);
-    if (index < 0) return;
-    tabs->removeTab(index);
-    page->deleteLater();
+void PreviewWindow::updateSessionLayout() {
+    // As in the application: General shows its placeholder only while no session is docked in the window.
+    bool sessions = false;
+    for (auto* panel : sessionPanels()) sessions = sessions || !panel->dockContainer()->isFloating();
+    markSessionPanels(ui->dockManager);
+    ui->generalPanel()->setDockAreaFlag(ads::CDockAreaWidget::HideSingleWidgetTitleBar, !sessions);
+    showGeneralPlaceholder(ui->documentsDock, !sessions);
 }
 
 void PreviewWindow::updateNotificationDetails() {
@@ -336,21 +360,23 @@ void PreviewWindow::updateNotificationDetails() {
 }
 
 void PreviewWindow::addPanel() {
-    const auto name = QString("Panel %1").arg(nextPanel++);
-    auto* panel = new QWidget(ui->groupTabs);
-    auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(0, 0, 0, 0);
-    auto* tabs = new QTabWidget(panel);
-    tabs->setObjectName("panelSessionTabs");
-    configureTabs(tabs);
-    layout->addWidget(tabs);
-    ui->groupTabs->setCurrentIndex(ui->groupTabs->addTab(panel, Branding::applicationIcon(), name));
-    auto* action = ui->menuConnectionPanels->addAction(name);
-    panel->setProperty("panelAction", QVariant::fromValue(action));
-    connect(action, &QAction::triggered, this, [this, target = QPointer<QWidget>(panel)] {
-        if (target && ui->groupTabs->indexOf(target) >= 0) ui->groupTabs->setCurrentWidget(target);
-    });
-    connect(panel, &QObject::destroyed, action, &QObject::deleteLater);
+    // New Panel moves the current tab into a panel of its own beside its panel.
+    auto* panel = currentPanel(); const auto docks = panelDocks(panel);
+    if (docks.size() < 2 || !isSessionDock(panel->currentDockWidget())) return;
+    auto* dock = panel->currentDockWidget();
+    splitPanel(ui->dockManager, dock, panel, ads::RightDockWidgetArea);
+    lastSession = dock; updateSessionLayout();
+}
+
+void PreviewWindow::rebuildPanelsMenu() {
+    auto* menu = ui->menuConnectionPanels; menu->clear();
+    for (auto* panel : sessionPanels()) {
+        auto* action = menu->addAction(icon("Panel_16x.png"), panelName(panel));
+        connect(action, &QAction::triggered, this, [panel = QPointer<ads::CDockAreaWidget>(panel)] {
+            if (panel && panel->currentDockWidget()) panel->currentDockWidget()->setAsCurrentTab();
+        });
+    }
+    if (menu->isEmpty()) menu->addAction("No open panels")->setEnabled(false);
 }
 
 void PreviewWindow::addNode(const QString& kind) {
@@ -402,45 +428,18 @@ void PreviewWindow::showProperties() {
         documentEditor->setInheritance(false);
         return;
     }
-    documentEditor->load({}, {});
-    ui->configTree->clear();
-    ui->configTree->setEnabled(true);
-    QTreeWidgetItem* first = nullptr;
-    auto property = [&](const QString& category, const QString& name, const QString& value, const QString& help) {
-        QTreeWidgetItem* parent = nullptr;
-        if (ui->actionCategorized->isChecked()) {
-            for (int i = 0; i < ui->configTree->topLevelItemCount(); ++i)
-                if (ui->configTree->topLevelItem(i)->text(0) == category) parent = ui->configTree->topLevelItem(i);
-            if (!parent) {
-                parent = new QTreeWidgetItem(ui->configTree, {category});
-                parent->setBackground(0, QColor("#eeeeee"));
-                parent->setBackground(1, QColor("#eeeeee"));
-                auto font = parent->font(0); font.setBold(true); parent->setFont(0, font);
-                parent->setExpanded(true);
-            }
-        }
-        auto* row = parent ? new QTreeWidgetItem(parent, {name, value}) : new QTreeWidgetItem(ui->configTree, {name, value});
-        row->setData(0, Qt::UserRole, help);
-        row->setToolTip(1, "Read-only preview value; no profile is modified");
-        if (!first) first = row;
-    };
-    if (propertyMode == 1 || propertyMode == 3) {
-        property("Inheritance", "Protocol", "Yes", "Preview inheritance flag. The Rust model is not connected.");
-        property("Inheritance", "Hostname / IP", "No", "Preview local-host override flag.");
-        property("Inheritance", "Port", "Yes", "Preview inheritance flag for the protocol port.");
-    } else {
-        const auto name = propertyMode == 2 ? QString("Defaults") : node->text(0);
-        property("Display", "Name", name, "This is the name displayed in the connections tree.");
-        if (kind != "putty" || propertyMode == 2) {
-            property("Display", "Description", "", "A description for the selected connection or folder.");
-            property("Connection", "Protocol", "RDP", "The protocol used by a connection. Preview only.");
-            if (kind == "connection") property("Connection", "Hostname / IP", node->data(0, EndpointRole).toString(), "Remote endpoint; no connection is made by this preview.");
-            property("Connection", "Port", "3389", "Default RDP port, shown as a read-only preview value.");
-            property("Connection", "Username", "", "Read-only account preview; no credentials are requested.");
-            property("Connection", "Password", "Unavailable", "Preview cannot accept or store passwords.");
-            property("Connection", "Domain", "", "Read-only account domain preview.");
-        }
+    documentEditor->setCategorized(ui->actionCategorized->isChecked());
+    if (propertyMode >= 2) { documentEditor->loadDefaults({}, propertyMode == 3); return; }
+    // In-memory sample settings: the Settings defaults with this node's endpoint.
+    previewEffective = ConnectionDefaults{}.effective();
+    const auto protocol = node->data(0, ProtocolRole).toString().toLower();
+    if (QStringList{"rdp", "ssh", "vnc"}.contains(protocol)) {
+        previewEffective["protocol"] = protocol; previewEffective["port"] = protocol == "ssh" ? 22 : protocol == "vnc" ? 5900 : 3389;
     }
-    if (ui->actionAlphabetical->isChecked()) ui->configTree->sortItems(0, Qt::AscendingOrder);
-    ui->configTree->setCurrentItem(first);
+    const auto endpoint = node->data(0, EndpointRole).toString();
+    if (kind == "connection") previewEffective["host"] = endpoint;
+    documentEditor->load(QJsonObject{{"id", "preview-" + node->text(0)}, {"kind", kind == "folder" ? "folder" : "connection"},
+        {"name", node->text(0)}, {"parent", node->parent() && node->parent()->parent() ? QJsonValue("preview-folder") : QJsonValue(QJsonValue::Null)},
+        {"overrides", kind == "connection" ? QJsonObject{{"host", endpoint}} : QJsonObject{}}, {"effective", previewEffective}}, {});
+    documentEditor->setInheritance(propertyMode == 1);
 }

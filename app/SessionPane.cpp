@@ -38,7 +38,6 @@ SessionPane::SessionPane(const rm::SessionInfo& info, QString profile, QWidget* 
     status_->setObjectName("sessionStatus"); layout->addWidget(status_);
     idle_ = new IdleTimeout(this); idle_->setObjectName("rdpIdleTimeout");
     captureHint_ = new QLabel(this); captureHint_->setObjectName("sessionCaptureHint");
-    captureHint_->setStyleSheet("QLabel { background: #1f4e8c; color: white; padding: 3px 6px; }");
     captureHint_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed); captureHint_->hide(); layout->addWidget(captureHint_);
     if (info.graphical) {
         if (target_.protocol == "vnc") {

@@ -1,13 +1,17 @@
 #include "PreviewWindow.h"
 #include "PreviewData.h"
-#include "ui_test.h"
+#include "Shell.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
+#include "DockManager.h"
+#include "DockWidgetTab.h"
+#include "ProfileEditor.h"
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QPersistentModelIndex>
 #include <QPointer>
-#include <QTabBar>
 #include <QTreeWidgetItemIterator>
 
 using namespace preview;
@@ -72,27 +76,21 @@ void PreviewWindow::rebuildJumpMenu() {
     auto* menu = ui->menuJumpTo; menu->clear();
     menu->addAction(ui->actionNextSession); menu->addAction(ui->actionPreviousSession); menu->addSeparator();
     for (auto* dock : {ui->connectionsDock, ui->configDock, ui->notificationsDock}) {
-        auto* action = menu->addAction(dock->windowIcon(), dock->windowTitle()); action->setData(dock->objectName());
-        connect(action, &QAction::triggered, this, [dock = QPointer<QDockWidget>(dock)] {
-            if (dock) { dock->show(); dock->raise(); dock->widget()->setFocus(); }
+        auto* action = menu->addAction(dock->icon(), dock->windowTitle()); action->setData(dock->objectName());
+        connect(action, &QAction::triggered, this, [dock = QPointer<ads::CDockWidget>(dock)] {
+            if (dock) { dock->toggleView(true); dock->setAsCurrentTab(); dock->raise(); dock->widget()->setFocus(); }
         });
     }
     menu->addSeparator();
-    for (int i = 0; i < ui->groupTabs->count(); ++i) {
-        auto* panel = ui->groupTabs->widget(i); auto* tabs = panel->findChild<QTabWidget*>();
-        auto* action = menu->addAction(ui->groupTabs->tabIcon(i), ui->groupTabs->tabText(i)); action->setData(QVariant::fromValue(panel));
-        connect(action, &QAction::triggered, this, [this, panel = QPointer<QWidget>(panel)] {
-            if (panel && ui->groupTabs->indexOf(panel) >= 0) { ui->groupTabs->setCurrentWidget(panel); if (auto* tabs = panel->findChild<QTabWidget*>()) tabs->setFocus(); }
+    for (auto* panel : sessionPanels()) {
+        auto* action = menu->addAction(icon("Panel_16x.png"), panelName(panel)); action->setData(panelName(panel));
+        connect(action, &QAction::triggered, this, [panel = QPointer<ads::CDockAreaWidget>(panel)] {
+            if (panel && panel->currentDockWidget()) { panel->currentDockWidget()->setAsCurrentTab(); panel->currentDockWidget()->widget()->setFocus(); }
         });
-        if (!tabs) continue;
-        for (int j = 0; j < tabs->count(); ++j) {
-            auto* page = tabs->widget(j); auto* session = menu->addAction(tabs->tabIcon(j), ui->groupTabs->tabText(i) + ": " + tabs->tabText(j)); session->setData(QVariant::fromValue(page));
-            connect(session, &QAction::triggered, this, [this, page = QPointer<QWidget>(page)] {
-                if (!page) return;
-                for (int i = 0; i < ui->groupTabs->count(); ++i) {
-                    auto* tabs = ui->groupTabs->widget(i)->findChild<QTabWidget*>();
-                    if (tabs && tabs->indexOf(page) >= 0) { ui->groupTabs->setCurrentIndex(i); tabs->setCurrentWidget(page); page->setFocus(); return; }
-                }
+        for (auto* dock : panelDocks(panel)) {
+            auto* session = menu->addAction(dock->icon(), panelName(panel) + ": " + dock->windowTitle()); session->setData(QVariant::fromValue(dock->widget()));
+            connect(session, &QAction::triggered, this, [this, dock = QPointer<ads::CDockWidget>(dock)] {
+                if (dock) { dock->setAsCurrentTab(); lastSession = dock; dock->widget()->setFocus(); }
             });
         }
     }
@@ -134,19 +132,15 @@ bool PreviewWindow::eventFilter(QObject* watched, QEvent* event) {
         popup(treeMenu(node), location);
         return true;
     }
-    if (auto* bar = qobject_cast<QTabBar*>(watched)) {
-        auto* tabs = qobject_cast<QTabWidget*>(bar->parentWidget());
-        if (!tabs) return false;
-        const int index = keyboard ? tabs->currentIndex() : bar->tabAt(context->pos());
-        if (index < 0) return true;
-        auto* page = tabs->widget(index);
-        popup(tabs == ui->groupTabs ? groupMenu(page) : sessionMenu(tabs, page), location);
+    if (auto* tab = qobject_cast<ads::CDockWidgetTab*>(watched)) {
+        // A session tab offers the session's commands instead of Qt ADS's own menu.
+        if (isSessionDock(tab->dockWidget())) popup(sessionMenu(tab->dockWidget()), location);
         return true;
     }
-    if (watched == ui->configTree || watched == ui->configTree->viewport()) {
+    if (auto* grid = documentEditor->view(); watched == grid || watched == grid->viewport()) {
         if (!keyboard) {
-            auto* row = ui->configTree->itemAt(ui->configTree->viewport()->mapFromGlobal(location));
-            if (row) ui->configTree->setCurrentItem(row);
+            auto* row = grid->itemAt(grid->viewport()->mapFromGlobal(location));
+            if (row) documentEditor->setCurrentKey(row->data(0, ProfileEditor::KeyRole).toString());
         }
         popup(configMenu(), location);
         return true;
@@ -312,38 +306,56 @@ void PreviewWindow::renameNode(QTreeWidgetItem* node) {
     });
 }
 
-QMenu* PreviewWindow::sessionMenu(QTabWidget* tabs, QWidget* page) {
+QMenu* PreviewWindow::sessionMenu(ads::CDockWidget* dock) {
     auto* menu = new QMenu(this);
     menu->setObjectName("sessionContextMenu");
-    const QPointer<QTabWidget> group(tabs);
-    const QPointer<QWidget> target(page);
+    const QPointer<ads::CDockWidget> target(dock);
+    auto* page = dock->widget();
     const auto selectedProtocol = page->property("previewProtocol").toString();
     const bool rdp = selectedProtocol == "RDP", vnc = selectedProtocol == "VNC";
     const bool ssh = selectedProtocol == "SSH1" || selectedProtocol == "SSH2";
     const bool putty = ssh || selectedProtocol == "Telnet" || selectedProtocol == "Rlogin" || selectedProtocol == "RAW";
+    const auto siblings = panelDocks(dock->dockAreaWidget()); const int index = int(siblings.indexOf(dock));
     menuAction(menu, "actionTabReconnect", false);
-    menuAction(menu, "actionTabDisconnect", true, [this, group, target] {
-        if (group && target) closeSession(group, target);
-    });
+    menuAction(menu, "actionTabDisconnect", true, [this, target] { if (target) closeSession(target); });
     menuAction(menu, "actionTabMinimize", false);
     for (bool rightOnly : {false, true}) {
         menuAction(menu, rightOnly ? "actionTabDisconnectRight" : "actionTabDisconnectOthers",
-                   rightOnly ? tabs->indexOf(page) < tabs->count() - 1 : tabs->count() > 1,
-                   [this, group, target, rightOnly] {
-            if (!group || !target || group->indexOf(target) < 0) return;
-            const int keep = group->indexOf(target);
-            for (int i = group->count() - 1; i >= 0; --i)
-                if (i != keep && (!rightOnly || i > keep)) closeSession(group, group->widget(i));
+                   rightOnly ? index < siblings.size() - 1 : siblings.size() > 1,
+                   [this, target, rightOnly] {
+            if (!target) return;
+            const auto docks = panelDocks(target->dockAreaWidget()); const int keep = int(docks.indexOf(target));
+            for (int i = int(docks.size()) - 1; i >= 0; --i) if (i != keep && (!rightOnly || i > keep)) closeSession(docks.at(i));
         });
     }
-    menuAction(menu, "actionTabRename", true, [this, group, target] {
-        if (group && target) renamePage(group, target, false);
+    menuAction(menu, "actionTabRename", true, [this, target] { if (target) renameSession(target); });
+    menuAction(menu, "actionTabDuplicate", true, [this, target] {
+        if (!target) return;
+        createPreview(target->dockAreaWidget(), target->widget()->property("previewTitle").toString(),
+                      target->widget()->property("previewProtocol").toString(), target->windowTitle());
     });
-    menuAction(menu, "actionTabDuplicate", true, [this, group, target] {
-        if (!group || !target || group->indexOf(target) < 0) return;
-        createPreview(group, target->property("previewTitle").toString(), target->property("previewProtocol").toString(),
-                      group->tabText(group->indexOf(target)));
-    });
+    // Panels are Qt ADS dock areas, as in the application: tabs also move by dragging them.
+    auto* move = menu->addMenu(icon("Panel_16x.png"), "Move to panel"); move->setObjectName("moveSessionMenu");
+    for (const auto& [name, label, side] : std::initializer_list<std::tuple<const char*, const char*, int>>{
+             {"actionMoveToNewPanelRight", "New panel to the right", ads::RightDockWidgetArea}, {"actionMoveToNewPanelBelow", "New panel below", ads::BottomDockWidgetArea}}) {
+        auto* action = move->addAction(label); action->setObjectName(name); action->setEnabled(siblings.size() > 1);
+        connect(action, &QAction::triggered, this, [this, target, side] {
+            if (!target || panelDocks(target->dockAreaWidget()).size() < 2) return;
+            ui->dockManager->addDockWidget(ads::DockWidgetArea(side), target, target->dockAreaWidget()); lastSession = target; updateSessionLayout();
+        });
+    }
+    auto* floating = move->addAction("New window"); floating->setObjectName("actionMoveToNewWindow");
+    floating->setEnabled(!(dock->dockContainer()->isFloating() && siblings.size() == 1));
+    connect(floating, &QAction::triggered, this, [this, target] { if (target) { target->setFloating(); updateSessionLayout(); } });
+    move->addSeparator();
+    auto panels = sessionPanels(); if (!panels.contains(ui->generalPanel())) panels.prepend(ui->generalPanel());
+    for (auto* panel : panels) {
+        auto* action = move->addAction(panelName(panel)); action->setEnabled(panel != dock->dockAreaWidget());
+        connect(action, &QAction::triggered, this, [this, target, panel = QPointer<ads::CDockAreaWidget>(panel)] {
+            if (!target || !panel) return;
+            panel->dockManager()->addDockWidgetTabToArea(target, panel); target->setAsCurrentTab(); lastSession = target; updateSessionLayout();
+        });
+    }
     menu->addSeparator();
     menuAction(menu, "actionTabFullscreen", false)->setVisible(rdp);
     menuAction(menu, "actionTabSmartSize", false)->setVisible(rdp || vnc);
@@ -363,51 +375,9 @@ QMenu* PreviewWindow::sessionMenu(QTabWidget* tabs, QWidget* page) {
     return menu;
 }
 
-void PreviewWindow::renamePage(QTabWidget* tabs, QWidget* page, bool panel) {
-    if (tabs->indexOf(page) < 0) return;
-    const QPointer<QTabWidget> group(tabs);
-    const QPointer<QWidget> target(page);
-    askName(this, tabs->tabText(tabs->indexOf(page)), [group, target, panel](const QString& name) {
-        if (!group || !target || group->indexOf(target) < 0) return;
-        group->setTabText(group->indexOf(target), name);
-        if (panel) {
-            if (auto* action = target->property("panelAction").value<QAction*>()) action->setText(name);
-        }
-    });
-}
-
-QMenu* PreviewWindow::groupMenu(QWidget* panel) {
-    auto* menu = new QMenu(this);
-    menu->setObjectName("groupContextMenu");
-    const QPointer<QWidget> target(panel);
-    menuAction(menu, "actionPanelRename", true, [this, target] {
-        if (target) renamePage(ui->groupTabs, target, true);
-    });
-    menuAction(menu, "actionPanelSendTo", false)->setToolTip("Detachable multi-monitor panels are not implemented");
-    auto* close = menuAction(menu, "actionPanelClose", !panel->property("isGeneralPanel").toBool(), [this, target] {
-        if (target) closePanel(target);
-    });
-    close->setVisible(!panel->property("isGeneralPanel").toBool());
-    return menu;
-}
-
-void PreviewWindow::closePanel(QWidget* panel) {
-    if (panel->property("isGeneralPanel").toBool() || ui->groupTabs->indexOf(panel) < 0) return;
-    const QPointer<QWidget> target(panel);
-    auto remove = [this, target] {
-        if (!target || target->property("isGeneralPanel").toBool()) return;
-        const int index = ui->groupTabs->indexOf(target);
-        if (index < 0) return;
-        if (auto* action = target->property("panelAction").value<QAction*>()) {
-            ui->menuConnectionPanels->removeAction(action);
-            action->setEnabled(false);
-        }
-        ui->groupTabs->removeTab(index);
-        target->deleteLater();
-    };
-    auto* tabs = panel->findChild<QTabWidget*>();
-    if (tabs && tabs->count()) confirm(this, "Close this panel and its local preview tabs?\nNo network sessions or profiles are affected.", remove);
-    else remove();
+void PreviewWindow::renameSession(ads::CDockWidget* dock) {
+    const QPointer<ads::CDockWidget> target(dock);
+    askName(this, dock->windowTitle(), [target](const QString& name) { if (target) target->setWindowTitle(name); });
 }
 
 QMenu* PreviewWindow::configMenu() {

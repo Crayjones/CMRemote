@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "DockAreaWidget.h"
+#include "DockWidget.h"
+#include "Shell.h"
 #include "SessionPane.h"
 #include "SshCredentialsDialog.h"
 #include "VncAuthentication.h"
@@ -14,7 +17,7 @@ std::optional<SessionTarget> MainWindow::committedTarget(const QString& id) cons
 }
 bool MainWindow::validAttempt(const Attempt& attempt) const {
     if (!attempt || credentialAttempt_ != attempt || attempt->token != credentialToken_ || closeApproved_) return false;
-    if (!attempt->owner || !sessionPanels().contains(attempt->owner) || (attempt->replacing && (!attempt->page || !ownerOf(attempt->page)))) return false;
+    if (attempt->replacing && (!attempt->page || !isOpenPane(attempt->page))) return false;
     if (!attempt->profile.isEmpty()) {
         const auto doc = context(attempt->document);
         if (!doc || doc->status().generation != attempt->generation || doc->status().revision != attempt->revision) return false;
@@ -26,7 +29,7 @@ bool MainWindow::validAttempt(const Attempt& attempt) const {
 }
 void MainWindow::clearCredentialDialog() { auto dialog = credentialDialog_; credentialDialog_.clear(); if (dialog) dialog->accept(); }
 void MainWindow::cancelCredentials() {
-    ++credentialToken_; auto dialog = credentialDialog_; credentialDialog_.clear(); credentialPage_.clear(); credentialOwner_.clear();
+    ++credentialToken_; auto dialog = credentialDialog_; credentialDialog_.clear(); credentialPage_.clear();
     if (credentialAttempt_) { credentialAttempt_->savePassword.reset(); credentialAttempt_->credentials.reset(); credentialAttempt_->sshAuthentication.reset(); credentialAttempt_->vncAuthentication.reset(); } credentialAttempt_.reset();
     if (dialog) dialog->reject();
     if (!closeApproved_) updateFileActions();
@@ -87,7 +90,7 @@ void MainWindow::finishCredentials(Attempt attempt) {
     if (!validAttempt(attempt)) return;
     if (attempt->target.protocol == "vnc") {
         if (!attempt->vncAuthentication) return;
-        clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear(); credentialOwner_.clear();
+        clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear();
         auto authentication = std::move(attempt->vncAuthentication); attempt->vncAuthentication.reset();
         attachSession(attempt->profile, attempt->target, false, attempt->owner, attempt->page, {}, attempt->document, {}, std::move(authentication));
         updateFileActions(); return;
@@ -101,7 +104,7 @@ void MainWindow::finishCredentials(Attempt attempt) {
         }
         const auto target = attempt->authenticatedTarget.value_or(attempt->target);
         if (target.username.isEmpty()) { cancelCredentials(); fail("SSH requires a username."); return; }
-        clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear(); credentialOwner_.clear();
+        clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear();
         auto authentication = std::move(attempt->sshAuthentication); attempt->sshAuthentication.reset();
         attachSession(attempt->profile, target, false, attempt->owner, attempt->page, {}, attempt->document, std::move(authentication));
         saveAttempt(attempt, target);
@@ -112,7 +115,7 @@ void MainWindow::finishCredentials(Attempt attempt) {
     auto target = attempt->target;
     if (!attempt->replacing || !attempt->profile.isEmpty()) { target.username = attempt->credentials->username; target.domain = attempt->credentials->domain; }
     const auto normalized = normalizeSessionTarget(target); if (!normalized) { cancelCredentials(); fail("Invalid RDP username or target."); return; }
-    clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear(); credentialOwner_.clear();
+    clearCredentialDialog(); credentialAttempt_.reset(); credentialPage_.clear();
     auto credentials = std::move(attempt->credentials); attempt->credentials.reset();
     attachSession(attempt->profile, *normalized, false, attempt->owner, attempt->page, std::move(credentials), attempt->document);
     saveAttempt(attempt, *normalized); updateFileActions();
@@ -124,6 +127,6 @@ void MainWindow::connectDifferent() {
         if (!selectConnectionProfile(reference)) return;
         const auto id = selectedId(); const auto target = committedTarget(id); if (!target) return;
         for (auto* pane : sessionPages()) if (pane->profile() == id && pane->document() == editorDocument_) { reconnectPane(pane, true); return; }
-        requestSession(id, *target, false, currentSessions(), nullptr, true, editorDocument_);
+        requestSession(id, *target, false, currentPanel(), nullptr, true, editorDocument_);
     });
 }

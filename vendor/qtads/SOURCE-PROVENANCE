@@ -1,0 +1,31 @@
+Qt Advanced Docking System (QtADS) 5.1.1
+Upstream: https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System
+Tag v5.1.1, commit 023ce95934fecfd4cf5c672c9c404fabe0f54923
+License: LGPL-2.1-or-later (LICENSE, gnu-lgpl-v2.1.md, unchanged)
+
+Retained: src/*.cpp, src/*.h and src/linux/ unchanged except three patches; cmake/modules/ads_version.h.in
+as ads_version.h.in. Not retained: images/ and stylesheets/; ads.qrc is replaced
+by an empty resource of the same name, which DockManager still initializes. CMRemote sets
+CDockManager::DisableStylesheet and styles the docks from app/ui/theme.qss; dock
+buttons use app-drawn icons registered with the ADS icon provider.
+CMakeLists.txt here is CMRemote's own static build, not upstream's.
+
+CMRemote patch (src/DockAreaWidget.cpp, CDockAreaLayout, marked "CMRemote patch"):
+upstream detaches a dock area's inactive tabs with setParent(nullptr), so every tab
+switch moved a session's GPU-backed view (QRhiWidget) out of its window and back.
+Inactive tabs now stay hidden children of their area; a removed tab keeps its parent
+until it is inserted into another area.
+
+CMRemote patch (src/DockAreaTabBar.cpp onTabWidgetMoved, src/DockWidgetTab.cpp moveTab,
+src/DockAreaWidget.cpp reorderDockWidget, marked "CMRemote patch"): upstream reorders a
+dragged tab only on mouse release, so the other tabs stay put while it slides over them.
+The tab now emits moved() on every drag step; once the cursor passes a neighbour's centre,
+the tab bar and dock area reorder immediately and the neighbours slide aside. The area moves
+the tab in its list without hiding or re-showing the current session view.
+
+CMRemote patch (src/DockWidgetTab.cpp rejoinTabBar, marked "CMRemote patch"): upstream
+keeps a tab pulled out of its bar as a floating preview until the mouse is released, even
+when it is brought back over a tab bar. Now, while the preview is over the tab bar of a
+dock area holding tabs of the same kind (CMRemote's "session" tab property), the preview
+is dropped, the dock widget joins that area at the cursor (if it is another area), and
+the drag continues as an ordinary tab move.

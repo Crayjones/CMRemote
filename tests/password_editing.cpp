@@ -1,11 +1,11 @@
 #include "MainWindow.h"
 #include "ProfileEditor.h"
-#include "PropertyDelegate.h"
+#include "qttreepropertybrowser_p.h"
 #include "GridDriver.h"
 #include "SessionPane.h"
 #include "FilePasswordDialogs.h"
 #include <QLabel>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #if defined(Q_OS_UNIX) && defined(RM_WITH_RDP)
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -27,12 +27,7 @@
 #include <QCheckBox>
 
 namespace {
-QTreeWidgetItem* row(MainWindow& window, const QString& key) {
-    auto* tree = window.findChild<QTreeWidget*>("configTree");
-    for (QTreeWidgetItemIterator it(tree); *it; ++it)
-        if ((*it)->data(0, PropertyDelegate::KeyRole).toString() == key) return *it;
-    return nullptr;
-}
+QTreeWidgetItem* row(MainWindow& window, const QString& key) { return window.findChild<ProfileEditor*>()->row(key); }
 QByteArray contents(const QString& path) { QFile file(path); return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray(); }
 bool settled(MainWindow& window, DocumentId id) {
     auto* files = window.findChild<DocumentService*>(); auto* editor = window.findChild<ProfileEditor*>();
@@ -41,10 +36,11 @@ bool settled(MainWindow& window, DocumentId id) {
 void assertSecretFree(QWidget& window, const QByteArray& secret) {
     const auto* editor = window.findChild<ProfileEditor*>(); QVERIFY(editor);
     QVERIFY(!QJsonDocument(editor->draft()).toJson().contains(secret));
-    auto* tree = window.findChild<QTreeWidget*>("configTree"); QVERIFY(tree);
+    auto* tree = editor->view(); QVERIFY(tree);
     for (QTreeWidgetItemIterator it(tree); *it; ++it) for (int column = 0; column < 2; ++column) {
-        for (int role = Qt::DisplayRole; role <= PropertyDelegate::CategoryRole; ++role)
+        for (int role = Qt::DisplayRole; role <= Qt::UserRole; ++role)
             QVERIFY(!(*it)->data(column, role).toString().toUtf8().contains(secret));
+        QVERIFY(!editor->rowValue((*it)->data(0, ProfileEditor::KeyRole).toString()).toString().toUtf8().contains(secret));
     }
 }
 const QString Folder = "11111111-1111-4111-8111-111111111111", Consumer = "22222222-2222-4222-8222-222222222222";
@@ -100,14 +96,15 @@ class PasswordEditingTest : public QObject {
 private slots:
     void passwordEnterFocusEscapeAndClear() {
         QWidget window; window.resize(650, 750); auto* layout = new QVBoxLayout(&window);
-        auto* tree = new QTreeWidget(&window); tree->setObjectName("configTree"); layout->addWidget(tree);
+        auto* tree = new QtTreePropertyBrowser(&window); tree->setObjectName("configGrid"); layout->addWidget(tree);
         auto* focus = new QLineEdit(&window); focus->setPlaceholderText("Focus target"); layout->addWidget(focus);
         auto* editor = new ProfileEditor(tree);
         editor->load({{"id", "11111111-1111-4111-8111-111111111111"}, {"kind", "connection"}, {"name", "Synthetic"}, {"overrides", QJsonObject{}}}, {});
         int calls = 0; PasswordEdit::Kind last = PasswordEdit::Kind::Clear;
         editor->setPasswordHandler([&](PasswordEdit edit) { ++calls; last = edit.kind; if (edit.kind == PasswordEdit::Kind::Set) QVERIFY(edit.value.size() != 0); });
         editor->setPasswordState({{}, true, false, true, true}, true);
-        auto* delegate = qobject_cast<PropertyDelegate*>(tree->itemDelegate()); QSignalSpy variants(delegate, &PropertyDelegate::valueCommitted);
+        // Every user commit is a password handoff; the secret never passes through a grid value.
+        auto* delegate = editor; QSignalSpy variants(editor, &ProfileEditor::userCommitted);
         window.show();
         auto* line = qobject_cast<QLineEdit*>(gridEditor(window, "password")); QVERIFY(line);
         QCOMPARE(line->echoMode(), QLineEdit::Password); QVERIFY(line->text().isEmpty());
@@ -125,17 +122,16 @@ private slots:
         line = qobject_cast<QLineEdit*>(gridEditor(window, "password")); QVERIFY(line);
         QTest::keyClicks(line, "synthetic-focus-password"); QTest::mouseClick(focus, Qt::LeftButton); QTRY_VERIFY(focus->hasFocus());
         QTRY_VERIFY(!delegate->activeEditor()); QCOMPARE(calls, 3); assertSecretFree(window, "synthetic-focus-password"); editor->finishPasswordEdit();
-        editor->clearPassword(); QCOMPARE(calls, 4); QVERIFY(last == PasswordEdit::Kind::Clear); QCOMPARE(variants.count(), 0);
+        editor->clearPassword(); QCOMPARE(calls, 4); QVERIFY(last == PasswordEdit::Kind::Clear); QCOMPARE(variants.count(), calls);
         editor->requirePasswordReentry(); QVERIFY(editor->dirty()); editor->finishPasswordEdit(); QVERIFY(!editor->dirty());
     }
     void previewCannotStoreSecrets() {
-        QWidget window; auto* tree = new QTreeWidget(&window); tree->setObjectName("configTree"); auto* editor = new ProfileEditor(tree);
+        QWidget window; auto* tree = new QtTreePropertyBrowser(&window); tree->setObjectName("configGrid"); auto* editor = new ProfileEditor(tree);
         editor->load({{"id", "11111111-1111-4111-8111-111111111111"}, {"kind", "connection"}, {"name", "Preview"}}, {});
         editor->setPasswordState({{}, true, false, true, true}, true);
         QVERIFY(!gridRow(window, "password")->flags().testFlag(Qt::ItemIsEditable));
         QVERIFY(!editor->canEditPassword()); editor->editPassword(); editor->clearPassword(); QVERIFY(!editor->dirty());
-        auto* delegate = qobject_cast<PropertyDelegate*>(tree->itemDelegate());
-        QVERIFY(!delegate->activeEditor());
+        QVERIFY(!editor->activeEditor());
     }
     void folderPasswordInheritanceIsFileScoped() {
         QTemporaryDir dir; const auto a = dir.filePath("a.xml"), b = dir.filePath("b.xml");
@@ -348,7 +344,7 @@ private slots:
         QTRY_VERIFY(files->status(idA) && !files->status(idA)->busy && files->status(idB) && !files->status(idB)->busy);
         window.unlockConnectionFile(idA, master.clone()); QTRY_VERIFY(files->status(idA)->unlocked && !files->status(idA)->busy);
         window.unlockConnectionFile(idB, master.clone()); QTRY_VERIFY(files->status(idB)->unlocked && !files->status(idB)->busy);
-        QVERIFY(window.selectConnectionProfile({idA, Consumer})); auto* tree = window.findChild<QTreeWidget*>("configTree");
+        QVERIFY(window.selectConnectionProfile({idA, Consumer})); auto* tree = window.findChild<QTreeWidget*>("configView");
         auto* password = gridRow(window, "password"); QVERIFY(password); tree->setCurrentItem(password, 1); tree->scrollToItem(password);
         const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2, tree->visualItemRect(password).center().y());
         QContextMenuEvent event(QContextMenuEvent::Mouse, point, tree->viewport()->mapToGlobal(point)); QApplication::sendEvent(tree->viewport(), &event);
@@ -387,7 +383,7 @@ private slots:
             setGridText(window, "password", id == idA ? "synthetic-password-A" : "synthetic-password-B"); acceptReview(window); QVERIFY(settled(window, id));
             QVERIFY(window.selectConnectionProfile({id, Consumer})); window.connectSelected(true);
         }
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QVERIFY(tabs); QCOMPARE(tabs->count(), 2); QCOMPARE(window.sessionCount(), size_t(2));
+        auto tabs = sessionTabs(window); QVERIFY(tabs); QCOMPARE(tabs->count(), 2); QCOMPARE(window.sessionCount(), size_t(2));
         auto* paneA = qobject_cast<SessionPane*>(tabs->widget(0)); auto* paneB = qobject_cast<SessionPane*>(tabs->widget(1)); QVERIFY(paneA && paneB);
         QVERIFY(paneA->reference() == ProfileReference({idA, Consumer})); QVERIFY(paneB->reference() == ProfileReference({idB, Consumer}));
         QCOMPARE(paneA->target().host, QString("127.0.0.1")); QCOMPARE(paneB->target().host, QString("127.0.0.2"));
@@ -425,6 +421,35 @@ private slots:
         reply.reset(); files->lookup({id, Consumer}, original, [&](DocumentReply value) { reply.emplace(std::move(value)); });
         QTRY_VERIFY(reply.has_value()); QVERIFY(reply->result.ok && !reply->password);
         QVERIFY(!contents(path).contains("synthetic-host-password")); assertSecretFree(window, "synthetic-host-password");
+    }
+    void duplicateKeepsSavedPasswords() {
+        QTemporaryDir dir; const auto path = dir.filePath("duplicate.xml"); QVERIFY(fixture(path, "127.0.0.1"));
+        MainWindow window(path, true); window.show(); auto* files = window.findChild<DocumentService*>(); const auto id = window.connectionFiles().first();
+        QTRY_VERIFY(files->status(id) && !files->status(id)->busy); window.unlockConnectionFile(id, Secret(QByteArray("synthetic file master")));
+        QTRY_VERIFY(files->status(id)->unlocked && !files->status(id)->busy); QVERIFY(window.selectConnectionProfile({id, Folder}));
+        setGridText(window, "password", "synthetic-folder-password"); acceptReview(window); QVERIFY(settled(window, id));
+        QVERIFY(files->status(id)->passwords.value(Consumer).authorized);
+        SessionTarget target; target.host = "127.0.0.1"; target.username = "synthetic-user";
+        const auto password = [&](const QString& profile) {
+            std::optional<DocumentReply> reply; files->lookup({id, profile}, target, [&](DocumentReply value) { reply.emplace(std::move(value)); });
+            [&] { QTRY_VERIFY(reply.has_value()); }(); return reply && reply->result.ok && reply->password ? reply->password->takeBytes() : QByteArray();
+        };
+        const auto duplicate = [&] {
+            const auto before = files->status(id)->passwords.keys(); window.findChild<QAction*>("actionTreeDuplicate")->trigger(); [&] { QVERIFY(settled(window, id)); }();
+            [&] { QTRY_VERIFY(!before.contains(window.selectedId())); }(); return window.selectedId();
+        };
+        // A copied folder keeps its own password, and its copied child still inherits it, bound to the same account.
+        const auto folderCopy = duplicate(); QVERIFY(!folderCopy.isEmpty() && folderCopy != Folder);
+        const auto states = files->status(id)->passwords; QString childCopy;
+        for (auto it = states.begin(); it != states.end(); ++it) if (it.key() != Consumer && it.key() != Folder && it.key() != folderCopy) childCopy = it.key();
+        QVERIFY(!childCopy.isEmpty()); QVERIFY(states.value(folderCopy).local); QVERIFY(states.value(childCopy).inherited);
+        QVERIFY(states.value(childCopy).authorized); QCOMPARE(password(childCopy), QByteArray("synthetic-folder-password"));
+        // A connection with its own password copies it too.
+        QVERIFY(window.selectConnectionProfile({id, Consumer})); setGridText(window, "password", "synthetic-child-password"); acceptReview(window); QVERIFY(settled(window, id));
+        const auto connectionCopy = duplicate(); QVERIFY(files->status(id)->passwords.value(connectionCopy).local);
+        QVERIFY(files->status(id)->passwords.value(connectionCopy).authorized); QCOMPARE(password(connectionCopy), QByteArray("synthetic-child-password"));
+        QCOMPARE(password(Consumer), QByteArray("synthetic-child-password"));
+        QVERIFY(!contents(path).contains("synthetic-child-password")); assertSecretFree(window, "synthetic-child-password");
     }
     void changedProtocolKeepsSavedPasswordAndDefaultPort() {
         QTemporaryDir dir; const auto path = dir.filePath("protocol.xml"); QVERIFY(fixture(path, "127.0.0.1"));
@@ -576,7 +601,7 @@ private slots:
             auto* username = prompt->findChild<QLineEdit*>("usernameEdit"); QVERIFY(username); username->setFocus(); username->selectAll(); QTest::keyClicks(username, "session-only-user");
             auto* password = prompt->findChild<QLineEdit*>("passwordEdit"); QVERIFY(password); password->setFocus(); QTest::keyClicks(password, "synthetic-transient-password");
             QTest::mouseClick(prompt->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok), Qt::LeftButton);
-            auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_VERIFY2(tabs->count() == 1, qPrintable(window.lastError())); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
+            auto tabs = sessionTabs(window); QTRY_VERIFY2(tabs->count() == 1, qPrintable(window.lastError())); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
             QCOMPARE(pane->target().username, QString("session-only-user")); QCOMPARE(pane->profile().isEmpty(), temporary);
             if (temporary) QVERIFY(!pane->document().valid()); else QCOMPARE(pane->document(), id);
             window.closeTab(0); QCOMPARE(window.sessionCount(), size_t(0)); QCOMPARE(contents(path), before);
@@ -642,7 +667,7 @@ private slots:
         if (lockAfterReplace) {
             QCOMPARE(window.sessionCount(), size_t(0)); QVERIFY(!files->status(idA)->unlocked); QCOMPARE(window.selectedDocument(), idB);
         } else {
-            QTRY_COMPARE(window.sessionCount(), size_t(1)); auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+            QTRY_COMPARE(window.sessionCount(), size_t(1)); auto tabs = sessionTabs(window);
             auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); QVERIFY(pane->reference() == ProfileReference({idA, Consumer}));
             QCOMPARE(pane->target().host, QString("127.0.0.1")); QCOMPARE(pane->target().username, QString("synthetic-user")); window.closeTab(0);
         }
@@ -732,7 +757,7 @@ private slots:
         const Secret initial(QByteArray("mR3m")); auto saved = ConnectionXml::read(bytes, &initial); QVERIFY(saved && saved->passwordStates().value(profile).local);
         assertSecretFree(window, "synthetic-config-password");
         QCOMPARE(gridRow(window, "password")->text(1), QString(8, QChar(0x2022)));
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); auto* password = gridRow(window, "password");
+        auto* tree = window.findChild<QTreeWidget*>("configView"); auto* password = gridRow(window, "password");
         tree->setCurrentItem(password, 1); tree->scrollToItem(password);
         const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2, tree->visualItemRect(password).center().y());
         QContextMenuEvent event(QContextMenuEvent::Mouse, point, tree->viewport()->mapToGlobal(point)); QApplication::sendEvent(tree->viewport(), &event);
@@ -791,7 +816,7 @@ private slots:
             QTRY_VERIFY(reset.has_value()); QVERIFY(reset->result.ok && reset->committed);
         }
         QVERIFY(window.selectConnectionProfile({idA, Consumer})); window.connectSelected(false); QTRY_COMPARE(window.sessionCount(), size_t(1));
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* original = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(original); const auto oldSession = original->id();
+        auto tabs = sessionTabs(window); auto* original = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(original); const auto oldSession = original->id();
         window.disconnectCurrent(); QVERIFY(window.selectConnectionFile(idA)); window.findChild<QAction*>("actionLockPasswords")->trigger();
         QVERIFY(!files->status(idA)->unlocked && files->status(idB)->unlocked); QVERIFY(window.selectConnectionFile(idB)); const auto beforeA = contents(a), beforeB = contents(b);
         window.reconnectCurrent();

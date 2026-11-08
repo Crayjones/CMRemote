@@ -8,7 +8,9 @@
 #include <QPainterPath>
 #include <QPropertyAnimation>
 #include <QTimer>
-#include <QDockWidget>
+#include "DockAreaWidget.h"
+#include "DockAreaTitleBar.h"
+#include "AutoHideSideBar.h"
 #include <QEvent>
 #include <QFrame>
 #include <QLabel>
@@ -16,8 +18,6 @@
 #include <QMenuBar>
 #include <QStatusBar>
 #include <QStyle>
-#include <QTabBar>
-#include <QTabWidget>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -52,8 +52,8 @@ bool inDock(QWidget* window) {
 constexpr int RevealEdge = 3, RetractDelayMs = 900, InitialRetractDelayMs = 1500;
 }
 
-SessionFullscreenController::SessionFullscreenController(QMainWindow* window, QTabWidget* groups)
-    : QObject(window), window_(window), groups_(groups), tracker_(new QTimer(this)) {
+SessionFullscreenController::SessionFullscreenController(QMainWindow* window)
+    : QObject(window), window_(window), tracker_(new QTimer(this)) {
     setObjectName("sessionFullscreenController"); window_->installEventFilter(this);
     tracker_->setInterval(80); connect(tracker_, &QTimer::timeout, this, &SessionFullscreenController::track);
     minimizer_ = new QTimer(this); minimizer_->setInterval(200);
@@ -89,7 +89,7 @@ void SessionFullscreenController::setPinned(bool pinned) {
 }
 void SessionFullscreenController::place(bool shown, bool animate) {
     if (!row_) return;
-    auto* central = window_->centralWidget(); row_->adjustSize();
+    auto* central = surface(); row_->adjustSize();
     const QPoint target((central->width() - row_->width()) / 2, shown ? 0 : -row_->height());
     shown_ = shown; row_->raise();
     if (auto* running = row_->findChild<QPropertyAnimation*>()) { running->stop(); delete running; }
@@ -100,8 +100,8 @@ void SessionFullscreenController::place(bool shown, bool animate) {
 }
 void SessionFullscreenController::track() {
     if (!active_ || !row_) return;
-    const QPoint local = window_->centralWidget()->mapFromGlobal(QCursor::pos());
-    const bool atEdge = local.y() <= RevealEdge && local.x() >= 0 && local.x() < window_->centralWidget()->width();
+    const QPoint local = surface()->mapFromGlobal(QCursor::pos());
+    const bool atEdge = local.y() <= RevealEdge && local.x() >= 0 && local.x() < surface()->width();
     const QRect reach = QRect(row_->x(), 0, row_->width(), row_->height()).adjusted(-12, 0, 12, 24);
     if (!shown_) { if (atEdge) { awaySince_ = -1; place(true, true); } return; }
     if (pinned_) return;
@@ -112,35 +112,30 @@ void SessionFullscreenController::track() {
     else if (now - awaySince_ >= RetractDelayMs) { awaySince_ = -1; place(false, true); }
 }
 SessionFullscreenController::~SessionFullscreenController() { exit(); }
+// The window's dock manager, which the session's dock fills.
+QWidget* SessionFullscreenController::surface() const { return window_->centralWidget(); }
 SessionPane* SessionFullscreenController::target() const { return pane_.data(); }
 void SessionFullscreenController::suppress(QWidget* widget) {
     if (!widget || chrome_.contains(widget)) return;
     widget->setProperty("requestedVisible", !widget->isHidden()); widget->setProperty("presentationSuppressed", true);
     chrome_.append(widget); widget->hide();
 }
-void SessionFullscreenController::unframe(QTabWidget* tabs) {
-    // The style keeps a pane frame around each tab widget even with its bar
-    // hidden, which leaves a light border around the session.
-    if (!tabs || frames_.contains(tabs)) return;
-    tabs->setProperty("fullscreenStyleSheet", tabs->styleSheet()); frames_.append(tabs);
-    tabs->setStyleSheet(tabs->styleSheet() + "\nQTabWidget::pane { border: 0; margin: 0; padding: 0; }");
-}
-void SessionFullscreenController::enter(SessionPane* pane, QTabWidget* owner, const QString& title) {
-    auto* layout = qobject_cast<QVBoxLayout*>(window_->centralWidget()->layout());
-    if (!pane || !owner || owner->indexOf(pane) < 0 || !layout) return;
+void SessionFullscreenController::enter(SessionPane* pane, const QString& title) {
+    if (!pane || !surface() || !surface()->isAncestorOf(pane)) return;
     if (active_ && pane_ == pane) return;
-    exit(); pane_ = pane; owner_ = owner; focus_ = QApplication::focusWidget();
+    exit(); pane_ = pane; focus_ = QApplication::focusWidget();
     state_ = window_->windowState() & ~Qt::WindowMinimized;
     geometry_ = state_.testFlag(Qt::WindowMaximized) || state_.testFlag(Qt::WindowFullScreen) ? window_->normalGeometry() : window_->geometry();
     active_ = true; ++generation_;
-    for (auto* dock : window_->findChildren<QDockWidget*>()) suppress(dock);
+    // The session's tab and title bar, and any pinned-pane bars.
+    for (auto* title : window_->findChildren<ads::CDockAreaTitleBar*>()) suppress(title);
+    for (auto* bar : window_->findChildren<ads::CAutoHideSideBar*>()) suppress(bar);
     for (auto* toolbar : window_->findChildren<QToolBar*>()) suppress(toolbar);
     // statusBar() would create an empty bar that stays behind after exit.
     if (auto* status = window_->findChild<QStatusBar*>(QString(), Qt::FindDirectChildrenOnly)) suppress(status);
     if (!window_->menuBar()->isNativeMenuBar()) suppress(window_->menuBar());
-    suppress(groups_->tabBar()); suppress(owner->tabBar()); unframe(groups_); unframe(owner);
     // An overlay, not a layout row: the session keeps the whole screen.
-    auto* row = new QWidget(window_->centralWidget()); row_ = row; row->setObjectName("fullscreenControlsRow");
+    auto* row = new QWidget(surface()); row_ = row; row->setObjectName("fullscreenControlsRow");
     auto* centered = new QHBoxLayout(row); centered->setContentsMargins(0, 0, 0, 0);
     auto* bar = new QFrame(row); bar_ = bar; bar->setObjectName("fullscreenBar"); bar->setFrameShape(QFrame::StyledPanel);
     bar->setAutoFillBackground(true); bar->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed); bar->setMaximumWidth(500);
@@ -157,7 +152,7 @@ void SessionFullscreenController::enter(SessionPane* pane, QTabWidget* owner, co
     auto* minimize = button("minimizeFullscreenConnection", "Minimize", QStyle::SP_TitleBarMinButton);
     auto* leave = button("exitSessionFullscreen", "Exit fullscreen", QStyle::SP_TitleBarNormalButton);
     auto* close = button("closeFullscreenConnection", "Close connection", QStyle::SP_TitleBarCloseButton);
-    centered->addWidget(bar); row->show(); window_->centralWidget()->installEventFilter(this);
+    centered->addWidget(bar); row->show(); surface()->installEventFilter(this);
     connect(pin, &QToolButton::toggled, this, &SessionFullscreenController::setPinned);
     setPinned(pinned_); place(true, false); tracker_->start();
     connect(minimize, &QToolButton::clicked, this, [this] {
@@ -177,7 +172,7 @@ void SessionFullscreenController::exit() {
     if (!active_) return;
     active_ = false; ++generation_; disconnect(destroyed_); tracker_->stop(); awaySince_ = -1; shown_ = true;
     minimizing_ = minimized_ = false; minimizer_->stop(); const QPointer<SessionPane> left = pane_;
-    window_->centralWidget()->removeEventFilter(this);
+    surface()->removeEventFilter(this);
     if (row_) {
         for (auto* child : row_->findChildren<QObject*>()) { child->disconnect(this); child->setObjectName({}); }
         row_->setObjectName({}); row_->hide(); row_->deleteLater();
@@ -188,20 +183,15 @@ void SessionFullscreenController::exit() {
         widget->setProperty("presentationSuppressed", false); widget->setVisible(visible);
     }
     chrome_.clear();
-    for (const auto& tabs : frames_) if (tabs) tabs->setStyleSheet(tabs->property("fullscreenStyleSheet").toString());
-    frames_.clear();
     if (state_.testFlag(Qt::WindowFullScreen)) window_->showFullScreen();
     else if (state_.testFlag(Qt::WindowMaximized)) window_->showMaximized();
     else { window_->showNormal(); window_->setGeometry(geometry_); }
     if (focus_ && focus_->isVisible()) focus_->setFocus();
-    pane_.clear(); owner_.clear(); focus_.clear();
+    pane_.clear(); focus_.clear();
     emit exited(left);
 }
-void SessionFullscreenController::checkSelection(QTabWidget* current) {
-    if (active_ && (!pane_ || !owner_ || current != owner_ || owner_->currentWidget() != pane_)) exit();
-}
 bool SessionFullscreenController::eventFilter(QObject* watched, QEvent* event) {
-    if (active_ && watched == window_->centralWidget() && event->type() == QEvent::Resize) place(shown_, false);
+    if (active_ && watched == surface() && event->type() == QEvent::Resize) place(shown_, false);
     // Leaving fullscreen on the way to the Dock and back publishes intermediate states.
     if (watched == window_ && active_ && event->type() == QEvent::WindowStateChange && minimizing_) {
         if (inDock(window_)) minimized_ = true;

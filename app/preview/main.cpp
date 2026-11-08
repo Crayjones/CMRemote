@@ -10,7 +10,8 @@
 #include <QContextMenuEvent>
 #include <QMenu>
 #include <QTabBar>
-#include <QTabWidget>
+#include "DockWidget.h"
+#include "DockWidgetTab.h"
 #include <QToolBar>
 #include <QTreeWidget>
 #include <QListWidget>
@@ -23,14 +24,15 @@ bool openMenu(PreviewWindow& window, const QString& name) {
     QWidget* target = nullptr;
     QPoint position;
     if (name == "tree" || name == "config") {
-        auto* tree = window.findChild<QTreeWidget*>(name == "tree" ? "connectionTree" : "configTree");
+        auto* tree = window.findChild<QTreeWidget*>(name == "tree" ? "connectionTree" : "configView");
         auto* item = name == "tree" ? tree->topLevelItem(0)->child(0) : tree->currentItem();
         target = tree->viewport();
         position = tree->visualItemRect(item).center();
-    } else if (name == "session" || name == "group") {
-        auto* tabs = window.findChild<QTabWidget*>(name == "session" ? "sessionTabs" : "groupTabs");
-        target = tabs->tabBar();
-        position = tabs->tabBar()->tabRect(0).center();
+    } else if (name == "session") {
+        // The first session's tab, a Qt ADS dock tab.
+        auto* dock = window.findChild<ads::CDockWidget*>("previewSession1"); if (!dock) return false;
+        target = dock->tabWidget();
+        position = target->rect().center();
     } else if (name == "notifications") {
         auto* list = window.findChild<QListWidget*>("notificationsList");
         target = list->viewport();
@@ -68,21 +70,34 @@ int main(int argc, char** argv) {
     app.setOrganizationName("RemoteManager");
     app.setApplicationName("RemoteManager");
     Branding::initialize();
-    applyLightAppearance(app);
+    applyAppearance(app);
     QCommandLineParser parser;
     parser.setApplicationDescription("Standalone, non-networked WinForms-to-Qt shell preview");
     parser.addHelpOption();
     parser.addOption({"smoke", "Exit after displaying the window"});
     parser.addOption({"screenshot", "Save a widget capture and exit", "path"});
-    parser.addOption({"menu", "Open a preview context menu: tree, session, group, config, notifications, external-tools", "surface"});
+    parser.addOption({"select", "Select this connection tree entry first", "name"});
+    parser.addOption({"theme", "light (default) or dark", "theme", "light"});
+    parser.addOption({"menu", "Open a preview context menu: tree, session, config, notifications, external-tools", "surface"});
     parser.process(app);
-    const QStringList surfaces{"tree", "session", "group", "config", "notifications", "external-tools"};
+    const QStringList surfaces{"tree", "session", "config", "notifications", "external-tools"};
     if (parser.isSet("menu") && !surfaces.contains(parser.value("menu"))) {
         std::fprintf(stderr, "Unknown preview menu surface\n");
         return 1;
     }
+    if (parser.value("theme") != "light" && parser.value("theme") != "dark") {
+        std::fprintf(stderr, "Unknown preview theme\n");
+        return 1;
+    }
+    applyTheme(app, parser.value("theme"));
     PreviewWindow window;
     window.show();
+    if (parser.isSet("select")) {
+        auto* tree = window.findChild<QTreeWidget*>("connectionTree");
+        const auto found = tree->findItems(parser.value("select"), Qt::MatchExactly | Qt::MatchRecursive);
+        if (found.isEmpty()) { std::fprintf(stderr, "Unknown preview connection\n"); return 1; }
+        tree->setCurrentItem(found.first());
+    }
     if (parser.isSet("menu")) {
         QTimer::singleShot(200, &window, [&] {
             if (!openMenu(window, parser.value("menu"))) {

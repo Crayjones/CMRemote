@@ -1,0 +1,21 @@
+Qt Property Browser (QtTreePropertyBrowser, QtVariantPropertyManager, QtVariantEditorFactory)
+Upstream: https://github.com/qt/qttools, src/shared/qtpropertybrowser
+Tag v6.12.0, commit 613a6fbf0a7998010ab2fda260b64066d66a021d
+This is Qt's maintained Qt 6 port of the qt-solutions QtPropertyBrowser that Qt Designer
+uses; the qt-solutions original and its forks do not build against Qt 6.
+License: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+(per-file SPDX headers; LGPL-3.0-only.txt, GPL-2.0-only.txt and GPL-3.0-only.txt from
+qttools LICENSES/, unchanged). The same terms as the Qt libraries CMRemote already ships.
+
+Retained unchanged: qtpropertybrowser, qtpropertymanager, qteditorfactory,
+qttreepropertybrowser, qtvariantproperty and qtpropertybrowserutils (.cpp and _p.h),
+except one patch.
+Not retained: the button and group-box browsers and images/ (cursor-property icons).
+CMakeLists.txt here is CMRemote's own static build.
+
+CMRemote patch (src/qtpropertybrowser.cpp, ~QtAbstractPropertyBrowser, marked "CMRemote
+patch"): upstream keeps every browser's manager-to-factory bindings in process-global maps
+keyed by raw pointers and never removes them when the browser is destroyed. A later browser
+allocated at the same address then found the stale binding and called into the destroyed
+factory. The destructor now removes the browser's map entries (only map entries; it never
+calls the factory, which may already be gone).

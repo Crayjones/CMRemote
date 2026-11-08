@@ -20,6 +20,8 @@ public:
     void reject() override;
 signals:
     void applied(PreferenceValues values);
+    // The theme picked in the dialog, shown before it is saved; Cancel shows the saved one again.
+    void themePreviewed(const QString& theme);
 private:
     PreferenceValues read() const;
     void save(bool close);

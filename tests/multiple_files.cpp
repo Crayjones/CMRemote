@@ -105,7 +105,7 @@ private slots:
         auto* service = window.findChild<DocumentService*>(); const auto id = window.connectionFiles().first();
         QTRY_VERIFY(service->status(id) && !service->status(id)->busy);
         QVERIFY(window.selectConnectionProfile({id, Profile}));
-        auto* grid = window.findChild<QTreeWidget*>("configTree");
+        auto* grid = window.findChild<QTreeWidget*>("configView");
         auto* row = gridRow(window, "font_smoothing");
         auto* choice = qobject_cast<QComboBox*>(gridEditor(window, "font_smoothing")); QVERIFY(choice);
         const auto scroll = grid->verticalScrollBar()->value(); QVERIFY(scroll > 0);
@@ -134,10 +134,10 @@ private slots:
         QTRY_VERIFY(!window.findChild<ProfileEditor*>()->dirty() && !service->status(idA)->busy);
         QVERIFY(window.selectConnectionProfile({idB, Profile})); QCOMPARE(gridValue(window, "host").toString(), QString("localhost"));
         QVERIFY(gridValue(window, "description").toString() != "A only");
-        auto* grid = window.findChild<QTreeWidget*>("configTree"); auto* row = gridRow(window, "description");
+        auto* grid = window.findChild<QTreeWidget*>("configView"); auto* row = gridRow(window, "description");
         auto* edit = qobject_cast<QLineEdit*>(gridEditor(window, "description")); edit->setText("B active draft");
         bool refreshed = false; service->setFault(idA, AtomicFile::Fault::None, [&](DocumentReply) { refreshed = true; }); QTRY_VERIFY(refreshed);
-        QCOMPARE(grid->currentItem(), row); QVERIFY(edit == qobject_cast<PropertyDelegate*>(grid->itemDelegate())->activeEditor()); QCOMPARE(edit->text(), QString("B active draft"));
+        QCOMPARE(grid->currentItem(), row); QVERIFY(edit == grid->window()->findChild<ProfileEditor*>()->activeEditor()); QCOMPARE(edit->text(), QString("B active draft"));
         QTest::keyClick(edit, Qt::Key_Return); QTRY_VERIFY(!window.findChild<ProfileEditor*>()->dirty() && !service->status(idB)->busy);
         QVERIFY(window.selectConnectionProfile({idA, Profile})); QCOMPARE(gridValue(window, "description").toString(), QString("A only"));
         QVERIFY(window.selectConnectionProfile({idB, Profile})); QCOMPARE(gridValue(window, "description").toString(), QString("B active draft"));

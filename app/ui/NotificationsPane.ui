@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>NotificationsPane</class>
+ <widget class="QWidget" name="notificationsContents">
+  <property name="minimumSize"><size><width>0</width><height>95</height></size></property>
+  <layout class="QVBoxLayout" name="notificationsLayout">
+   <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+   <item><widget class="QSplitter" name="notificationSplitter">
+    <property name="orientation"><enum>Qt::Horizontal</enum></property>
+    <widget class="QWidget" name="notificationDetails">
+     <layout class="QVBoxLayout" name="notificationDetailsLayout">
+      <property name="spacing"><number>2</number></property>
+      <property name="leftMargin"><number>5</number></property><property name="topMargin"><number>3</number></property>
+      <property name="rightMargin"><number>5</number></property><property name="bottomMargin"><number>3</number></property>
+      <item><layout class="QHBoxLayout" name="notificationHeadingLayout">
+       <item><widget class="QLabel" name="notificationIcon"><property name="pixmap"><pixmap resource="preview-icons.qrc">:/original/StatusInformation_16x.png</pixmap></property></widget></item>
+       <item><widget class="QLabel" name="notificationDate"><property name="text"><string>UI preview</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
+      </layout></item>
+      <item><widget class="QPlainTextEdit" name="notificationText"><property name="readOnly"><bool>true</bool></property><property name="plainText"><string>No network sessions. Changes stay in memory.</string></property></widget></item>
+     </layout>
+    </widget>
+    <widget class="QListWidget" name="notificationsList"><property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property><item><property name="text"><string>Qt preview loaded — no network sessions or profile file access.</string></property></item></widget>
+   </widget></item>
+  </layout>
+ </widget>
+ <resources><include location="preview-icons.qrc"/></resources>
+ <connections/>
+</ui>

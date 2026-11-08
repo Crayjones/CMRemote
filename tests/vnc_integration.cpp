@@ -12,7 +12,9 @@
 #include <QContextMenuEvent>
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QDockWidget>
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
@@ -31,7 +33,7 @@
 #include <QScreen>
 #include <QSignalSpy>
 #include <QTabBar>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
@@ -111,7 +113,7 @@ bool fixtureRequiresPassword(bool required) {
 }
 bool noPasswordPrompt(MainWindow& window) { return !window.findChild<VncCredentialsDialog*>(); }
 SessionPane* launch(MainWindow& window, bool temporary = false) {
-    auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); if (!tabs) return nullptr;
+    auto tabs = sessionTabs(window); if (!tabs) return nullptr;
     QPointer<SessionPane> previous = qobject_cast<SessionPane*>(tabs->currentWidget());
     if (!QTest::qWaitFor([&] { return window.documentState() == MainWindow::DocumentState::Open; }, 8000)) return nullptr;
     const int before = oracle("/state").value("accepted").toInt(-1);
@@ -278,13 +280,13 @@ class VncIntegration final : public QObject {
     }
     bool reconnect(MainWindow& window, QPointer<SessionPane> old) {
         window.reconnectCurrent();
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+        auto tabs = sessionTabs(window);
         return QTest::qWaitFor([&] { return tabs->currentWidget() && tabs->currentWidget() != old.data(); }, 8000) &&
             ready(qobject_cast<SessionPane*>(tabs->currentWidget())) && noPasswordPrompt(window);
     }
 private slots:
     void initTestCase() {
-        applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false);
+        applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false);
         // The runner's manifest is opt-in and owner-scoped. Cocoa already forwards
         // XDG_CONFIG_HOME; no test port is smuggled through unrelated credential env vars.
         const auto build = QDir(qEnvironmentVariable("RM_BUILD_DIR")).canonicalPath();
@@ -449,9 +451,9 @@ private slots:
         MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
         QVERIFY(activate(window, true)); auto* pane = launch(window); QVERIFY(pane); QVERIFY(ready(pane));
         auto* view = pane->findChild<VncDesktopView*>(); const int client = newestClient(); QVERIFY(presentation(window, pane, client));
-        auto* connections = window.findChild<QDockWidget*>("connectionsDock"); auto* config = window.findChild<QDockWidget*>("configDock");
+        auto* connections = window.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = window.findChild<ads::CDockWidget*>("configDock");
         auto* sessionFull = window.findChild<QAction*>("actionTabFullscreen"); auto* appFull = window.findChild<QAction*>("actionFullscreen");
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QVERIFY(connections && config && sessionFull && appFull && tabs);
+        auto tabs = sessionTabs(window); QVERIFY(connections && config && sessionFull && appFull && tabs);
         config->hide(); QTest::qWait(100);
         const auto geometry = window.geometry(); auto* const viewParent = view->parentWidget(); auto* const paneParent = pane->parentWidget();
         const auto session = pane->id(); const auto target = pane->target(); const auto margins = pane->layout()->contentsMargins();
@@ -466,7 +468,7 @@ private slots:
         QVERIFY(presentation(window, pane, client));
         auto* exit = full->findChild<QToolButton*>("exitSessionFullscreen"); QVERIFY(exit); exit->click();
         QTRY_VERIFY_WITH_TIMEOUT(!window.sessionFullscreenWindow(), 8000); QCOMPARE(tabs->indexOf(pane), 0); QCOMPARE(pane->parentWidget(), paneParent);
-        QCOMPARE(window.geometry(), geometry); QVERIFY(connections->isVisible()); QVERIFY(config->isHidden()); QVERIFY(tabs->tabBar()->isVisible());
+        QCOMPARE(window.geometry(), geometry); QVERIFY(connections->isVisible()); QVERIFY(config->isHidden()); QVERIFY(tabs->tabBarVisible());
         QVERIFY(presentation(window, pane, client));
         // Application fullscreen is independent of session fullscreen.
         appFull->setChecked(true); QTRY_VERIFY_WITH_TIMEOUT(window.isFullScreen(), 8000); QVERIFY(connections->isVisible());
@@ -492,7 +494,7 @@ private slots:
         QCOMPARE(view->cursor().shape(), Qt::ArrowCursor); QTRY_COMPARE_WITH_TIMEOUT(VncWorker::activeWorkers(), 0, 8000);
         const int before = oracle("/state").value("authenticated").toInt();
         QVERIFY(reconnect(window, saved));
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QPointer<SessionPane> replacement = qobject_cast<SessionPane*>(tabs->currentWidget());
+        auto tabs = sessionTabs(window); QPointer<SessionPane> replacement = qobject_cast<SessionPane*>(tabs->currentWidget());
         QVERIFY(replacement); QVERIFY(replacement->id() != originalSession); QVERIFY(replacement->target() == target);
         QTRY_VERIFY(saved.isNull()); QTRY_COMPARE_WITH_TIMEOUT(oracle("/state").value("authenticated").toInt(), before + 1, 5000);
         client = newestClient(); QVERIFY(presentation(window, replacement, client));
@@ -527,13 +529,13 @@ private slots:
             QCOMPARE(dialog->windowModality(), Qt::ApplicationModal); QVERIFY(dialog->frameGeometry().height() > dialog->geometry().height());
             QTest::qWait(300);
             if (screenCaptureAllowed()) QVERIFY(screen->grabWindow(0, frame.x(), frame.y(), frame.width(), frame.height()).save(evidence + "/password-dialog.png"));
-            QVERIFY(window.findChild<QDockWidget*>("configDock")->grab().save(evidence + "/vnc-config.png"));
+            QVERIFY(window.findChild<ads::CDockWidget*>("configDock")->grab().save(evidence + "/vnc-config.png"));
         }
         if (nativePlatform()) { QTRY_VERIFY_WITH_TIMEOUT(input->hasFocus(), 5000); QTest::keyClicks(input, "password"); }
         else input->setText("password");
         QTest::keyClick(input, Qt::Key_Return);
         QTRY_VERIFY_WITH_TIMEOUT(!window.findChild<VncCredentialsDialog*>(), 5000);
-        auto* pane = qobject_cast<SessionPane*>(window.findChild<QTabWidget*>("sessionTabs")->currentWidget()); QVERIFY(ready(pane));
+        auto* pane = qobject_cast<SessionPane*>(sessionTabs(window)->currentWidget()); QVERIFY(ready(pane));
         QVERIFY(clientState(client).value("password_accepted").toBool()); QVERIFY(presentation(window, pane, client));
         QVERIFY(fixtureRequiresPassword(false)); window.close(); QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 8000);
     }

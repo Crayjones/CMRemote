@@ -31,7 +31,7 @@
 #include <QSpinBox>
 #include <QTcpSocket>
 #include <QTemporaryDir>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTest>
 #include <QTimer>
 #include <QWindow>
@@ -107,7 +107,7 @@ bool command(TerminalView* view, const QString& text) {
     QTest::keyClick(view, Qt::Key_Return); return true;
 }
 SessionPane* launch(MainWindow& window, bool temporary = false, DocumentId document = {}) {
-    auto* tabs = window.findChild<QTabWidget*>("sessionTabs");
+    auto tabs = sessionTabs(window);
     QPointer<SessionPane> previous = qobject_cast<SessionPane*>(tabs->currentWidget());
     const auto attached = [&] { auto* pane = qobject_cast<SessionPane*>(tabs->currentWidget()); return pane && pane != previous; };
     if (!QTest::qWaitFor([&] { return window.documentState() == MainWindow::DocumentState::Open; }, 15000)) return nullptr;
@@ -138,7 +138,7 @@ class SshIntegration : public QObject {
     Q_OBJECT
 private slots:
     void initTestCase() {
-        applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false);
+        applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false);
         QVERIFY(QDir().mkpath(qEnvironmentVariable("RM_BUILD_DIR") + "/test-data"));
         QVERIFY(!qgetenv("RM_SSH_TEST_PASSWORD").isEmpty()); QVERIFY(!qgetenv("RM_SSH_TEST_PASSPHRASE").isEmpty());
         QVERIFY(qEnvironmentVariableIntValue("RM_SSH_TEST_PORT") > 0 && authCount() >= 0);
@@ -295,7 +295,7 @@ private slots:
         QVERIFY(fixture(path)); auto endpoint = std::make_shared<TestClipboardEndpoint>(); MainWindow window(path, true, nullptr, endpoint, trust, settings); QVERIFY(show(window));
         auto* pane = launch(window); QVERIFY(pane); QVERIFY(approve(pane)); QVERIFY(ready(pane)); auto* view = pane->findChild<TerminalView*>();
         auto* other = launch(window, true); QVERIFY(other); QVERIFY(approve(other)); QVERIFY(ready(other)); auto* otherView = other->findChild<TerminalView*>();
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); tabs->setCurrentWidget(pane); QVERIFY(show(window)); view->setFocus(); QTRY_VERIFY(view->hasFocus());
+        auto tabs = sessionTabs(window); tabs->setCurrentWidget(pane); QVERIFY(show(window)); view->setFocus(); QTRY_VERIFY(view->hasFocus());
         const auto session = pane->id(), otherSession = other->id(); const auto target = pane->target(); const int authenticated = authCount();
         const auto xmlBytes = contents(path), trustBytes = contents(trust), settingsBytes = contents(settings);
         const auto otherCells = otherView->screen()->cells(); const auto otherText = visibleText(otherView);
@@ -340,7 +340,7 @@ private slots:
         auto endpoint = std::make_shared<TestClipboardEndpoint>(); MainWindow window(path, true, nullptr, endpoint, trust, settings); QVERIFY(show(window));
         auto* pane = launch(window); QVERIFY(pane); QVERIFY(approve(pane)); QVERIFY(ready(pane)); auto* view = pane->findChild<TerminalView*>();
         auto* other = launch(window, true); QVERIFY(other); QVERIFY(ready(other)); auto* otherView = other->findChild<TerminalView*>();
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); tabs->setCurrentWidget(pane); QVERIFY(show(window)); view->setFocus(); QTRY_VERIFY(view->hasFocus());
+        auto tabs = sessionTabs(window); tabs->setCurrentWidget(pane); QVERIFY(show(window)); view->setFocus(); QTRY_VERIFY(view->hasFocus());
         const auto session = pane->id(); const auto target = pane->target(); const int authenticated = authCount();
         const auto xmlBytes = contents(path), settingBytes = contents(settings), trustBytes = contents(trust); const auto cells = view->screen()->cells(), otherCells = otherView->screen()->cells();
         QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier | Qt::ShiftModifier); QCOMPARE(view->appearance().fontSize, 13); QVERIFY(view->screen()->cells() != cells);
@@ -355,8 +355,7 @@ private slots:
         auto* dialog = window.findChild<OptionsDialog*>(); dialog->findChild<QSpinBox*>("fontSize")->setValue(16);
         dialog->findChild<QDialogButtonBox*>("buttons")->button(QDialogButtonBox::Ok)->click(); QTRY_COMPARE(view->appearance().fontSize, 17); QCOMPARE(otherView->appearance().fontSize, 16);
         QTRY_VERIFY(!window.findChild<OptionsDialog*>()); const auto applied = contents(settings);
-        const auto point = tabs->tabBar()->tabRect(tabs->indexOf(pane)).center();
-        QContextMenuEvent context(QContextMenuEvent::Mouse, point, tabs->tabBar()->mapToGlobal(point)); QApplication::sendEvent(tabs->tabBar(), &context);
+        openTabMenu(tabs, tabs->indexOf(pane));
         auto* menu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu); auto* different = menu->findChild<QAction*>("actionDifferentCredentials"); QVERIFY(different && different->isEnabled()); different->trigger(); menu->close();
         QTRY_VERIFY(window.findChild<SshCredentialsDialog*>()); window.findChild<SshCredentialsDialog*>()->reject(); QTRY_VERIFY(!window.findChild<SshCredentialsDialog*>());
         QCOMPARE(view->appearance().fontSize, 17); QCOMPARE(pane->id(), session); QVERIFY(pane->target() == target); QCOMPARE(authCount(), authenticated);

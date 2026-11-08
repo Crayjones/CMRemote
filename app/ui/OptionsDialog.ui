@@ -34,7 +34,6 @@
       <item><widget class="QLabel" name="panelsTitle"><property name="text"><string>Toolbars</string></property></widget></item>
       <item><widget class="QCheckBox" name="quickConnect"><property name="text"><string>Show Quick Connect toolbar</string></property></widget></item>
       <item><widget class="QCheckBox" name="lockToolbars"><property name="text"><string>Lock toolbar positions</string></property></widget></item>
-      <item><widget class="QCheckBox" name="showPanels"><property name="text"><string>Show connection panel tabs (View → Panel Tabs)</string></property></widget></item>
       <item><spacer name="panelsSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
      </layout></widget>
      <widget class="QWidget" name="rdpPage"><layout class="QVBoxLayout" name="rdpLayout">

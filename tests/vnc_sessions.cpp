@@ -25,7 +25,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTabBar>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -403,10 +403,9 @@ private slots:
         auto* fullscreen = window.findChild<QAction*>("actionTabFullscreen"); QVERIFY(fullscreen && fullscreen->isEnabled());
         // Fullscreen applies to every session type (SSH included); VNC keeps its own pane.
         window.setQuickConnectProtocol("ssh"); window.quickConnect("localhost", true); QVERIFY(fullscreen->isEnabled());
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QVERIFY(tabs); QCOMPARE(tabs->count(), 2);
+        auto tabs = sessionTabs(window); QVERIFY(tabs); QCOMPARE(tabs->count(), 2);
         QPointer<SessionPane> ssh = qobject_cast<SessionPane*>(tabs->widget(1)); QVERIFY(ssh && ssh->findChild<TerminalView*>());
-        QContextMenuEvent event(QContextMenuEvent::Mouse, tabs->tabBar()->tabRect(0).center(), tabs->tabBar()->mapToGlobal(tabs->tabBar()->tabRect(0).center()));
-        QApplication::sendEvent(tabs->tabBar(), &event); auto* menu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
+        openTabMenu(tabs, 0); auto* menu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(menu);
         auto* capturedFullscreen = menu->findChild<QAction*>("actionTabFullscreen"); QVERIFY(capturedFullscreen && capturedFullscreen->isEnabled());
         menu->close(); capturedFullscreen->trigger(); QPointer<QMainWindow> full;
         QTRY_VERIFY((full = window.sessionFullscreenWindow()) && full->isFullScreen()); QVERIFY(full->isAncestorOf(vnc)); QVERIFY(!window.isFullScreen());

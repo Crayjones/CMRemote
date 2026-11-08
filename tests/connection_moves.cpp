@@ -19,7 +19,7 @@
 #include <QJsonDocument>
 #include <QMimeData>
 #include <QSignalSpy>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTreeWidgetItemIterator>
@@ -194,7 +194,7 @@ private slots:
         QVERIFY(window.findChild<QAction*>("actionTreeConnect")->isEnabled());
 #endif
         window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_COMPARE(tabs->count(), 2); QCOMPARE(window.sessionCount(), size_t(2));
+        auto tabs = sessionTabs(window); QTRY_COMPARE(tabs->count(), 2); QCOMPARE(window.sessionCount(), size_t(2));
         auto* paneA = qobject_cast<SessionPane*>(tabs->widget(0)); auto* paneB = qobject_cast<SessionPane*>(tabs->widget(1)); QVERIFY(paneA && paneB);
         QCOMPARE(paneA->profile(), first); QCOMPARE(paneA->target().username, QString("folder-user"));
         QCOMPARE(paneB->profile(), second); QCOMPARE(paneB->target().username, QString("own-user"));
@@ -257,7 +257,7 @@ private slots:
         setGridText(window, "domain", "OLD"); QVERIFY(waitGridSaved(window)); setGridChoice(window, "resolution", "1280x720"); QVERIFY(waitGridSaved(window));
         const auto id = add(window, false, "Host"); setGridText(window, "host", "localhost"); QVERIFY(waitGridSaved(window));
         const auto local = stored(path, id).value("overrides"); window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); const auto session = pane->id(); const auto capture = pane->target();
+        auto tabs = sessionTabs(window); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane); const auto session = pane->id(); const auto capture = pane->target();
         tree->setCurrentItem(item(tree, {})); const auto destination = add(window, true, "New defaults");
         setGridText(window, "domain", "NEW"); QVERIFY(waitGridSaved(window));
         setGridChoice(window, "resolution", "800x600"); QVERIFY(waitGridSaved(window)); setGridChoice(window, "color_depth", 16); QVERIFY(waitGridSaved(window));
@@ -332,7 +332,7 @@ private slots:
         QVERIFY(store.xml()->password(master, id, target));
         MainWindow window(path, true); window.show(); QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open);
         auto* tree = window.findChild<ConnectionTree*>("connectionTree"); tree->setCurrentItem(item(tree, id)); window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QTRY_COMPARE(tabs->count(), 1); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
+        auto tabs = sessionTabs(window); QTRY_COMPARE(tabs->count(), 1); auto* pane = qobject_cast<SessionPane*>(tabs->widget(0)); QVERIFY(pane);
         const auto session = pane->id(); QCOMPARE(pane->target().domain, QString("OLD"));
         auto mime = dragData(tree, id); QVERIFY(drop(tree, mime.get(), destination)); QTRY_COMPARE(stored(path, id).value("parent").toString(), destination); QVERIFY(waitGridSaved(window));
         QCOMPARE(pane->id(), session); QCOMPARE(pane->target().domain, QString("OLD"));

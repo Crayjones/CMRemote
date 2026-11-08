@@ -2,7 +2,6 @@
 #include "PreviewData.h"
 #include "Branding.h"
 #include "ProfileEditor.h"
-#include "PropertyDelegate.h"
 #include <QAbstractButton>
 #include <QAction>
 #include <QClipboard>
@@ -14,7 +13,9 @@
 #include <QPointer>
 #include <QTabBar>
 #include <QComboBox>
-#include <QDockWidget>
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
 #include <QImageReader>
 #include <QLabel>
 #include <QLineEdit>
@@ -22,7 +23,9 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QPlainTextEdit>
-#include <QTabWidget>
+#include "DockAreaWidget.h"
+#include "DockWidgetTab.h"
+#include <QPointer>
 #include <QTest>
 #include <QToolBar>
 #include <QToolButton>
@@ -33,6 +36,37 @@
 QStringList nativeMenuTitles(const QString& parent = {});
 bool triggerNativeMenuItem(const QString& parent, const QString& title);
 #endif
+
+// A panel of preview session tabs: the Qt ADS dock area holding them, read like
+// the QTabWidget panels used to be.
+struct Tabs {
+    QPointer<ads::CDockAreaWidget> area;
+    const Tabs* operator->() const { return this; }
+    QList<ads::CDockWidget*> docks() const {
+        QList<ads::CDockWidget*> result;
+        if (area) for (auto* dock : area->dockWidgets()) if (dock->property("sessionDock").toBool()) result.append(dock);
+        return result;
+    }
+    int count() const { return int(docks().size()); }
+    ads::CDockWidget* dock(int index) const { const auto all = docks(); return index >= 0 && index < all.size() ? all.at(index) : nullptr; }
+    QWidget* widget(int index) const { auto* found = dock(index); return found ? found->widget() : nullptr; }
+    ads::CDockWidgetTab* tab(int index) const { auto* found = dock(index); return found ? found->tabWidget() : nullptr; }
+    int indexOf(QWidget* page) const { const auto all = docks(); for (int i = 0; i < all.size(); ++i) if (all.at(i)->widget() == page) return i; return -1; }
+    QWidget* currentWidget() const { return area && area->currentDockWidget() ? area->currentDockWidget()->widget() : nullptr; }
+    int currentIndex() const { return indexOf(currentWidget()); }
+    QString tabText(int index) const { auto* found = dock(index); return found ? found->windowTitle() : QString(); }
+    QIcon tabIcon(int index) const { auto* found = dock(index); return found ? found->icon() : QIcon(); }
+    // Reorders like dragging the tab within its panel.
+    void moveTab(int from, int to) const { area->dockManager()->addDockWidgetTabToArea(dock(from), area, int(area->dockWidgets().indexOf(dock(to)))); }
+    // The tab's close button, after Qt ADS hands the request to the preview.
+    void close(int index) const { dock(index)->requestCloseDockWidget(); QCoreApplication::sendPostedEvents(); }
+};
+static Tabs general(QWidget& window) { return {window.findChild<ads::CDockWidget*>("documentsDock")->dockAreaWidget()}; }
+static Tabs panelOf(QWidget* page) {
+    for (auto* widget = page ? page->parentWidget() : nullptr; widget; widget = widget->parentWidget())
+        if (auto* dock = qobject_cast<ads::CDockWidget*>(widget)) return {dock->dockAreaWidget()};
+    return {};
+}
 
 class PreviewTest : public QObject {
     Q_OBJECT
@@ -58,8 +92,8 @@ private:
         tree->scrollToItem(node);
         return context(tree->viewport(), tree->visualItemRect(node).center());
     }
-    QMenu* tabMenu(QTabWidget* tabs, int index) {
-        return context(tabs->tabBar(), tabs->tabBar()->tabRect(index).center());
+    QMenu* tabMenu(const Tabs& tabs, int index) {
+        auto* tab = tabs.tab(index); return tab ? context(tab, tab->rect().center()) : nullptr;
     }
     QAction* command(QMenu* menu, const char* name) {
         for (auto* action : menu->actions()) {
@@ -107,12 +141,7 @@ private slots:
         QCOMPARE(QGuiApplication::applicationDisplayName(), QString("CMRemote"));
         QCOMPARE(QGuiApplication::desktopFileName(), QString("org.remotemanager.RemoteManager"));
         QCOMPARE(window.windowTitle(), QString("CMRemote — Qt UI preview"));
-        auto* groups = get<QTabWidget>(window, "groupTabs");
-        const int general = groups->indexOf(get<QWidget>(window, "generalPanel")); QVERIFY(general >= 0);
-        get<QAction>(window, "actionAddPanel")->trigger();
-        QCOMPARE(groups->count(), 2);
-        const QList<QIcon> icons{Branding::applicationIcon(), QGuiApplication::windowIcon(), window.windowIcon(),
-                                 groups->tabIcon(general), groups->tabIcon(groups->currentIndex())};
+        const QList<QIcon> icons{Branding::applicationIcon(), QGuiApplication::windowIcon(), window.windowIcon()};
         for (const auto& icon : icons) {
             QCOMPARE(icon.availableSizes().size(), 9);
             for (const int size : {16, 24, 32, 48, 64, 128, 256, 512, 1024}) {
@@ -144,7 +173,7 @@ private slots:
     void previewCannotStoreSecrets() {
         PreviewWindow window; show(window);
         auto* tree = get<QTreeWidget>(window, "connectionTree"); tree->setCurrentItem(tree->topLevelItem(0)->child(0));
-        auto* config = get<QTreeWidget>(window, "configTree"); QTreeWidgetItem* password = nullptr;
+        auto* config = get<QTreeWidget>(window, "configView"); QTreeWidgetItem* password = nullptr;
         for (QTreeWidgetItemIterator it(config); *it; ++it) if ((*it)->text(0) == "Password") password = *it;
         QVERIFY(password); QVERIFY(!(password->flags() & Qt::ItemIsEditable)); QCOMPARE(password->text(1), QString("Unavailable"));
         config->setCurrentItem(password, 1); config->setFocus(); QTest::keyClick(config, Qt::Key_Return); QTest::keyClick(config, Qt::Key_F2);
@@ -159,7 +188,7 @@ private slots:
         show(window);
         auto* tree = get<QTreeWidget>(window, "connectionTree");
         tree->setCurrentItem(tree->topLevelItem(0));
-        auto* config = get<QTreeWidget>(window, "configTree");
+        auto* config = get<QTreeWidget>(window, "configView");
         QCOMPARE(config->columnCount(), 2);
         QCOMPARE(config->topLevelItem(0)->text(0), QString("Display"));
         auto* name = config->topLevelItem(0)->child(0);
@@ -198,19 +227,20 @@ private slots:
         PreviewWindow window; show(window);
         QStringList top; for (auto* action : window.menuBar()->actions()) top << action->text().remove('&'); QCOMPARE(top, QStringList({"File", "View", "Tools", "Help"}));
         QStringList order; for (auto* action : get<QMenu>(window, "menuView")->actions()) order << (action->isSeparator() ? "|" : action->text());
-        QCOMPARE(order, QStringList({"Add Connection Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
+        QCOMPARE(order, QStringList({"New Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
         QCOMPARE(get<QAction>(window, "actionViewConfig")->menuRole(), QAction::NoRole);
         QCOMPARE(get<QAction>(window, "actionOptions")->menuRole(), QAction::PreferencesRole);
         QVERIFY(!get<QAction>(window, "actionViewScreenshots")->isEnabled()); QVERIFY(!get<QAction>(window, "actionExternalTools")->isEnabled());
         auto* tree = get<QTreeWidget>(window, "connectionTree"); QVERIFY(!tree->dragEnabled()); QCOMPARE(tree->topLevelItem(0)->text(0), QString("Connections"));
         int roots = 0; for (int i = 0; i < tree->topLevelItemCount(); ++i) if (tree->topLevelItem(i)->text(0) == "Connections") ++roots; QCOMPARE(roots, 1);
-        auto* grid = get<QTreeWidget>(window, "configTree"); QCOMPARE(grid->columnCount(), 2); QVERIFY(grid->findChildren<QLineEdit*>().isEmpty());
+        auto* grid = get<QTreeWidget>(window, "configView"); QCOMPARE(grid->columnCount(), 2); QVERIFY(grid->findChildren<QLineEdit*>().isEmpty());
         QCOMPARE(get<QToolBar>(window, "connectionsToolbar")->actions().size(), 4);
         for (auto* child : window.findChildren<QObject*>()) QVERIFY(QByteArray(child->metaObject()->className()) != "VaultService");
-        auto* groups = get<QTabWidget>(window, "groupTabs"); auto* tabs = get<QTabWidget>(window, "sessionTabs"); auto* page = tabs->widget(0);
+        auto tabs = general(window); auto* page = tabs->widget(0);
+        quick(window, "second-host"); QCOMPARE(tabs->count(), 2); QVERIFY(tabs->currentWidget() != page);
         auto* jump = get<QMenu>(window, "menuJumpTo"); jump->popup(window.mapToGlobal(window.rect().center())); QTRY_VERIFY(jump->actions().size() >= 9); jump->hide();
         QAction* target = nullptr; for (auto* action : jump->actions()) if (action->data().value<QWidget*>() == page) target = action; QVERIFY(target);
-        get<QAction>(window, "actionAddPanel")->trigger(); QCOMPARE(groups->count(), 2); target->trigger(); QCOMPARE(groups->currentWidget(), groups->widget(0)); QCOMPARE(tabs->currentWidget(), page); QCOMPARE(tabs->count(), 1);
+        target->trigger(); QCOMPARE(tabs->currentWidget(), page); QCOMPARE(tabs->count(), 2);
         QVERIFY(get<QLabel>(window, "sessionMessage")->text().contains("no network connection"));
     }
     void sourceMenusAndDockGeometry() {
@@ -225,22 +255,23 @@ private slots:
         for (const auto* name : {"actionUnlockPasswords", "actionLockPasswords", "actionChangeMaster", "actionDifferentCredentials"}) {
             auto* action = get<QAction>(window, name); QVERIFY(!action->isEnabled()); QVERIFY(!action->isVisible());
         }
-        auto* connections = get<QDockWidget>(window, "connectionsDock");
-        auto* config = get<QDockWidget>(window, "configDock");
-        auto* notifications = get<QDockWidget>(window, "notificationsDock");
+        auto* connections = get<ads::CDockWidget>(window, "connectionsDock");
+        auto* config = get<ads::CDockWidget>(window, "configDock");
+        auto* notifications = get<ads::CDockWidget>(window, "notificationsDock");
         auto* quick = get<QToolBar>(window, "quickConnectToolbar");
-        QCOMPARE(window.dockWidgetArea(connections), Qt::LeftDockWidgetArea);
-        QCOMPARE(window.dockWidgetArea(config), Qt::LeftDockWidgetArea);
-        QCOMPARE(window.dockWidgetArea(notifications), Qt::BottomDockWidgetArea);
-        QCOMPARE(connections->x(), config->x());
+        // Docks live in separate dock areas: compare where they sit in the window.
+        const auto place = [&window](QWidget* widget) { return QRect(widget->mapTo(&window, QPoint()), widget->size()); };
+        QWidget* documents = general(window).area.data(); QVERIFY(documents);
+        QVERIFY(place(connections).right() < place(documents).left()); QVERIFY(place(config).right() < place(documents).left());
+        QCOMPARE(place(connections).x(), place(config).x());
         QCOMPARE(connections->width(), config->width());
-        QVERIFY(connections->geometry().bottom() < config->geometry().top());
-        QVERIFY(notifications->isHidden()); QVERIFY(!get<QAction>(window, "actionViewNotifications")->isChecked());
+        QVERIFY(place(connections).bottom() < place(config).top());
+        QVERIFY(notifications->isClosed()); QVERIFY(!get<QAction>(window, "actionViewNotifications")->isChecked());
         QVERIFY(quick->width() < window.width() / 2);
         get<QAction>(window, "actionViewNotifications")->trigger(); QTest::qWait(80);
-        QVERIFY(config->geometry().bottom() < notifications->geometry().top());
-        QVERIFY(quick->geometry().bottom() < connections->geometry().top());
-        QVERIFY(notifications->x() <= connections->x());
+        QVERIFY(place(config).bottom() < place(notifications).top());
+        QVERIFY(place(quick).bottom() < place(connections).top());
+        QVERIFY(place(notifications).x() <= place(connections).x());
         QVERIFY(notifications->width() >= window.width() - 4);
         auto* combo = get<QComboBox>(window, "quickConnectCombo");
         QVERIFY(combo->isVisible());
@@ -273,23 +304,23 @@ private slots:
         auto* tree = get<QTreeWidget>(window, "connectionTree");
         auto* root = tree->topLevelItem(0);
         auto* server = root->child(0);
-        auto* properties = get<QTreeWidget>(window, "configTree");
+        auto* properties = get<QTreeWidget>(window, "configView");
         auto* title = get<QLabel>(window, "configHelpTitle");
         QCOMPARE(properties->topLevelItem(0)->text(0), QString("Display"));
         QCOMPARE(title->text(), QString("Name"));
         QCOMPARE(properties->topLevelItem(0)->child(0)->text(1), QString("Connections"));
         tree->setCurrentItem(server);
-        QCOMPARE(properties->topLevelItemCount(), 2);
-        auto* port = properties->topLevelItem(1)->child(2);
-        QCOMPARE(port->text(0), QString("Port"));
+        // The real Config grid over in-memory sample settings.
+        auto* editor = window.findChild<ProfileEditor*>(); QVERIFY(editor);
+        auto* port = editor->row("port"); QVERIFY(port && !port->isHidden());
+        QCOMPARE(port->text(0), QString("Port")); QCOMPARE(port->text(1), QString("3389")); QCOMPARE(port->parent()->text(0), QString("Protocol"));
         properties->setCurrentItem(port);
         QCOMPARE(title->text(), QString("Port"));
-        QVERIFY(get<QLabel>(window, "configHelpText")->text().contains("Default RDP port"));
+        QVERIFY(get<QLabel>(window, "configHelpText")->text().contains("port the selected protocol"));
         get<QAction>(window, "actionInheritance")->trigger();
-        QCOMPARE(properties->topLevelItem(0)->text(0), QString("Inheritance"));
+        QCOMPARE(editor->row("port")->text(0), QString("Inherit Port"));
         get<QAction>(window, "actionAlphabetical")->trigger();
-        QCOMPARE(properties->topLevelItemCount(), 3);
-        QCOMPARE(properties->topLevelItem(0)->text(0), QString("Hostname / IP"));
+        QVERIFY(!editor->row("port")->parent());
         tree->setCurrentItem(root);
         QVERIFY(!get<QAction>(window, "actionInheritance")->isEnabled());
         QVERIFY(get<QAction>(window, "actionProperties")->isChecked());
@@ -309,16 +340,13 @@ private slots:
         QVERIFY(tree->topLevelItem(1)->isHidden());
     }
 
-    void nestedTabsQuickConnectAndClose() {
+    void sessionTabsQuickConnectPanelsAndClose() {
         PreviewWindow window;
         show(window);
-        auto* groups = get<QTabWidget>(window, "groupTabs");
-        auto* tabs = get<QTabWidget>(window, "sessionTabs");
-        QCOMPARE(groups->count(), 1);
-        QCOMPARE(groups->tabText(0), QString("General"));
+        auto tabs = general(window);
+        QVERIFY(get<ads::CDockWidget>(window, "documentsDock")->isClosed());
         QCOMPARE(tabs->count(), 1);
         QCOMPARE(tabs->tabText(0), QString("server01"));
-        QVERIFY(groups->widget(0)->isAncestorOf(tabs));
         auto* combo = get<QComboBox>(window, "quickConnectCombo");
         combo->setEditText("demo-host");
         QTest::keyClick(combo->lineEdit(), Qt::Key_Return);
@@ -337,33 +365,36 @@ private slots:
         QCOMPARE(tabs->count(), 3);
         QVERIFY(get<QListWidget>(window, "notificationsList")->currentItem()->text().contains("VNC"));
         QVERIFY(get<QPlainTextEdit>(window, "notificationText")->toPlainText().contains("demo-host"));
-        QVERIFY(QMetaObject::invokeMethod(tabs, "tabCloseRequested", Q_ARG(int, 0)));
+        tabs.close(0);
         QCOMPARE(tabs->count(), 2);
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         combo->setEditText("server01");
         button->menu()->actions()[0]->trigger();
         QTest::keyClick(combo->lineEdit(), Qt::Key_Return);
         QCOMPARE(tabs->count(), 3);
+        // New Panel moves the current tab into a panel of its own; new tabs follow it.
+        auto* moved = tabs->currentWidget();
         get<QAction>(window, "actionAddPanel")->trigger();
-        QCOMPARE(groups->count(), 2);
-        auto* panelTabs = groups->currentWidget()->findChild<QTabWidget*>();
-        QVERIFY(panelTabs);
-        QCOMPARE(panelTabs->count(), 0);
+        auto panel = panelOf(moved); QVERIFY(panel.area && panel.area != tabs.area);
+        QCOMPARE(panel->count(), 1); QCOMPARE(tabs->count(), 2);
         combo->setEditText("panel-host");
         QTest::keyClick(combo->lineEdit(), Qt::Key_Return);
-        QCOMPARE(panelTabs->count(), 1);
-        QCOMPARE(tabs->count(), 3);
-        get<QAction>(window, "actionGeneralPanel")->trigger();
-        QCOMPARE(groups->currentIndex(), 0);
+        QCOMPARE(panel->count(), 2);
+        QCOMPARE(tabs->count(), 2);
+        auto* panels = get<QMenu>(window, "menuConnectionPanels"); emit panels->aboutToShow();
+        QStringList names; for (auto* action : panels->actions()) names << action->text(); QCOMPARE(names, QStringList({"General", "Panel 1"}));
+        // Closing every tab shows the empty General placeholder.
+        while (panel->count()) panel.close(0);
+        while (tabs->count()) tabs.close(0);
+        QVERIFY(!get<ads::CDockWidget>(window, "documentsDock")->isClosed());
     }
-
     void doubleClickAndMemoryOnlyTreeActions() {
         PreviewWindow window;
         show(window);
         auto* tree = get<QTreeWidget>(window, "connectionTree");
         auto* server = tree->topLevelItem(0)->child(0);
-        auto* tabs = get<QTabWidget>(window, "sessionTabs");
-        QVERIFY(QMetaObject::invokeMethod(tabs, "tabCloseRequested", Q_ARG(int, 0)));
+        auto tabs = general(window);
+        tabs.close(0);
         QCOMPARE(tabs->count(), 0);
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         const auto pos = tree->visualItemRect(server).center();
@@ -386,28 +417,29 @@ private slots:
     void visibilityAndResetLayout() {
         PreviewWindow window;
         show(window);
-        auto* config = get<QDockWidget>(window, "configDock");
+        auto* config = get<ads::CDockWidget>(window, "configDock");
         auto* view = get<QAction>(window, "actionViewConfig");
         view->trigger();
         QVERIFY(!config->isVisible());
-        config->show();
+        config->toggleView(true);
         QVERIFY(view->isChecked());
-        config->close();
+        config->toggleView(false);
         QVERIFY(!view->isChecked());
         get<QAction>(window, "actionViewMultiSsh")->trigger();
         QVERIFY(get<QToolBar>(window, "multiSshToolbar")->isVisible());
         get<QAction>(window, "actionLockToolbars")->trigger();
         QVERIFY(!get<QToolBar>(window, "quickConnectToolbar")->isMovable());
-        config->setFloating(true);
-        config->show();
+        config->toggleView(true); config->setFloating();
+        QVERIFY(config->isFloating());
         get<QAction>(window, "actionResetLayout")->trigger();
         QTest::qWait(80);
         QVERIFY(!config->isFloating());
-        QVERIFY(config->isVisible());
+        QTRY_VERIFY(config->isVisible());
         QVERIFY(view->isChecked());
         QVERIFY(!get<QToolBar>(window, "multiSshToolbar")->isVisible());
         QVERIFY(!get<QAction>(window, "actionViewMultiSsh")->isChecked());
-        QCOMPARE(window.dockWidgetArea(config), Qt::LeftDockWidgetArea);
+        const auto documents = get<ads::CDockWidget>(window, "documentsDock");
+        QVERIFY(config->mapTo(&window, QPoint(config->width(), 0)).x() < documents->mapTo(&window, QPoint()).x());
     }
 
     void contextMenuTargetsClickedObject() {
@@ -429,7 +461,7 @@ private slots:
         QVERIFY(command(menu, "actionTreeConnect")->isEnabled());
         menu->close();
         quick(window, "inactive-host");
-        auto* tabs = get<QTabWidget>(window, "sessionTabs");
+        auto tabs = general(window);
         auto* initial = tabs->widget(0);
         QCOMPARE(tabs->currentIndex(), 1);
         menu = tabMenu(tabs, 0);
@@ -439,8 +471,7 @@ private slots:
         rename(window, "renamed inactive");
         QCOMPARE(tabs->tabText(tabs->indexOf(initial)), QString("renamed inactive"));
         QCOMPARE(tabs->tabText(tabs->currentIndex()), QString("inactive-host"));
-        QVERIFY(!context(tabs->tabBar(), QPoint(tabs->tabBar()->width() - 2, tabs->tabBar()->height() + 5)));
-        menu = context(tabs->tabBar(), QPoint(), true);
+        menu = context(tabs.tab(tabs->currentIndex()), QPoint(), true);
         QVERIFY(menu);
         trigger(menu, "actionTabRename");
         rename(window, "keyboard current");
@@ -473,9 +504,9 @@ private slots:
         rename(window, "Friendly display");
         QCOMPARE(server->text(0), QString("Friendly display"));
         QCOMPARE(server->data(0, preview::EndpointRole).toString(), QString("server01"));
-        auto* config = get<QTreeWidget>(window, "configTree");
-        QCOMPARE(config->topLevelItem(0)->child(0)->text(1), QString("Friendly display"));
-        QCOMPARE(config->topLevelItem(1)->child(1)->text(1), QString("server01"));
+        auto* config = get<QTreeWidget>(window, "configView");
+        QCOMPARE(config->window()->findChild<ProfileEditor*>()->row("name")->text(1), QString("Friendly display"));
+        QCOMPARE(config->window()->findChild<ProfileEditor*>()->row("host")->text(1), QString("server01"));
         menu = nodeMenu(tree, server);
         if (QGuiApplication::platformName() == "offscreen") {
             trigger(menu, "actionCopyHostname");
@@ -483,7 +514,7 @@ private slots:
             menu = nodeMenu(tree, server);
         }
         trigger(menu, "actionTreeConnect");
-        QCOMPARE(get<QTabWidget>(window, "sessionTabs")->count(), 1);
+        QCOMPARE(general(window)->count(), 1);
         menu = nodeMenu(tree, server);
         trigger(menu, "actionTreeDuplicate");
         QCOMPARE(root->childCount(), 2);
@@ -531,7 +562,7 @@ private slots:
     void sessionContextMenuActionsAndProtocolGating() {
         PreviewWindow window;
         show(window);
-        auto* tabs = get<QTabWidget>(window, "sessionTabs");
+        auto tabs = general(window);
         auto* initial = tabs->widget(0);
         auto* menu = tabMenu(tabs, 0);
         QVERIFY(command(menu, "actionTabFullscreen")->isVisible());
@@ -569,7 +600,7 @@ private slots:
         // Resolve the target's position when executing, not when the popup opens.
         menu = tabMenu(tabs, 1);
         auto* kept = tabs->widget(1);
-        tabs->tabBar()->moveTab(1, 0);
+        tabs.moveTab(1, 0);
         trigger(menu, "actionTabDisconnectRight");
         QCOMPARE(tabs->count(), 1);
         QCOMPARE(tabs->widget(0), kept);
@@ -585,73 +616,45 @@ private slots:
         QCOMPARE(tabs->count(), 0);
         quick(window, "stale-host");
         menu = tabMenu(tabs, 0);
-        auto* stale = tabs->widget(0);
-        tabs->removeTab(0);
+        auto* stale = tabs->dock(0);
+        stale->dockManager()->removeDockWidget(stale);
         delete stale;
         trigger(menu, "actionTabDuplicate");
         QCOMPARE(tabs->count(), 0);
-        get<QAction>(window, "actionAddPanel")->trigger();
-        auto* panelTabs = get<QTabWidget>(window, "groupTabs")->currentWidget()->findChild<QTabWidget*>();
-        quick(window, "new-panel-host");
+        quick(window, "first-host"); quick(window, "new-panel-host");
+        auto* moved = tabs->currentWidget(); get<QAction>(window, "actionAddPanel")->trigger();
+        auto panelTabs = panelOf(moved);
         menu = tabMenu(panelTabs, 0);
         QVERIFY(menu);
         trigger(menu, "actionTabDuplicate");
         QCOMPARE(panelTabs->count(), 2);
     }
 
-    void groupContextMenuLifetimeAndGeneralProtection() {
+    void sessionTabsMoveBetweenPanelsAndWindows() {
         PreviewWindow window;
         show(window);
-        auto* groups = get<QTabWidget>(window, "groupTabs");
-        auto* panels = get<QMenu>(window, "menuConnectionPanels");
-        auto* menu = tabMenu(groups, 0);
-        QVERIFY(!command(menu, "actionPanelClose")->isVisible());
-        QVERIFY(!command(menu, "actionPanelClose")->isEnabled());
-        trigger(menu, "actionPanelRename");
-        rename(window, "Renamed General");
-        QCOMPARE(panels->actions().first()->text(), QString("Renamed General"));
-        menu = tabMenu(groups, 0);
-        QVERIFY(!command(menu, "actionPanelClose")->isEnabled());
-        menu->close();
-        get<QAction>(window, "actionAddPanel")->trigger();
-        auto* panel = groups->currentWidget();
-        QPointer<QAction> viewAction(panels->actions().last());
-        quick(window, "panel-host");
-        menu = tabMenu(groups, 1);
-        QVERIFY(!command(menu, "actionPanelSendTo")->isEnabled());
-        trigger(menu, "actionPanelRename");
-        rename(window, "Named panel");
-        QCOMPARE(viewAction->text(), QString("Named panel"));
-        menu = tabMenu(groups, 1);
-        trigger(menu, "actionPanelClose");
-        confirmDelete(window, false);
-        QCOMPARE(groups->count(), 2);
-        QCOMPARE(panel->findChild<QTabWidget*>()->count(), 1);
-        menu = tabMenu(groups, 1);
-        // Move it while the popup is open; closure still targets this page.
-        groups->tabBar()->moveTab(1, 0);
-        QPointer<QWidget> deleted(panel);
-        trigger(menu, "actionPanelClose");
-        confirmDelete(window, true);
-        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-        QVERIFY(!deleted);
-        QVERIFY(!viewAction);
-        QCOMPARE(groups->count(), 1);
-        QCOMPARE(panels->actions().size(), 1);
-        QCOMPARE(groups->tabText(0), QString("Renamed General"));
-        quick(window, "surviving-group");
-        QCOMPARE(get<QTabWidget>(window, "sessionTabs")->count(), 2);
-        get<QAction>(window, "actionAddPanel")->trigger();
-        menu = tabMenu(groups, 1);
-        trigger(menu, "actionPanelClose");
-        QCOMPARE(groups->count(), 1);
-        QVERIFY(!window.findChild<QMessageBox*>("previewDelete"));
+        auto tabs = general(window);
+        quick(window, "second-host");
+        auto* first = tabs->widget(0); auto* second = tabs->widget(1);
+        auto* menu = tabMenu(tabs, 1);
+        QVERIFY(command(menu, "actionMoveToNewPanelRight")->isEnabled());
+        trigger(menu, "actionMoveToNewPanelRight");
+        auto panel = panelOf(second); QVERIFY(panel.area != tabs.area); QCOMPARE(tabs->count(), 1);
+        // A panel's only tab cannot split again but can return to General by name.
+        menu = tabMenu(panel, 0);
+        QVERIFY(!command(menu, "actionMoveToNewPanelRight")->isEnabled());
+        QAction* back = nullptr; for (auto* action : menu->findChild<QMenu*>("moveSessionMenu")->actions()) if (action->text() == "General") back = action;
+        QVERIFY(back && back->isEnabled()); back->trigger(); menu->close();
+        QPointer<ads::CDockAreaWidget> gone = panel.area; QTRY_VERIFY(gone.isNull());
+        QCOMPARE(tabs->count(), 2); QCOMPARE(tabs->widget(1), second); QCOMPARE(tabs->widget(0), first);
+        // New window floats the tab in a Qt ADS window of its own.
+        menu = tabMenu(tabs, 1); trigger(menu, "actionMoveToNewWindow");
+        QVERIFY(panelOf(second).area->dockContainer()->isFloating()); QCOMPARE(tabs->count(), 1);
     }
-
     void propertyAndNotificationContextMenus() {
         PreviewWindow window;
         show(window);
-        auto* config = get<QTreeWidget>(window, "configTree");
+        auto* config = get<QTreeWidget>(window, "configView");
         auto* menu = context(config->viewport(), QPoint(10, 10));
         QVERIFY(menu);
         QVERIFY(!command(menu, "actionPropertyReset")->isEnabled());
@@ -662,9 +665,11 @@ private slots:
         QVERIFY(!command(menu, "actionShowHelp")->isChecked());
         trigger(menu, "actionShowHelp");
         QVERIFY(get<QWidget>(window, "configHelp")->isVisible());
+        get<QAction>(window, "actionViewNotifications")->setChecked(true);
         quick(window, "first-message");
         quick(window, "second-message");
         auto* list = get<QListWidget>(window, "notificationsList");
+        QTRY_VERIFY(list->viewport()->height() > 3 * list->sizeHintForRow(0));
         auto* details = get<QPlainTextEdit>(window, "notificationText");
         QCOMPARE(list->count(), 3);
         menu = context(list->viewport(), list->visualItemRect(list->item(1)).center());
@@ -759,7 +764,7 @@ private slots:
         QVERIFY(!tree->topLevelItem(0)->icon(0).pixmap(16, 16).isNull());
         QVERIFY(!tree->topLevelItem(0)->child(0)->icon(0).pixmap(16, 16).isNull());
         QVERIFY(!tree->topLevelItem(1)->icon(0).pixmap(16, 16).isNull());
-        auto* tabs = get<QTabWidget>(window, "sessionTabs");
+        auto tabs = general(window);
         auto* menu = tabMenu(tabs, 0);
         for (auto* action : menu->actions())
             if (!action->isSeparator()) QVERIFY2(!action->icon().pixmap(16, 16).isNull(), qPrintable(action->objectName()));

@@ -63,6 +63,10 @@ public:
     // Adds an import batch (already applied to the projection) with its passwords in one write.
     void importProfiles(DocumentId id, QByteArray projection, std::shared_ptr<ImportedPasswords> passwords, QStringList consumers,
                         QString reservation, Completion complete);
+    // Saves a duplicated subtree (already applied to the projection). Each copy gets its original's
+    // saved password and password inheritance; a copy is bound to its account only where the original was.
+    void duplicateProfiles(DocumentId id, QByteArray projection, std::vector<std::pair<QString, QString>> copies,
+                           QString reservation, Completion complete);
     // Writes an mRemoteNG XML/CSV export to a separate file; the open file is not changed.
     void exportFile(DocumentId id, QString path, ExportOptions options, Completion complete);
     void close(DocumentId id, Completion complete);

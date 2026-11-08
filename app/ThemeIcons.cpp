@@ -6,6 +6,7 @@
 #include <QHash>
 #include <QListWidget>
 #include <QTabBar>
+#include "DockWidget.h"
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 
@@ -84,6 +85,8 @@ void restyle() {
         for (auto* action : window->findChildren<QAction*>()) if (!action->icon().isNull()) action->setIcon(themed(action->icon()));
         for (auto* button : window->findChildren<QAbstractButton*>()) if (!button->icon().isNull()) button->setIcon(themed(button->icon()));
         for (auto* tabs : window->findChildren<QTabBar*>()) for (int i = 0; i < tabs->count(); ++i) tabs->setTabIcon(i, themed(tabs->tabIcon(i)));
+        // Dock tabs (panes and sessions) show their dock's icon.
+        for (auto* dock : window->findChildren<ads::CDockWidget*>()) if (!dock->icon().isNull()) dock->setIcon(themed(dock->icon()));
         for (auto* combo : window->findChildren<QComboBox*>()) for (int i = 0; i < combo->count(); ++i) combo->setItemIcon(i, themed(combo->itemIcon(i)));
         for (auto* list : window->findChildren<QListWidget*>()) for (int i = 0; i < list->count(); ++i) list->item(i)->setIcon(themed(list->item(i)->icon()));
         for (auto* tree : window->findChildren<QTreeWidget*>())

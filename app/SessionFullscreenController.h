@@ -4,23 +4,22 @@
 #include <QRect>
 #include <QList>
 class QMainWindow;
-class QTabWidget;
 class QWidget;
 class QTimer;
 class QToolButton;
 class SessionPane;
 
-// Presentation only: the captured pane never leaves its owning session tab.
+// Presentation only: shows the one session docked in a FullscreenWindow
+// fullscreen, with a floating bar of window controls over it.
 class SessionFullscreenController final : public QObject {
     Q_OBJECT
 public:
-    explicit SessionFullscreenController(QMainWindow* window, QTabWidget* groups);
+    explicit SessionFullscreenController(QMainWindow* window);
     ~SessionFullscreenController() override;
     bool active() const { return active_; }
     SessionPane* target() const;
-    void enter(SessionPane* pane, QTabWidget* owner, const QString& title);
+    void enter(SessionPane* pane, const QString& title);
     void exit();
-    void checkSelection(QTabWidget* current);
     bool pinned() const { return pinned_; }
     void setPinned(bool pinned);
     bool barRetracted() const { return active_ && !shown_; }
@@ -32,18 +31,15 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void suppress(QWidget* widget);
-    void unframe(QTabWidget* tabs);
+    QWidget* surface() const;
     // The bar floats over the session so the desktop reaches every screen
     // edge; unpinned, it slides above the top edge until the pointer returns.
     void place(bool shown, bool animate);
     void track();
     QMainWindow* window_;
-    QTabWidget* groups_;
     QPointer<SessionPane> pane_;
-    QPointer<QTabWidget> owner_;
     QPointer<QWidget> focus_, bar_, row_;
     QList<QPointer<QWidget>> chrome_;
-    QList<QPointer<QTabWidget>> frames_;
     Qt::WindowStates state_;
     QRect geometry_;
     quint64 generation_ = 0;

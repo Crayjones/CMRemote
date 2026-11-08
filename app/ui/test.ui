@@ -7,76 +7,13 @@
   <property name="font"><font><family>Arial</family><pointsize>9</pointsize></font></property>
   <property name="windowTitle"><string>CMRemote — Qt UI preview</string></property>
   <property name="windowIcon"><iconset resource="branding.qrc"><normaloff>:/branding/cmremote-256.png</normaloff>:/branding/cmremote-256.png</iconset></property>
-  <property name="dockNestingEnabled"><bool>true</bool></property>
-  <property name="styleSheet"><string notr="true">QMainWindow { background: #f0f0f0; }
-QMainWindow::separator { background: #dedede; width: 4px; height: 4px; }
-QDockWidget { border: 1px solid #b5b5b5; color: white; }
-QDockWidget::title { background: #0078d7; color: white; padding: 3px 5px; }
-QToolBar { background: #f0f0f0; border: none; spacing: 1px; padding: 1px; }
-QToolButton { padding: 2px; }
-QMenuBar { background: #f0f0f0; padding: 1px; }
-QMenuBar::item { padding: 3px 8px; }
-QMenuBar::item:selected { background: #cce8ff; }
-QTreeWidget, QListWidget, QPlainTextEdit { background: white; color: #202020; border: none; }
-QTreeWidget::item, QListWidget::item { min-height: 19px; }
-QTreeWidget::item:selected, QListWidget::item:selected { background: #0078d7; color: white; }
-QLineEdit, QComboBox { background: white; color: #202020; border: 1px solid #ababab; padding: 2px; }
-QTabWidget::pane { border: 1px solid #ababab; }
-QTabBar::tab { background: #eeeeee; color: #202020; border: 1px solid #ababab; padding: 4px 12px; }
-QTabBar::tab:selected { background: #0078d7; color: white; }
-QTabWidget#sessionTabs QTabBar::tab, QTabWidget#panelSessionTabs QTabBar::tab { background: #dadada; color: #505050; }
-QTabWidget#sessionTabs QTabBar::tab:selected, QTabWidget#panelSessionTabs QTabBar::tab:selected { background: #ffffff; color: #202020; border-bottom-color: #ffffff; }
-QWidget#sessionSurface { background: #191919; }
-QLabel#sessionMessage { color: #dddddd; background: transparent; }
-QWidget#configHelp, QWidget#notificationDetails { background: #f0f0f0; }
-QLabel#configHelpTitle { font-weight: bold; }
-QLabel#notificationDate { color: #666666; font-style: italic; }</string></property>
-  <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="documentLayout">
-    <property name="spacing"><number>0</number></property>
-    <property name="leftMargin"><number>0</number></property>
-    <property name="topMargin"><number>0</number></property>
-    <property name="rightMargin"><number>0</number></property>
-    <property name="bottomMargin"><number>0</number></property>
-    <item><widget class="QTabWidget" name="groupTabs">
-     <property name="documentMode"><bool>true</bool></property>
-     <property name="movable"><bool>true</bool></property>
-     <widget class="QWidget" name="generalPanel">
-      <attribute name="title"><string>General</string></attribute>
-      <attribute name="icon"><iconset resource="branding.qrc"><normaloff>:/branding/cmremote-16.png</normaloff>:/branding/cmremote-16.png</iconset></attribute>
-      <layout class="QVBoxLayout" name="generalLayout">
-       <property name="spacing"><number>0</number></property>
-       <property name="leftMargin"><number>0</number></property>
-       <property name="topMargin"><number>0</number></property>
-       <property name="rightMargin"><number>0</number></property>
-       <property name="bottomMargin"><number>0</number></property>
-       <item><widget class="QTabWidget" name="sessionTabs">
-        <property name="documentMode"><bool>true</bool></property>
-        <property name="tabsClosable"><bool>true</bool></property>
-        <property name="movable"><bool>true</bool></property>
-        <widget class="QWidget" name="serverTab">
-         <attribute name="title"><string>server01</string></attribute>
-         <attribute name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Connection.ico</normaloff>:/original/Connection.ico</iconset></attribute>
-         <layout class="QVBoxLayout" name="serverLayout">
-          <property name="leftMargin"><number>0</number></property>
-          <property name="topMargin"><number>0</number></property>
-          <property name="rightMargin"><number>0</number></property>
-          <property name="bottomMargin"><number>0</number></property>
-          <item><widget class="QWidget" name="sessionSurface">
-           <layout class="QVBoxLayout" name="sessionSurfaceLayout">
-            <item><widget class="QLabel" name="sessionMessage">
-             <property name="text"><string>server01 · RDP&#10;&#10;UI preview only — no network connection&#10;&#10;The embedded session view will occupy this area.</string></property>
-             <property name="textFormat"><enum>Qt::PlainText</enum></property>
-             <property name="alignment"><set>Qt::AlignCenter</set></property>
-             <property name="wordWrap"><bool>true</bool></property>
-            </widget></item>
-           </layout>
-          </widget></item>
-         </layout>
-        </widget>
-       </widget></item>
-      </layout>
-     </widget>
+  <widget class="QWidget" name="emptySessions">
+   <layout class="QVBoxLayout" name="emptySessionsLayout">
+    <item><widget class="QLabel" name="emptySessionsMessage">
+     <property name="text"><string>Double-click a connection to open it here.</string></property>
+     <property name="textFormat"><enum>Qt::PlainText</enum></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="wordWrap"><bool>true</bool></property>
     </widget></item>
    </layout>
   </widget>
@@ -91,8 +28,8 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
    <widget class="QMenu" name="menuView">
     <property name="title"><string>&amp;View</string></property>
     <addaction name="actionAddPanel"/>
-    <widget class="QMenu" name="menuConnectionPanels"><property name="title"><string>Connection Panels</string></property><addaction name="actionGeneralPanel"/></widget>
-    <addaction name="menuConnectionPanels"/><addaction name="actionViewPanels"/><addaction name="separator"/>
+    <widget class="QMenu" name="menuConnectionPanels"><property name="title"><string>Connection Panels</string></property></widget>
+    <addaction name="menuConnectionPanels"/><addaction name="separator"/>
     <addaction name="actionViewConnections"/><addaction name="actionViewConfig"/><addaction name="actionViewNotifications"/><addaction name="actionViewScreenshots"/>
     <addaction name="separator"/>
     <widget class="QMenu" name="menuJumpTo"><property name="title"><string>Jump To</string></property><addaction name="actionNextSession"/><addaction name="actionPreviousSession"/></widget>
@@ -144,105 +81,6 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   </widget>
   <widget class="QToolBar" name="multiSshToolbar"><property name="windowTitle"><string>Multi SSH</string></property><attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute></widget>
   <widget class="QToolBar" name="externalToolsToolbar"><property name="windowTitle"><string>External tools</string></property><attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute><addaction name="actionExternalTools"/></widget>
-  <widget class="QDockWidget" name="connectionsDock">
-   <property name="windowTitle"><string>Connections</string></property>
-   <property name="minimumSize"><size><width>226</width><height>130</height></size></property>
-   <attribute name="dockWidgetArea"><number>1</number></attribute>
-   <widget class="QWidget" name="connectionsContents">
-    <layout class="QVBoxLayout" name="connectionsLayout">
-     <property name="spacing"><number>0</number></property>
-     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
-     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
-     <item><widget class="QToolBar" name="connectionsToolbar">
-      <property name="iconSize"><size><width>16</width><height>16</height></size></property>
-      <property name="movable"><bool>false</bool></property>
-      <addaction name="actionAddConnection"/><addaction name="actionAddFolder"/>
-      <addaction name="actionExpandAll"/><addaction name="actionSort"/>
-     </widget></item>
-     <item><widget class="ConnectionTree" name="connectionTree">
-      <property name="headerHidden"><bool>true</bool></property>
-      <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
-      <property name="indentation"><number>16</number></property>
-      <column><property name="text"><string>Connections</string></property></column>
-      <item><property name="text"><string>Connections</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/ASPWebSite_16x.png</normaloff>:/original/ASPWebSite_16x.png</iconset></property>
-       <item><property name="text"><string>server01</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Connection.ico</normaloff>:/original/Connection.ico</iconset></property></item>
-      </item>
-      <item><property name="text"><string>PuTTY Saved Sessions</string></property><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/PuttySessions.png</normaloff>:/original/PuttySessions.png</iconset></property></item>
-     </widget></item>
-     <item><widget class="QLineEdit" name="searchEdit"><property name="placeholderText"><string>Search</string></property><property name="clearButtonEnabled"><bool>true</bool></property></widget></item>
-    </layout>
-   </widget>
-  </widget>
-  <widget class="QDockWidget" name="configDock">
-   <property name="windowTitle"><string>Config</string></property>
-   <property name="minimumSize"><size><width>226</width><height>180</height></size></property>
-   <attribute name="dockWidgetArea"><number>1</number></attribute>
-   <widget class="QWidget" name="configContents">
-    <layout class="QVBoxLayout" name="configLayout">
-     <property name="spacing"><number>0</number></property>
-     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
-     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
-     <item><widget class="QToolBar" name="configToolbar">
-      <property name="iconSize"><size><width>16</width><height>16</height></size></property>
-      <property name="movable"><bool>false</bool></property>
-      <addaction name="actionCategorized"/><addaction name="actionAlphabetical"/><addaction name="separator"/>
-      <addaction name="actionProperties"/><addaction name="actionInheritance"/><addaction name="actionDefaultProperties"/><addaction name="actionDefaultInheritance"/><addaction name="separator"/><addaction name="actionConnectionIcon"/><addaction name="actionHostStatus"/>
-     </widget></item>
-     <item><widget class="QSplitter" name="configSplitter">
-      <property name="orientation"><enum>Qt::Vertical</enum></property>
-      <property name="childrenCollapsible"><bool>false</bool></property>
-      <widget class="QTreeWidget" name="configTree">
-       <property name="headerHidden"><bool>true</bool></property><property name="rootIsDecorated"><bool>true</bool></property>
-       <property name="indentation"><number>13</number></property>
-       <column><property name="text"><string>Property</string></property></column><column><property name="text"><string>Value</string></property></column>
-       <item><property name="text"><string>Display</string></property>
-        <item><property name="text"><string>Name</string></property><property name="text"><string>Connections</string></property></item>
-        <item><property name="text"><string>Password protection</string></property><property name="text"><string>No</string></property></item>
-       </item>
-      </widget>
-      <widget class="QWidget" name="configHelp">
-       <property name="minimumSize"><size><width>0</width><height>60</height></size></property>
-       <layout class="QVBoxLayout" name="configHelpLayout">
-        <property name="spacing"><number>2</number></property>
-        <property name="leftMargin"><number>5</number></property><property name="topMargin"><number>5</number></property>
-        <property name="rightMargin"><number>5</number></property><property name="bottomMargin"><number>5</number></property>
-        <item><widget class="QLabel" name="configHelpTitle"><property name="text"><string>Name</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
-        <item><widget class="QLabel" name="configHelpText"><property name="text"><string>This is the name displayed in the connections tree.</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property><property name="wordWrap"><bool>true</bool></property><property name="alignment"><set>Qt::AlignLeft|Qt::AlignTop</set></property></widget></item>
-        <item><spacer name="configHelpSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>0</width><height>0</height></size></property></spacer></item>
-       </layout>
-      </widget>
-     </widget></item>
-    </layout>
-   </widget>
-  </widget>
-  <widget class="QDockWidget" name="notificationsDock">
-   <property name="windowTitle"><string>Notifications</string></property>
-   <property name="visible"><bool>false</bool></property>
-   <property name="minimumSize"><size><width>0</width><height>95</height></size></property>
-   <attribute name="dockWidgetArea"><number>8</number></attribute>
-   <widget class="QWidget" name="notificationsContents">
-    <layout class="QVBoxLayout" name="notificationsLayout">
-     <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property>
-     <property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
-     <item><widget class="QSplitter" name="notificationSplitter">
-      <property name="orientation"><enum>Qt::Horizontal</enum></property>
-      <widget class="QWidget" name="notificationDetails">
-       <layout class="QVBoxLayout" name="notificationDetailsLayout">
-        <property name="spacing"><number>2</number></property>
-        <property name="leftMargin"><number>5</number></property><property name="topMargin"><number>3</number></property>
-        <property name="rightMargin"><number>5</number></property><property name="bottomMargin"><number>3</number></property>
-        <item><layout class="QHBoxLayout" name="notificationHeadingLayout">
-         <item><widget class="QLabel" name="notificationIcon"><property name="pixmap"><pixmap resource="preview-icons.qrc">:/original/StatusInformation_16x.png</pixmap></property></widget></item>
-         <item><widget class="QLabel" name="notificationDate"><property name="text"><string>UI preview</string></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
-        </layout></item>
-        <item><widget class="QPlainTextEdit" name="notificationText"><property name="readOnly"><bool>true</bool></property><property name="plainText"><string>No network sessions. Changes stay in memory.</string></property></widget></item>
-       </layout>
-      </widget>
-      <widget class="QListWidget" name="notificationsList"><property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property><item><property name="text"><string>Qt preview loaded — no network sessions or profile file access.</string></property></item></widget>
-     </widget></item>
-    </layout>
-   </widget>
-  </widget>
   <action name="actionNewFile"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/NewFile_16x.png</normaloff>:/original/NewFile_16x.png</iconset></property><property name="text"><string>New connection file</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionOpenFile"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/OpenFile_16x.png</normaloff>:/original/OpenFile_16x.png</iconset></property><property name="text"><string>Open connection file…</string></property><property name="enabled"><bool>false</bool></property></action>
   <action name="actionSaveFile"><property name="text"><string>Save connection file</string></property><property name="enabled"><bool>false</bool></property></action>
@@ -261,9 +99,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   <action name="actionViewExternalTools"><property name="text"><string>External Tools Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
   <action name="actionViewMultiSsh"><property name="text"><string>Multi SSH Toolbar</string></property><property name="checkable"><bool>true</bool></property></action>
   <action name="actionReconnectAll"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Refresh_16x.png</normaloff>:/original/Refresh_16x.png</iconset></property><property name="text"><string>Reconnect all connections</string></property><property name="enabled"><bool>false</bool></property></action>
-  <action name="actionAddPanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/InsertPanel_16x.png</normaloff>:/original/InsertPanel_16x.png</iconset></property><property name="text"><string>Add Connection Panel</string></property></action>
-  <action name="actionViewPanels"><property name="text"><string>Panel Tabs</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>false</bool></property></action>
-  <action name="actionGeneralPanel"><property name="text"><string>General</string></property></action>
+  <action name="actionAddPanel"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/InsertPanel_16x.png</normaloff>:/original/InsertPanel_16x.png</iconset></property><property name="text"><string>New Panel</string></property></action>
   <action name="actionResetLayout"><property name="text"><string>Reset layout</string></property></action>
   <action name="actionLockToolbars"><property name="text"><string>Lock toolbar positions</string></property><property name="checkable"><bool>true</bool></property></action>
   <action name="actionFullscreen"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/FullScreen_16x.png</normaloff>:/original/FullScreen_16x.png</iconset></property><property name="text"><string>Full Screen</string></property><property name="checkable"><bool>true</bool></property><property name="shortcut"><string>F11</string></property></action>
@@ -342,9 +178,7 @@ QLabel#notificationDate { color: #666666; font-style: italic; }</string></proper
   <action name="actionCtrlEsc"><property name="text"><string>Ctrl+Esc</string></property></action>
   <action name="actionPuttySettings"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/PuttyConfig.png</normaloff>:/original/PuttyConfig.png</iconset></property><property name="text"><string>PuTTY settings</string></property></action>
   <action name="actionTabExternalTools"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Console_16x.png</normaloff>:/original/Console_16x.png</iconset></property><property name="text"><string>External applications</string></property></action>
-  <action name="actionPanelRename"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Rename_16x.png</normaloff>:/original/Rename_16x.png</iconset></property><property name="text"><string>Rename</string></property></action>
   <action name="actionPanelSendTo"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Monitor_16x.png</normaloff>:/original/Monitor_16x.png</iconset></property><property name="text"><string>Send to</string></property></action>
-  <action name="actionPanelClose"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Close_16x.png</normaloff>:/original/Close_16x.png</iconset></property><property name="text"><string>Close</string></property></action>
   <action name="actionPropertyReset"><property name="text"><string>Reset</string></property><property name="enabled"><bool>false</bool></property><property name="toolTip"><string>Preview properties are read-only</string></property></action>
   <action name="actionShowHelp"><property name="text"><string>Show Help Text</string></property><property name="checkable"><bool>true</bool></property><property name="checked"><bool>true</bool></property></action>
   <action name="actionNotificationCopy"><property name="icon"><iconset resource="preview-icons.qrc"><normaloff>:/original/Copy_16x.png</normaloff>:/original/Copy_16x.png</iconset></property><property name="text"><string>Copy</string></property></action>

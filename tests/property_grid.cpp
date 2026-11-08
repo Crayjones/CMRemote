@@ -7,7 +7,7 @@
 #include "OptionsDialog.h"
 #include <QCheckBox>
 #include <QDir>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QScrollBar>
 #include <QHeaderView>
 #include "GridDriver.h"
@@ -21,7 +21,11 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QAbstractButton>
-#include <QDockWidget>
+#include "DockManager.h"
+#include "qttreepropertybrowser_p.h"
+#include "DockAreaTitleBar.h"
+#include "DockWidget.h"
+#include "DockAreaWidget.h"
 #include <QStyle>
 #include <QLabel>
 #include <QJsonArray>
@@ -58,15 +62,23 @@ public:
 class PropertyGridTest : public QObject {
     Q_OBJECT
 private slots:
-    void initTestCase() { applyLightAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
+    void initTestCase() { applyAppearance(*qApp); qApp->setQuitOnLastWindowClosed(false); }
+    void recreatedGridsNeverReachDestroyedFactories() {
+        // Grids, managers and factories are reallocated at freed addresses; a new
+        // grid must not find the previous one's binding (it used to crash here).
+        for (int i = 0; i < 200; ++i) {
+            auto* grid = new QtTreePropertyBrowser; auto* editor = new ProfileEditor(grid);
+            QVERIFY(editor->view()); delete grid;
+        }
+    }
     void configValueCellsStayVisibleInNarrowDock() {
         QTemporaryDir dir; SaveWindow window(dir.filePath("narrow.xml"), true, dir.filePath("preferences.json")); OPEN_FOLDERED_CONNECTION(window);
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); auto* dock = window.findChild<QDockWidget*>("configDock");
+        auto* tree = window.findChild<QTreeWidget*>("configView"); auto* dock = window.findChild<ads::CDockWidget*>("configDock");
         const auto connection = window.selectedId(); const auto document = window.selectedDocument();
         auto* defaults = window.findChild<QAction*>("actionDefaultProperties");
         const int writes = window.writes();
         for (int width : {226, 330}) {
-            window.resizeDocks({dock}, {width}, Qt::Horizontal); QTRY_COMPARE(dock->width(), width);
+            resizeSidePanes(window, width); QTRY_COMPARE(dock->dockAreaWidget()->width(), width);
             for (const auto* mode : {"actionProperties", "actionInheritance", "actionDefaultProperties", "actionDefaultInheritance"}) {
                 if (QString(mode).startsWith("actionDefault")) { QVERIFY(window.selectConnectionFile(document)); QTRY_VERIFY(defaults->isEnabled()); }
                 else QVERIFY(window.selectConnectionProfile({document, connection}));
@@ -85,7 +97,7 @@ private slots:
             }
         }
         QCOMPARE(window.writes(), writes);
-        window.resizeDocks({dock}, {226}, Qt::Horizontal); QVERIFY(window.selectConnectionProfile({document, connection}));
+        resizeSidePanes(window, 226); QVERIFY(window.selectConnectionProfile({document, connection}));
         setGridText(window, "name", "Narrow Config"); QVERIFY(waitGridSaved(window));
         QCOMPARE(gridValue(window, "name").toString(), QString("Narrow Config"));
     }
@@ -274,7 +286,7 @@ private slots:
         setGridChoice(window, "icon", "SSH"); QVERIFY(waitGridSaved(window));
         auto image = [](const QIcon& icon) { return icon.pixmap(16, 16).toImage(); };
         auto* tree = window.findChild<QTreeWidget*>("connectionTree"); QCOMPARE(image(tree->currentItem()->icon(0)), image(ConnectionIcons::resolve("SSH")));
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); QCOMPARE(image(tabs->tabIcon(tabs->indexOf(pane))), image(ConnectionIcons::resolve("SSH")));
+        auto tabs = sessionTabs(window); QCOMPARE(image(tabs->tabIcon(tabs->indexOf(pane))), image(ConnectionIcons::resolve("SSH")));
         auto* savedMenu = window.findChild<QMenu*>("savedConnectionsMenu"); QVERIFY(savedMenu); QVERIFY(QMetaObject::invokeMethod(savedMenu, "aboutToShow"));
         QVERIFY(!savedMenu->actions().isEmpty()); auto* fileMenu = savedMenu->actions().first()->menu(); QVERIFY(fileMenu);
         QCOMPARE(image(fileMenu->actions().first()->icon()), image(ConnectionIcons::resolve("SSH")));
@@ -294,7 +306,7 @@ private slots:
         const auto first = window.selectedDocument(); const auto profile = window.selectedId(); const auto original = contents(a);
         QFile copy(b); QVERIFY(copy.open(QIODevice::WriteOnly)); QCOMPARE(copy.write(original), qint64(original.size())); copy.close();
         const auto second = window.openConnectionFile(b); QTRY_VERIFY(!documentBusy(window)); QVERIFY(window.selectConnectionProfile({first, profile}));
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); auto* row = gridRow(window, "icon"); tree->setCurrentItem(row); tree->scrollToItem(row);
+        auto* tree = window.findChild<QTreeWidget*>("configView"); auto* row = gridRow(window, "icon"); tree->setCurrentItem(row); tree->scrollToItem(row);
         auto* menu = window.findChild<QAction*>("actionConnectionIcon")->menu(); QVERIFY(QMetaObject::invokeMethod(menu, "aboutToShow"));
         QAction* entry = nullptr; for (auto* action : menu->actions()) if (action->data() == "Linux") entry = action; QVERIFY(entry);
         QVERIFY(window.selectConnectionProfile({second, profile})); entry->trigger(); QVERIFY(waitGridSaved(window));
@@ -347,7 +359,7 @@ private slots:
     }
     void configHelpMatchesReference() {
         QTemporaryDir dir; MainWindow window(dir.filePath("help.xml"), true); OPEN_FOLDERED_CONNECTION(window);
-        auto* tree = window.findChild<QTreeWidget*>("configTree");
+        auto* tree = window.findChild<QTreeWidget*>("configView");
         tree->setCurrentItem(gridRow(window, "name"));
         QVERIFY(window.findChild<QLabel*>("configHelpText")->text().startsWith("This is the name that will be displayed in the connections tree."));
         {   // Description sits right under the title even when the pane is tall.
@@ -411,34 +423,42 @@ private slots:
         setGridChoice(window, "inherit_all", false); QVERIFY(waitGridSaved(window)); QCOMPARE(window.writes(), before + 2);
         QVERIFY(gridLocal(window, "description")); QVERIFY(gridLocal(window, "protocol")); QVERIFY(gridLocal(window, "ssh_key_path"));
     }
-    void configDockHeadersAreBlueWithWhiteText() {
+    void activeDockHeadersAreBlueWithWhiteText() {
         QTemporaryDir dir; MainWindow window(dir.filePath("headers.xml"), true); window.show(); QVERIFY(QTest::qWaitForWindowExposed(&window));
-        for (const auto* name : {"connectionsDock", "configDock"}) {
-            auto* dock = window.findChild<QDockWidget*>(name); QVERIFY(dock);
-            // Title bar: blue fill, white text; the dock's contents keep dark text.
-            const auto title = dock->grab(QRect(0, 0, dock->width(), dock->style()->pixelMetric(QStyle::PM_TitleBarHeight, nullptr, dock) + 6)).toImage();
-            int blue = 0, white = 0;
-            for (int y = 0; y < title.height(); ++y) for (int x = 0; x < title.width() / 2; ++x) {
-                const QColor c = title.pixelColor(x, y);
-                if (c == QColor("#0078d7")) ++blue; else if (c.red() > 230 && c.green() > 230 && c.blue() > 230) ++white;
+        auto* manager = window.findChild<ads::CDockManager*>("dockManager"); QVERIFY(manager);
+        const auto blueShare = [](ads::CDockWidget* dock) {
+            auto* bar = dock->dockAreaWidget()->titleBar(); const auto image = bar->grab().toImage(); int blue = 0, white = 0;
+            const auto accent = qApp->palette().color(QPalette::Accent);
+            for (int y = 0; y < image.height(); ++y) for (int x = 0; x < image.width() / 2; ++x) {
+                const QColor c = image.pixelColor(x, y);
+                if (c == accent) ++blue; else if (c.red() > 230 && c.green() > 230 && c.blue() > 230) ++white;
             }
-            QVERIFY2(blue > title.width(), name); QVERIFY2(white > 10, name);
+            return std::pair<int, int>{blue, white};
+        };
+        for (const auto* name : {"connectionsDock", "configDock"}) {
+            auto* dock = window.findChild<ads::CDockWidget*>(name); QVERIFY(dock);
+            // The active pane's title bar: accent fill, white text; the other pane's is the plain header color.
+            manager->setDockWidgetFocused(dock); QCoreApplication::processEvents();
+            const auto [blue, white] = blueShare(dock); QVERIFY2(blue > dock->dockAreaWidget()->titleBar()->width(), name); QVERIFY2(white > 10, name);
+            auto* other = window.findChild<ads::CDockWidget*>(QString(name) == "configDock" ? "connectionsDock" : "configDock");
+            QCOMPARE(blueShare(other).first, 0);
             QVERIFY(dock->widget()->palette().color(QPalette::WindowText).lightness() < 128);
-            // Float and close glyphs are white too.
-            for (const auto* button : {"qt_dockwidget_floatbutton", "qt_dockwidget_closebutton"}) {
-                auto* control = dock->findChild<QAbstractButton*>(button); QVERIFY2(control, button);
+            // Pin and close are drawn in the theme's text color.
+            for (const auto* button : {"dockAreaAutoHideButton", "dockAreaCloseButton"}) {
+                auto* control = dock->dockAreaWidget()->titleBar()->findChild<QAbstractButton*>(button); QVERIFY2(control && control->isVisible(), button);
                 const auto glyph = control->icon().pixmap(QSize(10, 10), 2.0).toImage(); int drawn = 0;
-                for (int y = 0; y < glyph.height(); ++y) for (int x = 0; x < glyph.width(); ++x) {
-                    const QColor c = glyph.pixelColor(x, y); if (c.alpha() < 128) continue;
-                    ++drawn; QVERIFY2(c.red() > 230 && c.green() > 230 && c.blue() > 230, button);
-                }
+                for (int y = 0; y < glyph.height(); ++y) for (int x = 0; x < glyph.width(); ++x) if (glyph.pixelColor(x, y).alpha() >= 128) ++drawn;
                 QVERIFY2(drawn > 10, button);
-            } QVERIFY(dock->features() & QDockWidget::DockWidgetClosable); QVERIFY(dock->features() & QDockWidget::DockWidgetFloatable);
-            dock->setFloating(true); QVERIFY(dock->isFloating()); dock->setFloating(false); QVERIFY(!dock->isFloating());
-            dock->close(); QVERIFY(dock->isHidden());
+            }
+            QVERIFY(dock->features() & ads::CDockWidget::DockWidgetClosable); QVERIFY(dock->features() & ads::CDockWidget::DockWidgetFloatable);
+            QVERIFY(dock->features() & ads::CDockWidget::DockWidgetPinnable);
+            dock->setAutoHide(true); QVERIFY(dock->isAutoHide()); dock->setAutoHide(false); QVERIFY(!dock->isAutoHide());
+            dock->toggleView(false); QVERIFY(dock->isClosed());
         }
         window.findChild<QAction*>("actionResetLayout")->trigger();
-        QVERIFY(!window.findChild<QDockWidget*>("connectionsDock")->isHidden()); QVERIFY(!window.findChild<QDockWidget*>("configDock")->isHidden());
+        QVERIFY(!window.findChild<ads::CDockWidget*>("connectionsDock")->isClosed()); QVERIFY(!window.findChild<ads::CDockWidget*>("configDock")->isClosed());
+        window.findChild<ads::CDockWidget*>("configDock")->setFloating(); QVERIFY(window.findChild<ads::CDockWidget*>("configDock")->isFloating());
+        window.findChild<QAction*>("actionResetLayout")->trigger(); QVERIFY(!window.findChild<ads::CDockWidget*>("configDock")->isFloating());
     }
     void configNativeVisualReceipt() {
         const auto platform = QGuiApplication::platformName();
@@ -448,8 +468,8 @@ private slots:
         QTemporaryDir dir; MainWindow window(dir.filePath("synthetic-config.xml"), true, nullptr, {}, {}, {}, dir.filePath("preferences.json"));
         window.resize(1060, 780); OPEN_CONNECTION(window); setGridText(window, "name", "Synthetic connection"); QVERIFY(waitGridSaved(window));
         setGridChoice(window, "icon", "SSH"); QVERIFY(waitGridSaved(window));
-        window.resizeDocks({window.findChild<QDockWidget*>("connectionsDock"), window.findChild<QDockWidget*>("configDock")}, {330, 330}, Qt::Horizontal);
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); tree->setCurrentItem(gridRow(window, "name")); tree->scrollToTop();
+        resizeSidePanes(window, 330);
+        auto* tree = window.findChild<QTreeWidget*>("configView"); tree->setCurrentItem(gridRow(window, "name")); tree->scrollToTop();
         QTest::qWait(150); QVERIFY(!window.findChild<ProfileEditor*>()->editing()); QVERIFY(window.grab().save(QDir(evidence).filePath("properties.png")));
         SELECT_FILE_ROOT(window); auto* defaults = window.findChild<QAction*>("actionDefaultProperties"); QTRY_VERIFY(defaults->isEnabled()); defaults->trigger();
         setGridChoice(window, "protocol", "ssh"); QVERIFY(waitGridSaved(window));
@@ -498,7 +518,7 @@ private slots:
         tree->setCurrentItem(tree->topLevelItem(0)); QVERIFY(window.documentRootSelected()); QVERIFY(window.findChild<ProfileEditor*>()->documentRoot());
     }
     void rootKeepsIndependentPasswordAndFullEncryptionControls() {
-        QTreeWidget tree; ProfileEditor editor(&tree);
+        QtTreePropertyBrowser grid; ProfileEditor& editor = *new ProfileEditor(&grid);
         editor.loadDocument(false, true, "XML protection", true);
         QVERIFY(editor.draft().contains("full_encryption"));
         QVERIFY(editor.requestedFullEncryption()); QVERIFY(!editor.requestedProtection());
@@ -595,7 +615,7 @@ private slots:
         auto* files = window.findChild<DocumentService*>();
         QTRY_VERIFY(files->status(idA) && !files->status(idA)->busy && files->status(idB) && !files->status(idB)->busy);
         auto openMenu = [&]() -> QMenu* {
-            auto* tree = window.findChild<QTreeWidget*>("configTree"); auto* row = gridRow(window, "ssh_key_path");
+            auto* tree = window.findChild<QTreeWidget*>("configView"); auto* row = gridRow(window, "ssh_key_path");
             if (row->parent()) row->parent()->setExpanded(true); tree->setCurrentItem(row, 1); tree->scrollToItem(row);
             const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2, tree->visualItemRect(row).center().y());
             QContextMenuEvent event(QContextMenuEvent::Mouse, point, tree->viewport()->mapToGlobal(point)); QApplication::sendEvent(tree->viewport(), &event);
@@ -694,7 +714,7 @@ private slots:
     }
     void compactGridHasNoPersistentEditors() {
         QTemporaryDir dir; MainWindow window(dir.filePath("p"), true); OPEN_CONNECTION(window);
-        auto* tree = window.findChild<QTreeWidget*>("configTree");
+        auto* tree = window.findChild<QTreeWidget*>("configView");
         for (QTreeWidgetItemIterator it(tree); *it; ++it) { QVERIFY(!tree->itemWidget(*it, 0)); QVERIFY(!tree->itemWidget(*it, 1)); }
         QVERIFY(!tree->findChild<QLineEdit*>()); QVERIFY(!tree->findChild<QComboBox*>()); QVERIFY(!tree->findChild<QSpinBox*>());
         QCOMPARE(tree->columnCount(), 2);
@@ -708,7 +728,7 @@ private slots:
         QTemporaryDir dir; MainWindow window(dir.filePath("p"), true); OPEN_CONNECTION(window);
         QVERIFY(qobject_cast<QLineEdit*>(gridEditor(window, "name", true))); closeGridEditors(window);
         QVERIFY(qobject_cast<QLineEdit*>(gridEditor(window, "name", false))); closeGridEditors(window);
-        auto* config = window.findChild<QTreeWidget*>("configTree"); auto* delegate = qobject_cast<PropertyDelegate*>(config->itemDelegate());
+        auto* config = window.findChild<QTreeWidget*>("configView"); auto* delegate = window.findChild<ProfileEditor*>();
         config->setCurrentItem(gridRow(window, "name"), 0); QTest::keyClick(config, Qt::Key_Enter, Qt::KeypadModifier);
         QTRY_VERIFY(qobject_cast<QLineEdit*>(delegate->activeEditor())); closeGridEditors(window);
         config->setCurrentItem(gridRow(window, "password"), 0); QTest::keyClick(config, Qt::Key_Return); QVERIFY(delegate->activeEditor()); closeGridEditors(window);
@@ -718,12 +738,11 @@ private slots:
         QVERIFY(qobject_cast<QSpinBox*>(gridEditor(window, "port", true))); closeGridEditors(window);
         for (const auto* key : {"name", "protocol", "port"}) {
             auto* row = gridRow(window, key); if (row->parent()) row->parent()->setExpanded(true);
-            auto* tree = window.findChild<QTreeWidget*>("configTree"); tree->setCurrentItem(gridRow(window, "password"), 0); tree->scrollToItem(row);
+            auto* tree = window.findChild<QTreeWidget*>("configView"); tree->setCurrentItem(gridRow(window, "password"), 0); tree->scrollToItem(row);
             const auto cell = tree->visualItemRect(row); const QPoint point(tree->columnViewportPosition(1) + tree->columnWidth(1) / 2, cell.center().y());
+            // One click on a value opens its editor.
             QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-            QTest::mouseDClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-            QTest::mouseRelease(tree->viewport(), Qt::LeftButton, Qt::NoModifier, point);
-            auto* delegate = qobject_cast<PropertyDelegate*>(tree->itemDelegate()); QTRY_VERIFY(delegate->activeEditor()); closeGridEditors(window);
+            QTRY_VERIFY(window.findChild<ProfileEditor*>()->activeEditor()); closeGridEditors(window);
         }
     }
     void enterAndFocusLossAutoSave() {
@@ -765,7 +784,7 @@ private slots:
     void popupSelectionAndEscape() {
         QTemporaryDir dir; const auto path = dir.filePath("p"); SaveWindow window(path, true); OPEN_CONNECTION(window);
         // Room for a popup wide enough that the pointer lands inside its rows.
-        auto* dock = window.findChild<QDockWidget*>("configDock"); window.resizeDocks({dock}, {330}, Qt::Horizontal); QTRY_VERIFY(dock->width() >= 300);
+        auto* dock = window.findChild<ads::CDockWidget*>("configDock"); resizeSidePanes(window, 330); QTRY_VERIFY(dock->width() >= 300);
         const auto writes = window.writes(); const auto original = contents(path);
         QPointer<QComboBox> combo = qobject_cast<QComboBox*>(gridEditor(window, "protocol")); QVERIFY(combo);
         QTest::mouseClick(combo, Qt::LeftButton); QTRY_VERIFY(combo && combo->view()->isVisible());
@@ -867,9 +886,9 @@ private slots:
     }
     void gridModesPreserveValueAndSelection() {
         QTemporaryDir dir; const auto path = dir.filePath("p"); MainWindow window(path, true); OPEN_CONNECTION(window);
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); auto* edit = qobject_cast<QLineEdit*>(gridEditor(window, "name")); edit->selectAll(); QTest::keyClicks(edit, "Mode value");
+        auto* tree = window.findChild<QTreeWidget*>("configView"); auto* edit = qobject_cast<QLineEdit*>(gridEditor(window, "name")); edit->selectAll(); QTest::keyClicks(edit, "Mode value");
         window.findChild<QAction*>("actionAlphabetical")->trigger(); QTRY_VERIFY(contents(path).contains("Mode value")); QVERIFY(waitGridSaved(window));
-        QCOMPARE(tree->currentItem()->data(0, PropertyDelegate::KeyRole).toString(), QString("name")); QVERIFY(!gridRow(window, "name")->parent());
+        QCOMPARE(tree->currentItem()->data(0, ProfileEditor::KeyRole).toString(), QString("name")); QVERIFY(!gridRow(window, "name")->parent());
         QVERIFY(window.findChild<QAction*>("actionAlphabetical")->isChecked()); QVERIFY(!window.findChild<QAction*>("actionCategorized")->isChecked());
         window.findChild<QAction*>("actionCategorized")->trigger(); QVERIFY(gridRow(window, "name")->parent());
         gridRow(window, "host")->parent()->setExpanded(false); window.findChild<QAction*>("actionAlphabetical")->trigger(); window.findChild<QAction*>("actionCategorized")->trigger();
@@ -890,22 +909,21 @@ private slots:
         QVERIFY(!gridRow(window, "host")->parent()->isExpanded());
     }
     void adoptRefreshesParentChoicesWithoutRebuildingRows() {
-        QWidget container; QTreeWidget tree(&container); tree.setObjectName("configTree"); ProfileEditor editor(&tree);
+        QWidget container; auto* grid = new QtTreePropertyBrowser(&container); ProfileEditor& editor = *new ProfileEditor(grid); auto& tree = *editor.view();
         QJsonObject parent{{"id", "parent"}, {"kind", "folder"}, {"name", "Before"}};
         QJsonObject child{{"id", "child"}, {"name", "Child"}, {"parent", "parent"}, {"overrides", QJsonObject{}}};
         editor.load(child, {{"parent", parent}, {"child", child}});
-        auto* row = gridRow(container, "parent"); tree.setCurrentItem(row, 1);
+        auto* row = gridRow(container, "parent"); editor.setCurrentKey("parent");
         parent["name"] = "After"; editor.adopt(child, {{"parent", parent}, {"child", child}});
         QCOMPARE(gridRow(container, "parent"), row); QCOMPARE(tree.currentItem(), row);
         QCOMPARE(row->text(1), QString("After"));
-        QCOMPARE(row->data(1, PropertyDelegate::OptionsRole).toList().at(1).toMap().value("text").toString(), QString("After"));
         QVERIFY(!editor.dirty());
     }
     void inheritanceWithoutSourceLabels() {
         QTemporaryDir dir; MainWindow window(dir.filePath("p"), true); window.show(); QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open);
         window.addFolder(); QTRY_VERIFY(!documentBusy(window)); closeGridEditors(window); setGridText(window, "name", "Team"); QVERIFY(waitGridSaved(window));
         setGridText(window, "username", "inherited-account"); QVERIFY(waitGridSaved(window)); window.addConnection(); QTRY_VERIFY(!documentBusy(window)); closeGridEditors(window);
-        auto* tree = window.findChild<QTreeWidget*>("configTree"); tree->setCurrentItem(gridRow(window, "username"), 1);
+        auto* tree = window.findChild<QTreeWidget*>("configView"); tree->setCurrentItem(gridRow(window, "username"), 1);
         QCOMPARE(window.findChild<QLabel*>("configHelpTitle")->text(), QString("Username")); QVERIFY(!window.findChild<QLabel*>("configHelpText")->text().contains("Source:"));
         QCOMPARE(gridValue(window, "username").toString(), QString("inherited-account")); QVERIFY(!gridLocal(window, "username"));
         setGridText(window, "username", ""); QVERIFY(waitGridSaved(window)); QVERIFY(gridLocal(window, "username")); QCOMPARE(gridValue(window, "username").toString(), QString());

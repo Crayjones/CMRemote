@@ -18,7 +18,7 @@
 
 int main(int argc,char** argv) {
     QApplication app(argc,argv);
-    applyLightAppearance(app);
+    applyAppearance(app);
     QCoreApplication::setOrganizationName("RemoteManager");
     QCoreApplication::setApplicationName("RemoteManager");
     QCoreApplication::setApplicationVersion(Updates::currentVersion());

@@ -8,7 +8,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTemporaryDir>
 
 namespace {
@@ -149,11 +149,11 @@ private slots:
         QTemporaryDir dir; const auto path = dir.filePath("confCons.xml"); QVERIFY(seed(path, true)); MainWindow window(path, true); window.show();
         QTRY_VERIFY(window.findChild<QDialog*>("filePassword")); acceptMaster(window.findChild<QDialog*>("filePassword")); QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open);
         window.findChild<QTreeWidget*>("connectionTree")->setCurrentItem(profile(window)); window.connectSelected(true); QTRY_COMPARE(window.sessionCount(), size_t(1));
-        auto* pane = qobject_cast<SessionPane*>(window.findChild<QTabWidget*>("sessionTabs")->widget(0)); QVERIFY(pane && pane->active());
+        auto* pane = qobject_cast<SessionPane*>(sessionTabs(window)->widget(0)); QVERIFY(pane && pane->active());
         auto* service = window.findChild<DocumentService*>(); const auto id = window.selectedDocument(); service->lock(id); QVERIFY(!service->status(id)->unlocked);
-        QVERIFY(pane->active()); QVERIFY(profile(window)); auto* config = window.findChild<QTreeWidget*>("configTree");
+        QVERIFY(pane->active()); QVERIFY(profile(window)); auto* config = window.findChild<QTreeWidget*>("configView");
         QTRY_VERIFY(!config->isEnabled()); config->setCurrentItem(gridRow(window, "name"), 1);
-        QTest::keyClick(config, Qt::Key_Return); QVERIFY(!qobject_cast<PropertyDelegate*>(config->itemDelegate())->activeEditor());
+        QTest::keyClick(config, Qt::Key_Return); QVERIFY(!config->window()->findChild<ProfileEditor*>()->activeEditor());
         const auto original = contents(path); std::optional<DocumentReply> reply;
         service->save(id, QJsonDocument(storedXml(path, master())).toJson(QJsonDocument::Compact), "locked", [&](DocumentReply value) { reply = std::move(value); });
         QTRY_VERIFY(reply.has_value()); QVERIFY(!reply->result.ok && !reply->committed); QCOMPARE(contents(path), original); QVERIFY(pane->active());

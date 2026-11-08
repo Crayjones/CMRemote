@@ -2,7 +2,7 @@
 #include "ConnectionImport.h"
 #include "ExportDialog.h"
 #include "ProfileEditor.h"
-#include "ui_test.h"
+#include "Shell.h"
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>

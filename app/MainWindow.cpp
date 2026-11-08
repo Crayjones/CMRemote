@@ -20,11 +20,18 @@
 #include "LocalShortcuts.h"
 #include "Views.h"
 #include "SessionFullscreenController.h"
-#include "PanelWindow.h"
+#include "FullscreenWindow.h"
+#include "DockAreaWidget.h"
+#include "DockContainerWidget.h"
+#include "FloatingDockContainer.h"
 #include "ShellVisibility.h"
 #include "UpdateCheck.h"
 #include "AutoUpdate.h"
-#include "ui_test.h"
+#include "Shell.h"
+#include "DockManager.h"
+#include "DockWidget.h"
+#include "qttreepropertybrowser_p.h"
+#include <QStyleHints>
 #include <QDir>
 #include <QActionGroup>
 #include <QScrollBar>
@@ -57,7 +64,7 @@ QSize rmNativeTitleBarInset(QWidget* widget);
 #endif
 
 MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, std::shared_ptr<ClipboardEndpoint> clipboard, QString sshHostKeyPath, QString terminalAppearancePath, const QString& preferencesPath)
-    : QMainWindow(parent), sshHostKeyPath_(std::move(sshHostKeyPath)), ui_(std::make_unique<Ui::MainWindow>()), core_(rm::detached_core()), dataPath_(dataPath), testMode_(testMode) {
+    : QMainWindow(parent), sshHostKeyPath_(std::move(sshHostKeyPath)), ui_(std::make_unique<ShellUi>()), core_(rm::detached_core()), dataPath_(dataPath), testMode_(testMode) {
     Branding::initialize();
     clipboardEndpoint_ = clipboard ? std::move(clipboard) : systemClipboardEndpoint();
     static const bool resources = [] { Q_INIT_RESOURCE(preview_icons); return true; }();
@@ -72,20 +79,17 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     // No bottom status strip; messages go to Notifications.
     statusBar()->hide();
     setWindowIcon(Branding::applicationIcon());
-    ui_->groupTabs->setTabIcon(ui_->groupTabs->indexOf(ui_->generalPanel), Branding::applicationIcon());
-    while (ui_->sessionTabs->count()) { auto* page = ui_->sessionTabs->widget(0); ui_->sessionTabs->removeTab(0); delete page; }
-    ui_->serverTab = nullptr; ui_->notificationsList->clear(); ui_->notificationText->clear(); ui_->notificationDate->clear();
-    ui_->generalPanel->setProperty("isGeneralPanel", true);
+    ui_->notificationsList->clear(); ui_->notificationText->clear(); ui_->notificationDate->clear();
     ui_->connectionTree->setSelectionMode(QAbstractItemView::SingleSelection);
-    editor_ = new ProfileEditor(ui_->configTree);
+    editor_ = new ProfileEditor(ui_->configGrid);
     for (auto* action : findChildren<QAction*>()) {
         if (!action->objectName().startsWith("action")) continue;
         action->setEnabled(false); action->setToolTip("Unavailable in this milestone");
     }
     for (auto* action : {ui_->actionAddFolder, ui_->actionAddConnection, ui_->actionTreeConnect, ui_->actionTreeDelete,
          ui_->actionTreeRename, ui_->actionTabDisconnect, ui_->actionTabReconnect, ui_->actionExit, ui_->actionAbout,
-         ui_->actionViewConnections, ui_->actionViewConfig, ui_->actionViewNotifications, ui_->actionViewQuickConnect, ui_->actionViewPanels,
-         ui_->actionViewExternalTools, ui_->actionViewMultiSsh, ui_->actionGeneralPanel, ui_->actionExpandAll,
+         ui_->actionViewConnections, ui_->actionViewConfig, ui_->actionViewNotifications, ui_->actionViewQuickConnect,
+         ui_->actionViewExternalTools, ui_->actionViewMultiSsh, ui_->actionExpandAll,
          ui_->actionCollapseAll, ui_->actionSort, ui_->actionShowHelp, ui_->actionCategorized, ui_->actionAlphabetical}) {
         action->setEnabled(true); action->setToolTip(action->text());
     }
@@ -128,9 +132,6 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     connect(ui_->quickConnectCombo->lineEdit(), &QLineEdit::returnPressed, this, [this] { quickConnect(ui_->quickConnectCombo->currentText()); });
     connect(ui_->actionSaveAsConnection, &QAction::triggered, this, &MainWindow::saveAsConnection);
     ui_->searchEdit->addAction(originalIcon("Search_16x.png"), QLineEdit::LeadingPosition)->setEnabled(false);
-    ui_->connectionsDock->setWindowIcon(originalIcon("ASPWebSite_16x.png"));
-    ui_->configDock->setWindowIcon(originalIcon("Settings_16x.png"));
-    ui_->notificationsDock->setWindowIcon(originalIcon("StatusInformation_16x.png"));
     for (auto* toolbar : {ui_->connectionsToolbar, ui_->configToolbar}) toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     ui_->actionAddFolder->setText("New folder"); ui_->actionSort->setText("Sort");
     auto* sort = new QMenu(this); ui_->actionSort->setMenu(sort);
@@ -200,10 +201,28 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     });
     if (auto* button = qobject_cast<QToolButton*>(ui_->configToolbar->widgetForAction(ui_->actionConnectionIcon))) button->setPopupMode(QToolButton::InstantPopup);
     connect(ui_->actionTabFullscreen, &QAction::triggered, this, [this] {
-        auto* tabs = currentSessions(); fullscreenPane(tabs ? qobject_cast<SessionPane*>(tabs->currentWidget()) : nullptr);
+        fullscreenPane(currentPane());
     });
-    connect(ui_->actionTabMinimize, &QAction::triggered, this, [this] { if (currentSessions() && currentSessions()->currentWidget()) showMinimized(); });
-    configureTabs(ui_->sessionTabs);
+    connect(ui_->actionTabMinimize, &QAction::triggered, this, [this] { if (auto* pane = currentPane()) pane->window()->showMinimized(); });
+    // Sessions are dock tabs: track the one in use and keep the General placeholder current.
+    connect(ui_->dockManager, &ads::CDockManager::focusedDockWidgetChanged, this, [this](ads::CDockWidget*, ads::CDockWidget* now) {
+        if (isSessionDock(now) && now->dockManager() == ui_->dockManager) { lastSession_ = now; updateActions(); }
+    });
+    connect(ui_->dockManager, &ads::CDockManager::floatingWidgetCreated, this, [this](ads::CFloatingDockContainer* floating) {
+        floating->installEventFilter(this); sessionLayoutChanged();
+    });
+    connect(ui_->dockManager, &ads::CDockManager::dockAreaCreated, this, [this](ads::CDockAreaWidget* area) {
+        connect(area, &ads::CDockAreaWidget::currentChanged, this, [this, area] {
+            if (auto* dock = area->currentDockWidget(); isSessionDock(dock) && dock->dockManager() == ui_->dockManager && lastSession_ && lastSession_->dockAreaWidget() == area) lastSession_ = dock;
+            updateActions();
+        });
+        sessionLayoutChanged();
+    });
+    connect(ui_->dockManager, &ads::CDockManager::dockWidgetAdded, this, &MainWindow::sessionLayoutChanged);
+    connect(ui_->dockManager, &ads::CDockManager::dockWidgetRemoved, this, &MainWindow::sessionLayoutChanged);
+    connect(ui_->dockManager, &ads::CDockContainerWidget::dockAreasAdded, this, &MainWindow::sessionLayoutChanged);
+    connect(ui_->dockManager, &ads::CDockContainerWidget::dockAreasRemoved, this, &MainWindow::sessionLayoutChanged);
+    connect(ui_->generalPanel(), &ads::CDockAreaWidget::currentChanged, this, &MainWindow::updateActions);
     configureMenus();
     connect(ui_->connectionTree, &ConnectionTree::dragStarting, editor_, &ProfileEditor::flush);
     connect(ui_->connectionTree, &QTreeWidget::currentItemChanged, this, &MainWindow::selectionChanged);
@@ -216,12 +235,9 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     connect(ui_->actionCollapseAll, &QAction::triggered, ui_->connectionTree, &QTreeWidget::collapseAll);
     connect(ui_->actionSort, &QAction::triggered, this, [this] { sortConnections(Qt::AscendingOrder); });
     connect(ui_->searchEdit, &QLineEdit::textChanged, this, &MainWindow::filterConnections);
-    auto bindDock = [this](QDockWidget* dock, QAction* action) {
-        connect(action, &QAction::toggled, dock, [dock](bool visible) { setShellVisible(dock, visible); });
-        connect(dock, &QDockWidget::visibilityChanged, action, [dock, action] {
-            if (dock->property("presentationSuppressed").toBool()) return;
-            const QSignalBlocker blocker(action); action->setChecked(!dock->isHidden());
-        });
+    auto bindDock = [](ads::CDockWidget* dock, QAction* action) {
+        connect(action, &QAction::toggled, dock, [dock](bool visible) { if (visible == dock->isClosed()) dock->toggleView(visible); });
+        connect(dock, &ads::CDockWidget::viewToggled, action, [action](bool open) { const QSignalBlocker blocker(action); action->setChecked(open); });
     };
     bindDock(ui_->connectionsDock, ui_->actionViewConnections); bindDock(ui_->configDock, ui_->actionViewConfig);
     bindDock(ui_->notificationsDock, ui_->actionViewNotifications);
@@ -235,18 +251,13 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     bindToolbar(ui_->quickConnectToolbar, ui_->actionViewQuickConnect); bindToolbar(ui_->externalToolsToolbar, ui_->actionViewExternalTools);
     bindToolbar(ui_->multiSshToolbar, ui_->actionViewMultiSsh);
     ui_->externalToolsToolbar->hide(); ui_->multiSshToolbar->hide();
-    ui_->actionViewPanels->setToolTip("Show the connection panel tabs (General, Panel 1, …) above the session tabs");
-    connect(ui_->actionViewPanels, &QAction::toggled, this, &MainWindow::applyPanelTabs);
-    applyPanelTabs();
-    connect(ui_->actionGeneralPanel, &QAction::triggered, this, [this] { ui_->groupTabs->setCurrentWidget(ui_->generalPanel); });
     ui_->configHelpTitle->setText("Profile settings");
     ui_->configHelpText->setText("Enter or leaving the cell saves it. Escape cancels the cell. Passwords belong to the selected XML file.");
     ui_->configSplitter->setSizes({170, 65}); ui_->notificationSplitter->setSizes({226, 899});
-    setCorner(Qt::BottomLeftCorner, Qt::BottomDockWidgetArea); setCorner(Qt::BottomRightCorner, Qt::BottomDockWidgetArea);
 #ifdef Q_OS_MACOS
     if (QGuiApplication::platformName() == "cocoa") placeQuickConnectInTitleBar();
 #endif
-    resetLayout();
+    resetLayout(); updateSessionLayout();
     pollTimer_ = new QTimer(this);
     connect(pollTimer_, &QTimer::timeout, this, [this] {
         auto poll = [this](rm::Core& core, DocumentId document) {
@@ -263,6 +274,8 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     });
     initializeFiles();
     pollTimer_->start(16);
+    // "Match System" follows the OS; Appearance swaps the palette, icons follow here.
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [] { ThemeIcons::restyle(); });
     preferences_ = new ApplicationPreferences(preferencesPath, this);
     if (!preferencesPath.isEmpty()) {
         openFiles_ = new OpenFileList(QFileInfo(preferencesPath).absoluteDir().filePath("open-files.json"), this);
@@ -304,40 +317,26 @@ void MainWindow::applyPreferences(PreferenceValues values) {
     if (openh264_) openh264_->setEnabled(values.openh264);
     editor_->setCategorized(values.categorized); ui_->actionShowHelp->setChecked(values.propertyHelp);
     ui_->actionViewQuickConnect->setChecked(values.quickConnect); ui_->actionLockToolbars->setChecked(values.lockToolbars);
-    ui_->actionViewPanels->setChecked(values.showPanels);
     commandAsControl_ = values.commandAsControl; DesktopView::setCommandAsControl(values.commandAsControl);
     // Updates are scheduled only once the stored choice is known, so an opt-out never races the default.
     autoUpdate_ = values.autoUpdate; updatePreferenceKnown_ = true; if (updater_) updater_->setAutomatic(values.autoUpdate);
-    theme_ = values.theme; applyTheme(*qApp, theme_); applyThemeStyle();
+    theme_ = values.theme; applyTheme(*qApp, theme_); ThemeIcons::restyle();
     updateActions();
 }
 PreferenceValues MainWindow::currentPreferences() const {
     PreferenceValues values;
     values.categorized = editor_->categorized(); values.propertyHelp = ui_->actionShowHelp->isChecked();
     values.quickConnect = ui_->actionViewQuickConnect->isChecked(); values.lockToolbars = ui_->actionLockToolbars->isChecked();
-    values.defaults = defaults_; values.openh264 = openh264Enabled_; values.showPanels = ui_->actionViewPanels->isChecked();
+    values.defaults = defaults_; values.openh264 = openh264Enabled_;
     values.commandAsControl = commandAsControl_; values.autoUpdate = autoUpdate_; values.theme = theme_;
     return values;
-}
-void MainWindow::applyPanelTabs() {
-    // Separate windows keep their panel row: it carries their window menu.
-    setShellVisible(ui_->groupTabs->tabBar(), ui_->actionViewPanels->isChecked());
-}
-void MainWindow::applyThemeStyle() {
-    if (lightStyleSheet_.isEmpty()) {
-        lightStyleSheet_ = styleSheet();
-        // Match the system when it switches while Settings says "Match System".
-        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] { applyThemeStyle(); });
-    }
-    const auto sheet = themeStyleSheet(lightStyleSheet_, themeIsDark());
-    if (sheet != styleSheet()) setStyleSheet(sheet);
-    ThemeIcons::restyle();
 }
 void MainWindow::showOptions() { guard([this] { openSettings(0); }); }
 void MainWindow::openSettings(int page) {
     if (!optionsDialog_) {
         auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_, terminalAppearance_); optionsDialog_ = dialog;
         connect(dialog, &OptionsDialog::applied, this, &MainWindow::applyPreferences);
+        connect(dialog, &OptionsDialog::themePreviewed, this, [](const QString& theme) { applyTheme(*qApp, theme); ThemeIcons::restyle(); });
         dialog->open();
     }
     if (page) qobject_cast<OptionsDialog*>(optionsDialog_.data())->showPage(page);
@@ -346,9 +345,9 @@ void MainWindow::openSettings(int page) {
 MainWindow::~MainWindow() {
     // Child widgets can emit focus/editor signals during QMainWindow teardown.
     closeApproved_ = true; closeRequested_ = false; cancelCredentials();
-    delete dropHighlight_;
     for (auto* child : findChildren<QObject*>()) child->disconnect(this);
-    const auto windows = panelWindows_ + retiredWindows_;
+    QList<QPointer<QWidget>> windows = retiredWindows_;
+    for (const auto& window : ownedFullscreen_) windows.append(window.data());
     // Sessions first: their views must be destroyed while the windows' GPU contexts exist.
     closeAllSessions(); for (const auto& window : windows) delete window.data(); delete files_; files_ = nullptr; documents_.clear();
 }
@@ -573,7 +572,7 @@ void MainWindow::updateActions() {
     const bool defaultsAvailable = preferencesReady_ && !transitionPending_ && documentRootSelected();
     ui_->actionProperties->setEnabled(true); ui_->actionInheritance->setEnabled(!defaults && !transitionPending_ && inheritanceAvailable());
     ui_->actionDefaultProperties->setEnabled(defaultsAvailable); ui_->actionDefaultInheritance->setEnabled(defaultsAvailable);
-    ui_->configTree->setEnabled((defaults || selected || documentRootSelected()) && !transitionPending_ && !autoSaveInFlight_); ui_->connectionTree->setEnabled(!transitionPending_);
+    ui_->configGrid->setEnabled((defaults || selected || documentRootSelected()) && !transitionPending_ && !autoSaveInFlight_); ui_->connectionTree->setEnabled(!transitionPending_);
     ui_->actionAddFolder->setEnabled(editable); ui_->actionAddConnection->setEnabled(editable);
     ui_->actionTreeRename->setEnabled(selected && editable); ui_->actionTreeDelete->setEnabled(selected && editable);
     const auto profile = profiles_.value(selectedId()), effective = profile.value("effective").toObject();
@@ -583,8 +582,7 @@ void MainWindow::updateActions() {
 #endif
     ui_->quickConnectButton->setEnabled(!transitionPending_ && (rdpAvailable || quickConnectProtocol() == "ssh" || quickConnectProtocol() == "vnc"));
     ui_->actionTreeConnect->setEnabled(editable && !connectableProfiles(selectedDocument(), selectedId()).isEmpty());
-    auto* tabs = currentSessions();
-    auto* current = tabs ? qobject_cast<SessionPane*>(tabs->currentWidget()) : nullptr;
+    auto* current = currentPane();
     ui_->actionConnectionIcon->setEnabled((defaults || selected) && !transitionPending_ && !autoSaveInFlight_ && !editor_->inheritance());
     ui_->actionConnectionIcon->setIcon(ConnectionIcons::resolve(editor_->icon(), profile.value("kind") == "folder"));
     ui_->actionSaveAsConnection->setEnabled(current && current->profile().isEmpty() && editable);
@@ -594,6 +592,7 @@ void MainWindow::updateActions() {
     ui_->actionTabMinimize->setEnabled(tab); ui_->actionTabMinimize->setToolTip("Minimize the window; keep the session connected");
     ui_->actionTabDisconnect->setEnabled(tab && current->active() && !transitionPending_); ui_->actionTabReconnect->setEnabled(tab && !transitionPending_);
     ui_->actionNextSession->setEnabled(tab); ui_->actionPreviousSession->setEnabled(tab);
+    ui_->actionAddPanel->setEnabled(tab && panelPanes(currentPanel()).size() > 1 && !transitionPending_);
     bool associated = false;
     for (auto* pane : sessionPages()) associated = associated || (pane->profile() == selectedId() && pane->document() == selectedDocument() && selected && pane->active());
     ui_->actionTreeDisconnect->setEnabled(associated && !transitionPending_);
@@ -671,7 +670,7 @@ void MainWindow::connectCommitted(bool mock) {
     if (profiles_.value(id).value("kind") == "folder") {
         const auto members = connectableProfiles(editorDocument_, id, mock);
         if (members.isEmpty()) { fail("This folder has no connections that can be opened."); return; }
-        folderConnect_ = FolderConnect{editorDocument_, id, members, currentSessions(), mock};
+        folderConnect_ = FolderConnect{editorDocument_, id, members, currentPanel(), mock};
         continueFolderConnect(); return;
     }
     // An open tab is shown; a disconnected one also reconnects (double-click or Connect).
@@ -685,7 +684,7 @@ void MainWindow::connectCommitted(bool mock) {
     if (!mock && effective.value("protocol") != "rdp" && effective.value("protocol") != "ssh" && effective.value("protocol") != "vnc") { fail("This protocol has no network backend."); return; }
     if (profiles_.value(id).value("kind") != "connection") { fail("Folders cannot open sessions"); return; }
     if (!effective.value("unsupported").toArray().isEmpty()) { fail("This native connection has unsupported settings; edit them before connecting."); return; }
-    requestSession(id, sessionTarget(effective), mock, currentSessions(), nullptr, false, editorDocument_);
+    requestSession(id, sessionTarget(effective), mock, currentPanel(), nullptr, false, editorDocument_);
 }
 QStringList MainWindow::connectableProfiles(DocumentId document, const QString& id, bool mock) const {
     const auto doc = context(document); if (!doc) return {};
@@ -713,7 +712,7 @@ void MainWindow::continueFolderConnect() {
     // One credential attempt runs at a time; each finish or cancel resumes here.
     while (folderConnect_ && !closeApproved_ && !credentialDialog_ && !credentialAttempt_) {
         auto& run = *folderConnect_; const auto doc = context(run.document);
-        if (!doc || run.pending.isEmpty() || !run.owner) { folderConnect_.reset(); return; }
+        if (!doc || run.pending.isEmpty()) { folderConnect_.reset(); return; }
         const auto id = run.pending.takeFirst(); bool open = false;
         for (auto* pane : sessionPages()) open = open || (pane->profile() == id && pane->document() == run.document);
         if (open) continue;
@@ -731,7 +730,7 @@ void MainWindow::quickConnect(const QString& endpoint, bool mock) {
         if (history->findText(address) < 0) history->addItem(address);
         while (history->count() > 20) history->removeItem(0);
         history->setCurrentText(address);
-        requestSession({}, *target, mock, currentSessions());
+        requestSession({}, *target, mock, currentPanel());
     });
 }
 QString MainWindow::quickConnectProtocol() const { return ui_->quickConnectButton->property("protocol").toString(); }
@@ -776,8 +775,8 @@ void MainWindow::rebuildConnectionsMenu(QMenu* menu) {
     }
     if (menu->isEmpty()) menu->addAction("No connection files open")->setEnabled(false);
 }
-void MainWindow::requestSession(const QString& profile, SessionTarget target, bool mock, QTabWidget* owner, SessionPane* replacement, bool promptOnly, DocumentId document, const QString& folder) {
-    if (closeApproved_ || !owner) return;
+void MainWindow::requestSession(const QString& profile, SessionTarget target, bool mock, Panel owner, SessionPane* replacement, bool promptOnly, DocumentId document, const QString& folder) {
+    if (closeApproved_) return;
     if (credentialDialog_ || credentialAttempt_) {
         if (credentialDialog_) credentialDialog_->raise();
         return;
@@ -792,13 +791,15 @@ void MainWindow::requestSession(const QString& profile, SessionTarget target, bo
     if (mock) { attachSession(profile, target, true, owner, replacement, std::nullopt, document); return; }
     beginFileCredentials(document, profile, target, owner, replacement, promptOnly, folder);
 }
-void MainWindow::attachSession(const QString& profile, SessionTarget target, bool mock, QPointer<QTabWidget> owner,
+void MainWindow::attachSession(const QString& profile, SessionTarget target, bool mock, Panel owner,
                                QPointer<SessionPane> replacement, std::optional<TransientCredentials> credentials, DocumentId document,
                                std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication,
                                std::optional<rust::Box<rm::vnc::Authentication>> vncAuthentication) {
     // A fullscreen session returns to its tab before it is replaced there.
-    if (replacement) { exitFullscreenFor(replacement); owner = ownerOf(replacement); }
-    if (!owner || closeApproved_ || !sessionPanels().contains(owner)) return;
+    if (replacement) { exitFullscreenFor(replacement); if (!isOpenPane(replacement)) return; owner = panelOf(replacement); }
+    // A panel that closed meanwhile opens the session where new sessions go.
+    if (!owner || !owner->dockManager()) owner = currentPanel();
+    if (closeApproved_ || !owner) return;
     if (!replacement) for (auto* existing : sessionPages()) {
         if ((!profile.isEmpty() && existing->profile() == profile && existing->document() == document) ||
             (profile.isEmpty() && existing->profile().isEmpty() && existing->target() == target)) { focusPane(existing); return; }
@@ -816,12 +817,9 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
         info.host = bytes(target.host); info.port = target.port; info.username = bytes(target.username); info.domain = bytes(target.domain); info.options = bridgeOptions(target.options);
         info.ssh_auth = bytes(target.sshAuth); info.ssh_key_path = bytes(target.sshKeyPath); info.view_only = target.protocol == "vnc" && target.viewOnly;
         if (target.protocol == "vnc") { info.username = std::string(); info.domain = std::string(); }
-        int index = owner->count(); QString caption = (mock ? "MOCK · " : target.protocol.toUpper() + " · ") + qstr(info.title);
-        if (replacement) {
-            index = owner->indexOf(replacement); if (index < 0) { core.close_session(info.id); return; }
-            caption = owner->tabText(index); replacement->shutdown(); sessionCore(replacement->document()).close_session(bytes(replacement->id()));
-            owner->removeTab(index); delete replacement;
-        }
+        int index = -1; QString caption = (mock ? "MOCK · " : target.protocol.toUpper() + " · ") + qstr(info.title);
+        auto* previous = replacement ? dockOf(replacement) : nullptr;
+        if (previous) { index = owner->dockWidgets().indexOf(previous); caption = previous->windowTitle(); }
         // Attach only after QRhiWidget has enabled its RHI configuration.
         auto* pane = new SessionPane(info, profile, nullptr, document, clipboardEndpoint_);
         pane->setProperty("sessionProtocol", qstr(info.protocol));
@@ -837,7 +835,23 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
                 view->setContextActions({save});
             }
         }
-        owner->insertTab(index, pane, context(document) ? ConnectionIcons::profile(context(document)->profiles().value(profile)) : ConnectionIcons::resolve(""), caption); owner->setCurrentIndex(index);
+        // The session's tab is a dock of its own in the panel.
+        pane->setWindowTitle(caption);
+        auto* dock = createSessionDock(ui_->dockManager, pane, QString("sessionDock%1").arg(nextSessionDock_++));
+        dock->setIcon(context(document) ? ConnectionIcons::profile(context(document)->profiles().value(profile)) : ConnectionIcons::resolve(""));
+        configureSessionDock(dock);
+        owner->dockManager()->addDockWidgetTabToArea(dock, owner, index);
+        if (previous) {
+            // The new tab takes the old one's place before the old one closes, so its panel stays.
+            replacement->shutdown(); sessionCore(replacement->document()).close_session(bytes(replacement->id()));
+            if (lastSession_ == previous) lastSession_ = dock;
+            if (auto* manager = previous->dockManager()) manager->removeDockWidget(previous);
+            delete previous;
+        }
+        dock->setAsCurrentTab();
+        if (newPanelOnOpen_.removeAll(ProfileReference{document, profile})) splitPane(pane, ads::RightDockWidgetArea);
+        if (owner->dockManager() == ui_->dockManager && !lastSession_) lastSession_ = dock;
+        updateSessionLayout();
         connect(pane, &SessionPane::input, this, [this, document](const QString& session, const QString& text) {
             try { sessionCore(document).mock_input(bytes(session), bytes(text)); } catch (const rust::Error&) {}
         });
@@ -885,14 +899,13 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
     } catch (const rust::Error& e) { fail(QString::fromUtf8(e.what())); }
 }
 void MainWindow::saveAsConnection() {
-    auto* tabs = currentSessions();
-    QPointer<SessionPane> pane = tabs ? qobject_cast<SessionPane*>(tabs->currentWidget()) : nullptr;
+    QPointer<SessionPane> pane = currentPane();
     if (!pane || !pane->profile().isEmpty()) return;
     guard([this, pane] { saveTemporaryToFile(pane); });
 }
 void MainWindow::closeTab(int index) {
-    auto* tabs = currentSessions();
-    if (tabs) closePane(qobject_cast<SessionPane*>(tabs->widget(index)));
+    const auto panes = panelPanes(currentPanel());
+    if (index >= 0 && index < panes.size()) closePane(panes.at(index));
 }
 void MainWindow::disconnectPane(SessionPane* pane) {
     if (!pane) return;
@@ -904,18 +917,18 @@ void MainWindow::disconnectPane(SessionPane* pane) {
     updateActions();
 }
 void MainWindow::disconnectCurrent() {
-    auto* tabs = currentSessions(); if (tabs) disconnectPane(qobject_cast<SessionPane*>(tabs->currentWidget()));
+    disconnectPane(currentPane());
 }
 void MainWindow::reconnectCurrent() {
-    auto* tabs = currentSessions(); if (tabs) reconnectPane(qobject_cast<SessionPane*>(tabs->currentWidget()));
+    if (auto* pane = currentPane()) reconnectPane(pane);
 }
 void MainWindow::reconnectPane(QPointer<SessionPane> pane, bool promptOnly) {
     if (!pane) return;
     guard([this, pane, promptOnly] {
-        if (!pane || !ownerOf(pane)) return;
+        if (!pane || !isOpenPane(pane)) return;
         disconnectPane(pane);
         auto reopen = [this, pane, promptOnly] {
-            if (!pane || !ownerOf(pane) || closeApproved_) return;
+            if (!pane || !isOpenPane(pane) || closeApproved_) return;
             const auto profile = pane->profile(); auto target = pane->target();
             if (!profile.isEmpty()) {
                 const auto owningProfiles = context(pane->document()) ? context(pane->document())->profiles() : QHash<QString, QJsonObject>{};
@@ -924,7 +937,7 @@ void MainWindow::reconnectPane(QPointer<SessionPane> pane, bool promptOnly) {
                 if (!pane->mock() && effective.value("protocol") != "rdp" && effective.value("protocol") != "ssh" && effective.value("protocol") != "vnc") { fail("This protocol has no network backend."); return; }
                 target = sessionTarget(effective);
             }
-            requestSession(profile, target, pane->mock(), ownerOf(pane), pane, promptOnly, pane->document());
+            requestSession(profile, target, pane->mock(), panelOf(pane), pane, promptOnly, pane->document());
         };
         if (pane->vncRetiring()) pane->afterVncRetirement(std::move(reopen));
         else if (pane->sshRetiring()) pane->afterSshRetirement(std::move(reopen)); else reopen();
@@ -1139,7 +1152,7 @@ void MainWindow::placeQuickConnectInTitleBar() {
     spacer->setAttribute(Qt::WA_TransparentForMouseEvents);
     titleBarInset_ = toolbar->insertWidget(toolbar->actions().value(0), spacer);
     toolbar->setMovable(false); toolbar->setMinimumHeight(titleBarHeight_);
-    toolbar->setStyleSheet("QToolBar { background: transparent; border: none; }");
+    toolbar->setProperty("inTitleBar", true); toolbar->style()->unpolish(toolbar); toolbar->style()->polish(toolbar);
     // Empty toolbar space still drags and zooms the window like a title bar.
     // So does the window's own background beside the toolbar.
     for (QWidget* area : {static_cast<QWidget*>(this), static_cast<QWidget*>(toolbar), ui_->quickConnectControls, static_cast<QWidget*>(ui_->quickConnectLabel)}) area->installEventFilter(this);

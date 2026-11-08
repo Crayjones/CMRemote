@@ -444,6 +444,31 @@ void DocumentService::importProfiles(DocumentId id, QByteArray projection, std::
         passwords->local.clear();
     }, std::move(complete));
 }
+void DocumentService::duplicateProfiles(DocumentId id, QByteArray projection, std::vector<std::pair<QString, QString>> copies,
+                                        QString reservation, Completion complete) {
+    execute(id, std::move(reservation), [projection = std::move(projection), copies = std::move(copies)](State& state, DocumentReply& reply, const auto& canceled) {
+        auto* doc = state.find(reply); if (!doc) return;
+        if (!doc->writable()) { reply.result = error("Unlock this file before saving."); return; }
+        std::optional<QByteArray> normalized;
+        reply.result = doc->store.updateXml(*doc->master, [&](ConnectionXml& xml) {
+            auto passwords = xml.importPasswords(*doc->master, canceled); if (!passwords) return false;
+            QSet<QString> bound;
+            for (const auto& record : xml.boundRecords(canceled)) bound.insert(record.consumer.toLower());
+            normalized = xml.patch(*doc->master, projection, canceled); if (!normalized) return false;
+            QStringList consumers;
+            for (const auto& [original, copy] : copies) {
+                const auto key = original.toLower();
+                if (passwords->inherited.contains(key) && !xml.setPasswordInheritance(*doc->master, copy, true, canceled)) return false;
+                if (const auto found = passwords->local.find(key); found != passwords->local.end() && !xml.setPassword(*doc->master, copy, found->second, canceled)) return false;
+                if (bound.contains(key)) consumers << copy;
+            }
+            // The copy has the original's account, which the user already approved this password for.
+            return xml.authorizeConsumers(*doc->master, consumers, canceled);
+        }, nullptr, canceled);
+        reply.committed = reply.result.ok;
+        if (reply.committed) reply.projection = std::move(*normalized);
+    }, std::move(complete));
+}
 void DocumentService::exportFile(DocumentId id, QString path, ExportOptions options, Completion complete) {
     execute(id, {}, [path = std::move(path), options = std::move(options)](State& state, DocumentReply& reply, const auto& canceled) {
         auto* doc = state.find(reply); if (!doc) return;

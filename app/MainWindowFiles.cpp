@@ -1,4 +1,7 @@
 #include "MainWindow.h"
+#include "DockAreaWidget.h"
+#include "DockWidget.h"
+#include "Shell.h"
 #include "ThemeIcons.h"
 #include <QDir>
 #include "VncAuthentication.h"
@@ -8,7 +11,7 @@
 #include "SessionPane.h"
 #include "SshAuthentication.h"
 #include "FilePasswordDialogs.h"
-#include "ui_test.h"
+#include "Shell.h"
 #include <QFileDialog>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -232,7 +235,7 @@ void MainWindow::rebuildFiles() {
             items.value(profile)->setExpanded(doc->expanded().contains(profile));
         }
         for (auto* pane : sessionPages()) if (pane->document() == id && doc->profiles().contains(pane->profile())) {
-            if (auto* tabs = ownerOf(pane)) tabs->setTabIcon(tabs->indexOf(pane), ConnectionIcons::profile(doc->profiles().value(pane->profile())));
+            if (auto* dock = dockOf(pane)) dock->setIcon(ConnectionIcons::profile(doc->profiles().value(pane->profile())));
         }
         treeGenerations_.insert(id, doc->treeGeneration());
     }
@@ -562,7 +565,7 @@ void MainWindow::updateFileActions() {
     for (auto id : documentOrder_) { const auto doc = context(id); anyWritable = anyWritable || doc->canWrite(); trees.insert(id, {doc->profiles(), doc->treeGeneration(), doc->canWrite() && !autoSaveError_ && !transitionPending_, doc->order()}); }
     ui_->connectionTree->setCommittedDocuments(trees); ui_->connectionTree->setMovesEnabled(anyWritable && !closeApproved_ && !transitionPending_ && !autoSaveError_);
     const bool configEditable = !transitionPending_ && !autoSaveInFlight_ && (editor_->defaultsMode() ? preferencesReady_ : doc && doc->canWrite());
-    ui_->configTree->setEnabled(configEditable && (editor_->defaultsMode() || documentRootSelected() || !selectedId().isEmpty()));
+    ui_->configGrid->setEnabled(configEditable && (editor_->defaultsMode() || documentRootSelected() || !selectedId().isEmpty()));
     ui_->actionConnectionIcon->setEnabled(configEditable && !editor_->inheritance() && (editor_->defaultsMode() || !selectedId().isEmpty()));
     if (!editor_->defaultsMode()) editor_->setPasswordState(doc ? doc->status().passwords.value(editor_->id()) : PasswordState{},
         doc && doc->canWrite() && !transitionPending_);
@@ -587,10 +590,9 @@ void MainWindow::updateFileActions() {
     ui_->actionUnlockPasswords->setEnabled(doc && !doc->status().busy && (!doc->status().unlocked || reviewable) && doc->status().warning.isEmpty());
     ui_->actionLockPasswords->setEnabled(doc && (doc->status().unlocked || doc->status().compatibilityMaster || doc->status().busy)); ui_->actionChangeMaster->setEnabled(doc && !doc->status().busy && !transitionPending_ && !autoSaveError_ && doc->status().warning.isEmpty());
     ui_->actionDifferentCredentials->setEnabled(ui_->actionTreeConnect->isEnabled() && profiles_.value(selectedId()).value("kind") == "connection");
-    ui_->actionSaveAsConnection->setEnabled(currentSessions() && qobject_cast<SessionPane*>(currentSessions()->currentWidget()) &&
-        qobject_cast<SessionPane*>(currentSessions()->currentWidget())->profile().isEmpty() && anyWritable && !transitionPending_);
+    ui_->actionSaveAsConnection->setEnabled(currentPane() && currentPane()->profile().isEmpty() && anyWritable && !transitionPending_);
 }
-void MainWindow::beginFileCredentials(DocumentId document, const QString& profile, SessionTarget target, QTabWidget* owner, SessionPane* replacement, bool promptOnly, const QString& folder) {
+void MainWindow::beginFileCredentials(DocumentId document, const QString& profile, SessionTarget target, Panel owner, SessionPane* replacement, bool promptOnly, const QString& folder) {
     auto attempt = std::make_shared<CredentialAttempt>(); attempt->profile = profile; attempt->document = document; attempt->target = target; attempt->folder = folder;
     attempt->owner = owner; attempt->page = replacement; attempt->replacing = replacement != nullptr; attempt->token = ++credentialToken_;
     if (document.valid()) {
@@ -599,7 +601,7 @@ void MainWindow::beginFileCredentials(DocumentId document, const QString& profil
         const auto stored = attemptTarget(*doc, profile, folder);
         attempt->console = stored && target.protocol == "rdp" && target.options.consoleSession && !stored->options.consoleSession;
     }
-    credentialAttempt_ = attempt; credentialPage_ = replacement; credentialOwner_ = owner;
+    credentialAttempt_ = attempt; credentialPage_ = replacement;
     if (!document.valid() || promptOnly) { promptCredentials(attempt); return; }
     if (target.protocol == "ssh" && target.sshAuth == "private_key") { connectSshKey(attempt); return; }
     const auto doc = context(document);

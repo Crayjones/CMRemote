@@ -1,8 +1,11 @@
 #include "MainWindow.h"
+#include "DockAreaWidget.h"
+#include "DockWidget.h"
+#include "Shell.h"
 #include "ConnectionTree.h"
 #include "ProfileEditor.h"
 #include "SessionPane.h"
-#include "ui_test.h"
+#include "Shell.h"
 #include "Views.h"
 #include "SshHostKeyService.h"
 #include "SshTransferDialog.h"
@@ -11,6 +14,7 @@
 #include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QMenu>
 #include <QTcpSocket>
 #include <QTimer>
@@ -147,18 +151,22 @@ void MainWindow::connectWithOption(ConnectOption option) {
     guard([this, reference, option] {
         if (!selectConnectionProfile(reference)) return;
         if (option == ConnectOption::ChoosePanel)
-            choosePanel([this, reference](QTabWidget* owner) { connectInPanel(reference, owner, ConnectOption::ChoosePanel); });
-        else connectInPanel(reference, currentSessions(), option);
+            choosePanel([this, reference](Panel owner, bool newPanel) {
+                if (newPanel) newPanelOnOpen_.append(reference);
+                connectInPanel(reference, newPanel ? Panel(currentPanel()) : owner, ConnectOption::ChoosePanel);
+            });
+        else connectInPanel(reference, currentPanel(), option);
     });
 }
 
-void MainWindow::connectInPanel(ProfileReference reference, QPointer<QTabWidget> owner, ConnectOption option) {
-    if (!owner || !selectConnectionProfile(reference)) return;
+void MainWindow::connectInPanel(ProfileReference reference, Panel owner, ConnectOption option) {
+    if (!owner || !selectConnectionProfile(reference)) { newPanelOnOpen_.removeAll(reference); return; }
     auto target = committedTarget(reference.profile); if (!target) { fail("Only connections can be opened."); return; }
     if (!profiles_.value(reference.profile).value("effective").toObject().value("unsupported").toArray().isEmpty()) {
         fail("This native connection has unsupported settings; edit them before connecting."); return;
     }
     for (auto* pane : sessionPages()) if (pane->profile() == reference.profile && pane->document() == reference.document) {
+        newPanelOnOpen_.removeAll(reference);
         if (option == ConnectOption::Fullscreen) fullscreenPane(pane); else focusPane(pane);
         return;
     }
@@ -167,20 +175,38 @@ void MainWindow::connectInPanel(ProfileReference reference, QPointer<QTabWidget>
     requestSession(reference.profile, *target, false, owner, nullptr, option == ConnectOption::NoCredentials, reference.document);
 }
 
-void MainWindow::choosePanel(std::function<void(QTabWidget*)> chosen) {
-    QStringList names; QList<QPointer<QTabWidget>> panels;
-    for (auto* groups : groupBars()) for (int i = 0; i < groups->count(); ++i)
-        if (auto* tabs = groups->widget(i) ? groups->widget(i)->findChild<QTabWidget*>() : nullptr) { names << groups->tabText(i); panels << tabs; }
+void MainWindow::choosePanel(std::function<void(Panel, bool)> chosen) {
+    QStringList names; QList<Panel> panels;
+    // General is listed even while empty: new sessions can always open there.
+    auto panelList = sessionPanels(); if (!panelList.contains(ui_->generalPanel())) panelList.prepend(ui_->generalPanel());
+    for (auto* panel : panelList) { names << panelName(panel); panels << panel; }
     names << "New panel";
     auto* dialog = new QInputDialog(this); dialog->setObjectName("choosePanelDialog");
     dialog->setWindowTitle("Choose panel"); dialog->setLabelText("Connect in panel:");
     dialog->setComboBoxItems(names); dialog->setComboBoxEditable(false); dialog->setAttribute(Qt::WA_DeleteOnClose);
     connect(dialog, &QDialog::accepted, this, [this, dialog, names, panels, chosen = std::move(chosen)] {
         const int index = names.indexOf(dialog->textValue()); if (index < 0) return;
-        QTabWidget* owner = index < panels.size() ? panels.at(index).data() : createPanel(ui_->groupTabs)->findChild<QTabWidget*>();
-        if (owner) chosen(owner);
+        if (index < panels.size()) { if (panels.at(index)) chosen(panels.at(index), false); }
+        else chosen({}, true);
     });
     dialog->open();
+}
+
+// Pairs each profile of a duplicated subtree with its copy. The copies keep
+// their originals' child order, so the two trees are walked side by side.
+static std::vector<std::pair<QString, QString>> duplicatedPairs(const QByteArray& projection, const QString& original, const QString& copy) {
+    QHash<QString, QStringList> children;
+    for (const auto& value : QJsonDocument::fromJson(projection).object().value("profiles").toArray()) {
+        const auto profile = value.toObject(); children[profile.value("parent").toString()] << profile.value("id").toString();
+    }
+    std::vector<std::pair<QString, QString>> pairs;
+    std::function<void(const QString&, const QString&)> pair = [&](const QString& from, const QString& to) {
+        pairs.emplace_back(from, to);
+        const auto& left = children.value(from); const auto& right = children.value(to);
+        for (qsizetype i = 0; i < std::min(left.size(), right.size()); ++i) pair(left.at(i), right.at(i));
+    };
+    pair(original, copy);
+    return pairs;
 }
 
 void MainWindow::duplicateSelected() {
@@ -188,7 +214,14 @@ void MainWindow::duplicateSelected() {
     if (reference.profile.isEmpty()) return;
     guard([this, reference] {
         if (!selectConnectionProfile(reference)) return;
-        writeFileProfile(rm::ProfileChange::Duplicate, reference.profile, {});
+        const auto id = editorDocument_; const auto doc = context(id);
+        if (!doc || !doc->canWrite()) { fail("Unlock this connection file before saving."); return; }
+        try {
+            // The copies keep their originals' saved passwords.
+            const auto candidate = doc->prepareProfile(rm::ProfileChange::Duplicate, reference.profile.toUtf8()); updateActions();
+            files_->duplicateProfiles(id, candidate.projection, duplicatedPairs(candidate.projection, reference.profile, candidate.profile), candidate.reservation,
+                                      [this, profile = candidate.profile](DocumentReply reply) { fileReply(std::move(reply), profile); });
+        } catch (const std::exception&) { fail("Cannot prepare this file's profile edit."); }
     });
 }
 
@@ -229,7 +262,7 @@ void MainWindow::continueReconnectAll() {
     if (closeApproved_ || credentialDialog_ || credentialAttempt_ || folderConnect_) return;
     while (!reconnectQueue_.isEmpty()) {
         const auto pane = reconnectQueue_.takeFirst();
-        if (pane && ownerOf(pane)) { reconnectPane(pane); return; }
+        if (pane && isOpenPane(pane)) { reconnectPane(pane); return; }
     }
 }
 

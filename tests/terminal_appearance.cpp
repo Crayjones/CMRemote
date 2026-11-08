@@ -29,7 +29,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QSpinBox>
-#include <QTabWidget>
+#include "SessionTabs.h"
 #include <QTabBar>
 #include <QTemporaryDir>
 #include <QTest>
@@ -144,7 +144,7 @@ private slots:
         QVERIFY(activate(window)); QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open);
         window.addConnection(); QVERIFY(waitGridSaved(window)); setGridText(window, "host", "saved.invalid"); QVERIFY(waitGridSaved(window));
         setGridChoice(window, "protocol", "ssh"); QVERIFY(waitGridSaved(window)); window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* saved = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(saved);
+        auto tabs = sessionTabs(window); auto* saved = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(saved);
         const auto id = saved->id(); const auto target = saved->target(); const auto before = contents(xml);
         auto* view = saved->findChild<TerminalView*>(); view->initializeTerminal(endpoint); view->setFocus(); QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier); QCOMPARE(view->appearance().fontSize, 13);
         window.setQuickConnectProtocol("ssh"); window.quickConnect("temporary.invalid", true);
@@ -460,7 +460,7 @@ private slots:
         window.show(); QTRY_COMPARE(window.documentState(), MainWindow::DocumentState::Open);
         window.addConnection(); QVERIFY(waitGridSaved(window)); setGridText(window, "host", "saved.invalid"); QVERIFY(waitGridSaved(window));
         setGridChoice(window, "protocol", "ssh"); QVERIFY(waitGridSaved(window)); window.connectSelected(true);
-        auto* tabs = window.findChild<QTabWidget*>("sessionTabs"); auto* saved = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(saved);
+        auto tabs = sessionTabs(window); auto* saved = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(saved);
         const auto savedId = saved->id(); const auto savedTarget = saved->target(); const auto xmlBytes = contents(xml);
         window.setQuickConnectProtocol("ssh");
         window.quickConnect("first.invalid", true); auto* first = qobject_cast<SessionPane*>(tabs->currentWidget()); QVERIFY(first);
@@ -484,8 +484,7 @@ private slots:
         auto* menu = view->findChild<QMenu*>(); QVERIFY(menu); auto* action = menu->findChild<QAction*>("actionTerminalAppearance"); QVERIFY(action);
         action->trigger(); menu->close(); QTRY_VERIFY(window.findChild<OptionsDialog*>());
         window.findChild<OptionsDialog*>()->reject(); QTRY_VERIFY(!window.findChild<OptionsDialog*>());
-        const auto point = tabs->tabBar()->tabRect(tabs->indexOf(saved)).center();
-        QContextMenuEvent tabContext(QContextMenuEvent::Mouse, point, tabs->tabBar()->mapToGlobal(point)); QApplication::sendEvent(tabs->tabBar(), &tabContext);
+        openTabMenu(tabs, tabs->indexOf(saved));
         auto* tabMenu = window.findChild<QMenu*>("sessionContextMenu"); QVERIFY(tabMenu);
         auto* tabAppearance = tabMenu->findChild<QAction*>("actionTerminalAppearance"); QVERIFY(tabAppearance && tabAppearance->isEnabled());
         tabAppearance->trigger(); tabMenu->close(); QTRY_VERIFY(window.findChild<OptionsDialog*>());

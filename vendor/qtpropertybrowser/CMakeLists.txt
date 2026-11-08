@@ -1,0 +1,10 @@
+# Qt's own Qt 6 port of the qt-solutions property browser (qttools v6.12.0), static. See SOURCE-PROVENANCE.
+if(TARGET rm_qtpropertybrowser)
+    return()
+endif()
+file(GLOB RM_QTPROPERTYBROWSER_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/src/*.h")
+add_library(rm_qtpropertybrowser STATIC ${RM_QTPROPERTYBROWSER_SOURCES})
+set_target_properties(rm_qtpropertybrowser PROPERTIES AUTOMOC ON AUTOUIC OFF AUTORCC OFF CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_include_directories(rm_qtpropertybrowser PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src")
+target_link_libraries(rm_qtpropertybrowser PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_options(rm_qtpropertybrowser PRIVATE "$<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-w>")

@@ -10,10 +10,11 @@ OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* st
     ui_->setupUi(this); setObjectName("optionsDialog"); setAttribute(Qt::WA_DeleteOnClose); setWindowModality(Qt::WindowModal);
     ui_->theme->addItem("Match System", "system"); ui_->theme->addItem("Light", "light"); ui_->theme->addItem("Dark", "dark");
     ui_->theme->setCurrentIndex(std::max(0, ui_->theme->findData(values.theme)));
+    connect(ui_->theme, &QComboBox::currentIndexChanged, this, [this] { emit themePreviewed(ui_->theme->currentData().toString()); });
     ui_->categorized->setChecked(values.categorized); ui_->propertyHelp->setChecked(values.propertyHelp);
     ui_->quickConnect->setChecked(values.quickConnect); ui_->lockToolbars->setChecked(values.lockToolbars);
     ui_->openh264->setChecked(values.openh264); ui_->openh264Credit->setText(OpenH264::Credit);
-    ui_->showPanels->setChecked(values.showPanels); ui_->autoUpdate->setChecked(values.autoUpdate);
+    ui_->autoUpdate->setChecked(values.autoUpdate);
     ui_->commandAsControl->setChecked(values.commandAsControl);
     ui_->clipboard->setChecked(values.defaults.effective().value("clipboard").toBool());
 #ifndef Q_OS_MACOS
@@ -39,14 +40,18 @@ OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* st
 }
 OptionsDialog::~OptionsDialog() = default;
 void OptionsDialog::showPage(int page) { if (!ui_->categories->item(page)->isHidden()) ui_->categories->setCurrentRow(page); }
-void OptionsDialog::reject() { if (!saving_) QDialog::reject(); }
+void OptionsDialog::reject() {
+    if (saving_) return;
+    if (ui_->theme->currentData().toString() != values_.theme) emit themePreviewed(values_.theme);
+    QDialog::reject();
+}
 void OptionsDialog::accept() { save(true); }
 PreferenceValues OptionsDialog::read() const {
     auto draft = values_;
     draft.theme = ui_->theme->currentData().toString();
     draft.categorized = ui_->categorized->isChecked(); draft.propertyHelp = ui_->propertyHelp->isChecked();
     draft.quickConnect = ui_->quickConnect->isChecked(); draft.lockToolbars = ui_->lockToolbars->isChecked();
-    draft.openh264 = ui_->openh264->isChecked(); draft.showPanels = ui_->showPanels->isChecked();
+    draft.openh264 = ui_->openh264->isChecked();
     draft.commandAsControl = ui_->commandAsControl->isChecked(); draft.autoUpdate = ui_->autoUpdate->isChecked();
     // Stored with the connection defaults; connections that never set Clipboard follow it.
     if (ui_->clipboard->isChecked() != values_.defaults.effective().value("clipboard").toBool()) draft.defaults.values["clipboard"] = ui_->clipboard->isChecked();

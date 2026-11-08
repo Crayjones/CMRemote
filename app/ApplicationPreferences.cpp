@@ -17,6 +17,7 @@ PreferenceReply access(const QString& path, bool write, PreferenceValues values)
             !object.value("categorized").isBool() || !object.value("property_help").isBool() ||
             !object.value("quick_connect").isBool() || !object.value("lock_toolbars").isBool() ||
             (object.contains("openh264") && !object.value("openh264").isBool()) ||
+            // Earlier versions stored "show_panels" for the panel tab row that Qt ADS panels replaced; it is ignored.
             (object.contains("show_panels") && !object.value("show_panels").isBool()) ||
             (object.contains("command_as_control") && !object.value("command_as_control").isBool()) ||
             (object.contains("auto_update") && !object.value("auto_update").isBool()) ||
@@ -33,14 +34,14 @@ PreferenceReply access(const QString& path, bool write, PreferenceValues values)
             defaults = *parsed;
         }
         if (!write) reply.values = {object.value("categorized").toBool(), object.value("property_help").toBool(), object.value("quick_connect").toBool(), object.value("lock_toolbars").toBool(), defaults, object.value("openh264").toBool(true),
-            object.value("show_panels").toBool(false), object.value("command_as_control").toBool(false), object.value("auto_update").toBool(true), object.value("theme").toString("light")};
+            object.value("command_as_control").toBool(false), object.value("auto_update").toBool(true), object.value("theme").toString("light")};
     }
     if (write) {
         if (!QStringList{"system", "light", "dark"}.contains(values.theme)) { reply.result = {false, "The theme is invalid. The file was not changed.", {}}; return reply; }
         if (!ConnectionDefaults::parse(values.defaults.json())) { reply.result = {false, "Connection defaults are invalid. The file was not changed.", {}}; return reply; }
         const auto encoded = QJsonDocument(QJsonObject{{"version", 1}, {"categorized", values.categorized},
             {"property_help", values.propertyHelp}, {"quick_connect", values.quickConnect}, {"lock_toolbars", values.lockToolbars},
-            {"connection_defaults", values.defaults.json()}, {"openh264", values.openh264}, {"show_panels", values.showPanels},
+            {"connection_defaults", values.defaults.json()}, {"openh264", values.openh264},
             {"command_as_control", values.commandAsControl}, {"auto_update", values.autoUpdate}, {"theme", values.theme}}).toJson(QJsonDocument::Compact);
         if (bytes != encoded) reply.result = file.replace(encoded, 65536, "application preferences");
     }

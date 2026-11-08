@@ -12,6 +12,8 @@ CMRemote is licensed **GPL-2.0-or-later**; see [`LICENSE`](../LICENSE). Packages
 | zlib | 1.3.2 | Compression; zlib license |
 | cxx / cxx-build | 1.0.202 | FFI bridge; MIT OR Apache-2.0 |
 | vnc-rs | 0.6.0, vendored and locally patched | Embedded classic VNC/RFB; MIT OR Apache-2.0 |
+| Qt Advanced Docking System | 5.1.1, vendored unchanged | Dockable, tabbed and pinnable Connections/Config/Notifications panes; LGPL-2.1-or-later |
+| Qt Property Browser (qttools `src/shared/qtpropertybrowser`) | Qt 6.12.0, vendored unchanged | The Config pane's QtTreePropertyBrowser; LGPL-3.0-only / GPL-2.0-only / GPL-3.0-only / commercial, as Qt |
 | Rust | 1.99.0 | Compiler/toolchain; MIT OR Apache-2.0, with toolchain third-party notices |
 | serde | 1.0.228 | JSON model serialization; MIT OR Apache-2.0 |
 | serde_json | 1.0.151 | Password-free metadata and SSH trust codec; MIT OR Apache-2.0 |
@@ -77,6 +79,12 @@ Production and the standalone preview compile `app/ui/test.ui` with `app/ui/prev
 The subset retains byte-identical upstream [`COPYING.txt`](https://github.com/mRemoteNG/mRemoteNG/blob/4ad1c794fe2389cc5ca0bb1d271f009f44f6e0e6/COPYING.txt) (GPL v2) and [`CREDITS.md`](https://github.com/mRemoteNG/mRemoteNG/blob/4ad1c794fe2389cc5ca0bb1d271f009f44f6e0e6/CREDITS.md), plus a local `NOTICE.txt`. Aggregate credits include FAMFAMFAM Silk under CC BY 2.5 and PuTTY under MIT; they do not establish each image's rights. Icon-bearing packages redistribute these images under the upstream GPL v2 distribution with its notices; per-image provenance remains unresolved, and curating files and retaining attribution is not a per-image legal clearance.
 
 T12–T17's statement that no icon-bearing package was produced or published is historical integration evidence. Earlier package smoke results apply only to that earlier application, not the current shell or this migration. Historical references elsewhere to full local source trees or older image counts describe those snapshots; current research citations refer to the [pinned upstream revision](https://github.com/mRemoteNG/mRemoteNG/tree/4ad1c794fe2389cc5ca0bb1d271f009f44f6e0e6), not build dependencies.
+
+## Vendored UI libraries
+
+`vendor/qtads/` holds Qt Advanced Docking System v5.1.1 (commit `023ce959…`) and `vendor/qtpropertybrowser/` holds the property browser from qttools v6.12.0 (commit `613a6fbf…`). Both are built as small static libraries by CMRemote's own `CMakeLists.txt` and are used by the application and the standalone preview. Each directory's `SOURCE-PROVENANCE` lists the exact upstream files retained, what was left out and why, and keeps the upstream license texts. The property browser carries one marked patch: a destroyed browser removes its factory bindings from the library's global maps, so a later Config grid at the same address never calls into a destroyed factory. QtADS carries two marked patches. In `src/DockAreaWidget.cpp`, a dock area keeps its inactive tabs as hidden children instead of detaching them, so switching session tabs never moves an RDP view out of its window. In `src/DockAreaTabBar.cpp` and `src/DockWidgetTab.cpp`, a dragged tab reorders the tab bar while it moves, not only on release. `SOURCE-PROVENANCE` describes both.
+
+The qt-solutions QtPropertyBrowser and its community forks do not build against Qt 6; qttools carries Qt's maintained Qt 6 port with the same API (`QtTreePropertyBrowser`, `QtVariantPropertyManager`, `QtAbstractEditorFactory`). QtADS is LGPL-2.1-or-later and linked statically. CMRemote publishes its complete source under GPL-2.0-or-later, which lets recipients rebuild it against a modified QtADS. On Linux, QtADS also links `libxcb`, which Qt's xcb platform plugin already requires.
 
 ## Qt obligations before distribution
 

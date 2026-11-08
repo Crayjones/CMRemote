@@ -1,0 +1,118 @@
+/*
+ * CMRemote's only stylesheet. Appearance.h installs it on the application once,
+ * together with the Fusion style and the light or dark palette.
+ *
+ * Colors come from palette roles, so the same rules serve both themes:
+ *   window  #252526 panels          base    #1E1E1E fields, trees, documents
+ *   button  #2D2D30 headers, tabs   mid     #3F3F46 field borders
+ *   accent  #007ACC focused docks   highlight #0078D7 selection, active tabs
+ * (dark values shown; Appearance.h defines both palettes.)
+ *
+ * Widgets are never styled in code. Give an element an objectName or a dynamic
+ * property and style it here. New dialogs use plain widgets and inherit this.
+ */
+
+/* ---- Window chrome ---------------------------------------------------- */
+
+QMainWindow { background: palette(window); }
+QMainWindow::separator { background: palette(window); width: 4px; height: 4px; }
+QToolBar { background: palette(window); border: none; spacing: 1px; padding: 1px; }
+QToolButton { padding: 2px; }
+QMenuBar { background: palette(window); padding: 1px; }
+QMenuBar::item { padding: 3px 8px; background: transparent; }
+QMenuBar::item:selected { background: palette(midlight); }
+/* macOS: Quick Connect shares the transparent title bar. */
+QToolBar#quickConnectToolbar[inTitleBar="true"] { background: transparent; border: none; }
+
+/* ---- Fields ----------------------------------------------------------- */
+
+QLineEdit, QComboBox { background: palette(base); color: palette(text); border: 1px solid palette(mid); padding: 2px; }
+QLineEdit:focus, QComboBox:focus { border-color: palette(highlight); }
+
+/* ---- Tabs ------------------------------------------------------------- */
+
+QTabWidget::pane { border: 1px solid palette(mid); }
+QTabBar::tab { background: palette(button); color: palette(button-text); border: 1px solid palette(mid); padding: 4px 12px; }
+QTabBar::tab:selected { background: palette(highlight); color: palette(highlighted-text); }
+
+/* ---- Scroll bars ------------------------------------------------------ */
+
+/* A flat handle that stands out from its track in both themes. */
+QScrollBar:vertical { background: palette(window); width: 14px; margin: 0; border: none; }
+QScrollBar:horizontal { background: palette(window); height: 14px; margin: 0; border: none; }
+QScrollBar::handle:vertical { background: palette(placeholder-text); min-height: 24px; margin: 2px 3px; border-radius: 4px; }
+QScrollBar::handle:horizontal { background: palette(placeholder-text); min-width: 24px; margin: 3px 2px; border-radius: 4px; }
+QScrollBar::handle:hover, QScrollBar::handle:pressed { background: palette(window-text); }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; background: none; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+/* ---- Sessions --------------------------------------------------------- */
+
+QWidget#sessionSurface { background: #191919; }
+QLabel#sessionMessage { color: #dddddd; background: transparent; }
+QWidget#emptySessions { background: palette(base); }
+QLabel#emptySessionsMessage { color: palette(placeholder-text); background: transparent; }
+QLabel#sessionCaptureHint { background: #1f4e8c; color: white; padding: 3px 6px; }
+
+/* ---- Dock panes (Qt Advanced Docking System) -------------------------- */
+
+ads--CDockManager, ads--CDockContainerWidget, ads--CDockAreaWidget, ads--CDockWidget { background: palette(window); border: none; }
+ads--CDockSplitter::handle { background: palette(window); }
+ads--CDockSplitter::handle:horizontal { width: 4px; }
+ads--CDockSplitter::handle:vertical { height: 4px; }
+ads--CDockAreaWidget { border: 1px solid palette(button); }
+
+/* Title bar: gray while another pane has focus, solid blue when active. */
+ads--CDockAreaTitleBar { background: palette(button); border: none; min-height: 21px; max-height: 21px; }
+ads--CDockAreaWidget[focused="true"] ads--CDockAreaTitleBar, ads--CAutoHideDockContainer ads--CDockAreaTitleBar { background: palette(accent); }
+/* The tab strip inside the title bar is a scroll area; let the bar's color through. */
+ads--CDockAreaTabBar, ads--CDockAreaTabBar > QWidget, QWidget#tabsContainerWidget { background: transparent; border: none; }
+ads--CDockWidgetTab { background: transparent; border: none; padding: 0 2px 0 5px; }
+ads--CDockWidgetTab QLabel { color: palette(button-text); background: transparent; }
+ads--CDockWidgetTab[activeTab="false"] QLabel { color: palette(placeholder-text); }
+/* Text follows the tab's own focus flag: Qt ADS repolishes the tab, not labels under the area. */
+ads--CDockWidgetTab[focused="true"] QLabel, ads--CAutoHideDockContainer ads--CDockWidgetTab QLabel { color: palette(highlighted-text); }
+ads--CDockAreaTitleBar QToolButton, ads--CDockWidgetTab QAbstractButton { background: transparent; border: none; padding: 2px; margin: 0 1px; }
+ads--CDockAreaTitleBar QToolButton:hover, ads--CDockWidgetTab QAbstractButton:hover { background: palette(midlight); }
+ads--CDockAreaTitleBar QToolButton:pressed, ads--CDockWidgetTab QAbstractButton:pressed { background: palette(mid); }
+QToolButton#tabsMenuButton::menu-indicator { image: none; }
+/* Panels of session tabs look like Visual Studio's documents: a plain strip whose
+ * open tab is gray, and blue while its session has focus. */
+ads--CDockAreaWidget[sessionPanel="true"] ads--CDockAreaTitleBar { background: palette(window); border-bottom: 2px solid palette(mid); }
+ads--CDockAreaWidget[sessionPanel="true"][focused="true"] ads--CDockAreaTitleBar { background: palette(window); border-bottom-color: palette(accent); }
+ads--CDockWidgetTab[session="true"] { padding: 0 2px 0 8px; }
+/* Session tabs close from a small button on the tab; panes close from their title bar. */
+ads--CDockWidgetTab QAbstractButton#tabCloseButton { max-width: 0px; max-height: 0px; padding: 0; margin: 0; }
+ads--CDockWidgetTab[session="true"] QAbstractButton#tabCloseButton { max-width: 16px; max-height: 16px; padding: 1px; margin: 0 1px; qproperty-iconSize: 10px 10px; }
+ads--CDockWidgetTab[session="true"][activeTab="true"] { background: palette(mid); }
+ads--CDockWidgetTab[session="true"][activeTab="true"][focused="true"] { background: palette(accent); }
+ads--CDockWidgetTab[session="true"][activeTab="true"] QLabel { color: palette(text); }
+ads--CDockWidgetTab[session="true"][focused="true"] QLabel { color: palette(highlighted-text); }
+/* A fullscreen session fills the screen without a frame. */
+ads--CDockManager#fullscreenDockManager ads--CDockAreaWidget { border: none; }
+QLabel#autoHideTitleLabel { color: palette(highlighted-text); padding-left: 5px; }
+
+/* Pinned-away (auto-hide) panes: VS-style tabs along the window edge. */
+ads--CAutoHideSideBar { background: palette(window); border: none; qproperty-spacing: 10; }
+ads--CAutoHideSideBar[sideBarLocation="0"] { border-bottom: 1px solid palette(button); }
+ads--CAutoHideSideBar[sideBarLocation="1"] { border-right: 1px solid palette(button); }
+ads--CAutoHideSideBar[sideBarLocation="2"] { border-left: 1px solid palette(button); }
+ads--CAutoHideSideBar[sideBarLocation="3"] { border-top: 1px solid palette(button); }
+ads--CAutoHideTab { background: transparent; color: palette(button-text); border: none; padding: 3px 6px; }
+ads--CAutoHideTab[sideBarLocation="0"], ads--CAutoHideTab[sideBarLocation="2"] { border-bottom: 4px solid palette(mid); }
+ads--CAutoHideTab[sideBarLocation="1"], ads--CAutoHideTab[sideBarLocation="3"] { border-top: 4px solid palette(mid); }
+ads--CAutoHideTab:hover, ads--CAutoHideTab[activeTab="true"] { color: palette(accent); border-color: palette(accent); }
+ads--CAutoHideDockContainer { background: palette(window); border: 1px solid palette(button); }
+ads--CResizeHandle { background: palette(window); }
+
+/* Pane contents: flat lists on the document color, compact rows. */
+ads--CDockWidget QTreeView, ads--CDockWidget QListWidget, ads--CDockWidget QPlainTextEdit { background: palette(base); color: palette(text); border: none; }
+ads--CDockWidget QTreeView::item, ads--CDockWidget QListWidget::item { min-height: 19px; }
+ads--CDockWidget QTreeView::item:selected, ads--CDockWidget QListWidget::item:selected { background: palette(highlight); color: palette(highlighted-text); }
+ads--CDockWidget QToolBar { background: palette(window); }
+
+/* Config: the help box under the property grid. */
+QWidget#configHelp, QWidget#notificationDetails { background: palette(window); }
+QWidget#configHelp { border-top: 1px solid palette(button); }
+QLabel#configHelpTitle { font-weight: bold; }
+QLabel#notificationDate { color: palette(placeholder-text); font-style: italic; }

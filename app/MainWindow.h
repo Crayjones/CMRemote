@@ -20,14 +20,14 @@
 #include "UpdateCheck.h"
 #include <memory>
 #include <functional>
-namespace Ui { class MainWindow; }
+struct ShellUi;
 class SessionPane;
 class ClipboardEndpoint;
 class SessionFullscreenController;
-class PanelWindow;
+class FullscreenWindow;
+namespace ads { class CDockWidget; class CDockAreaWidget; class CFloatingDockContainer; }
 class ProfileEditor;
 class QDialog;
-class QTabWidget;
 class QMenu;
 class QAction;
 class QTreeWidgetItem;
@@ -84,12 +84,13 @@ public slots:
     QString quickConnectProtocol() const;
     void setQuickConnectProtocol(const QString& protocol);
     void saveAsConnection();
+    // Closes a tab of the current panel.
     void closeTab(int index);
     void disconnectCurrent();
     void reconnectCurrent();
     void deleteSelected();
+    // View > New Panel: moves the current tab into a new panel beside its own.
     void addPanel();
-    void closePanel(QWidget* panel);
 signals:
     void documentReady();
 protected:
@@ -97,6 +98,8 @@ protected:
     void closeEvent(QCloseEvent* event) override;
     void changeEvent(QEvent* event) override;
 private:
+    // A panel: a Qt ADS dock area of session tabs.
+    using Panel = QPointer<ads::CDockAreaWidget>;
     void initializeFiles();
     std::shared_ptr<DocumentContext> context(DocumentId id) const;
     rm::Core& activeCore();
@@ -137,20 +140,20 @@ private:
     void selectionChanged();
     void previewDraft();
     void connectCommitted(bool mock);
-    void requestSession(const QString& profile, SessionTarget target, bool mock, QTabWidget* owner, SessionPane* replacement = nullptr, bool promptOnly = false, DocumentId document = {}, const QString& folder = {});
+    void requestSession(const QString& profile, SessionTarget target, bool mock, Panel owner, SessionPane* replacement = nullptr, bool promptOnly = false, DocumentId document = {}, const QString& folder = {});
     // Connections a tree item opens: itself, or every connectable connection
     // beneath a folder in file order.
     QStringList connectableProfiles(DocumentId document, const QString& id, bool mock = false) const;
     void continueFolderConnect();
     void rebuildConnectionsMenu(QMenu* menu);
-    struct FolderConnect { DocumentId document; QString folder; QStringList pending; QPointer<QTabWidget> owner; bool mock = false; };
+    struct FolderConnect { DocumentId document; QString folder; QStringList pending; Panel owner; bool mock = false; };
     std::optional<FolderConnect> folderConnect_;
     struct CredentialAttempt {
         QString profile; SessionTarget target;
         DocumentId document;
         quint64 generation = 0;
         QByteArray revision;
-        QPointer<QTabWidget> owner; QPointer<SessionPane> page;
+        Panel owner; QPointer<SessionPane> page;
         quint64 token; bool replacing = false;
         std::optional<TransientCredentials> credentials;
         std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication;
@@ -164,7 +167,7 @@ private:
     std::optional<SessionTarget> committedTarget(const QString& profile) const;
     std::optional<SessionTarget> expectedTarget(const CredentialAttempt& attempt) const;
     bool validAttempt(const Attempt& attempt) const;
-    void beginFileCredentials(DocumentId document, const QString& profile, SessionTarget target, QTabWidget* owner, SessionPane* replacement, bool promptOnly, const QString& folder = {});
+    void beginFileCredentials(DocumentId document, const QString& profile, SessionTarget target, Panel owner, SessionPane* replacement, bool promptOnly, const QString& folder = {});
     std::optional<SessionTarget> attemptTarget(const DocumentContext& doc, const QString& profile, const QString& folder) const;
     void lookupFileCredentials(Attempt attempt);
     void connectSshKey(Attempt attempt);
@@ -177,8 +180,9 @@ private:
     enum class ConnectOption { Console, Fullscreen, NoCredentials, ChoosePanel };
     void setupTreeActions();
     void connectWithOption(ConnectOption option);
-    void connectInPanel(ProfileReference profile, QPointer<QTabWidget> owner, ConnectOption option);
-    void choosePanel(std::function<void(QTabWidget*)> chosen);
+    void connectInPanel(ProfileReference profile, Panel owner, ConnectOption option);
+    // Chosen panel, or null with newPanel set for a new panel beside the current one.
+    void choosePanel(std::function<void(Panel, bool newPanel)> chosen);
     void disconnectSelected();
     bool profileInScope(DocumentId document, const QString& id, SessionPane* pane) const;
     void duplicateSelected();
@@ -197,7 +201,7 @@ private:
     void finishImport(DocumentId owner, QString destination, ConnectionXml& xml, const Secret& key, QString label);
     void continueReconnectAll();
     void checkHostStatus();
-    void attachSession(const QString& profile, SessionTarget target, bool mock, QPointer<QTabWidget> owner,
+    void attachSession(const QString& profile, SessionTarget target, bool mock, Panel owner,
                        QPointer<SessionPane> replacement, std::optional<TransientCredentials> credentials, DocumentId document = {},
                        std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication = {},
                        std::optional<rust::Box<rm::vnc::Authentication>> vncAuthentication = {});
@@ -212,67 +216,62 @@ private:
     void updateActions();
     void filterConnections();
     void sortConnections(Qt::SortOrder order);
-    QTabWidget* currentSessions() const;
-    QList<QTabWidget*> sessionPanels() const;
+    // Every session is a Qt ADS dock tab; a panel is a dock area of session
+    // tabs, in the main window or in a floating window of its own.
+    QList<ads::CDockWidget*> sessionDocks() const;
     QList<SessionPane*> sessionPages() const;
-    QTabWidget* ownerOf(SessionPane* pane) const;
+    static ads::CDockWidget* dockOf(const SessionPane* pane);
+    static SessionPane* paneOf(const ads::CDockWidget* dock);
+    ads::CDockAreaWidget* panelOf(const SessionPane* pane) const;
+    bool isOpenPane(const SessionPane* pane) const;
+    // Panels holding sessions: the main window's first, then floating windows'.
+    QList<ads::CDockAreaWidget*> sessionPanels() const;
+    QList<SessionPane*> panelPanes(ads::CDockAreaWidget* panel) const;
+    QString panelName(ads::CDockAreaWidget* panel) const;
+    // Where new sessions open: the panel used last, else General.
+    ads::CDockAreaWidget* currentPanel() const;
+    SessionPane* currentPane() const;
     void focusPane(SessionPane* pane);
-    void configureTabs(QTabWidget* tabs);
+    void focusPanel(ads::CDockAreaWidget* panel);
+    void configureSessionDock(ads::CDockWidget* dock);
     void closePane(SessionPane* pane);
     void closeAllSessions();
     void reconnectPane(QPointer<SessionPane> pane, bool promptOnly = false);
-    void movePane(QPointer<SessionPane> pane, QPointer<QTabWidget> destination);
-    void renamePage(QTabWidget* tabs, QWidget* page, bool panel);
+    void movePaneTo(SessionPane* pane, ads::CDockAreaWidget* destination, int index = -1);
+    void splitPane(SessionPane* pane, int side);
+    void floatPane(SessionPane* pane);
+    void renamePane(SessionPane* pane);
     void resetLayout();
     void fullscreenPane(QPointer<SessionPane> pane);
-    void returnFromFullscreen(QPointer<PanelWindow> window, QPointer<SessionPane> pane);
+    void returnFromFullscreen(QPointer<FullscreenWindow> window, QPointer<SessionPane> pane);
     bool isFullscreenWindow(const QWidget* window) const;
-    // A fullscreen session's own window and the tab it returns to.
-    struct FullscreenWindow { QPointer<PanelWindow> window; QPointer<QTabWidget> origin; int index = -1; };
-    QList<FullscreenWindow> fullscreenWindows_;
-    // Browser-style windows: every window has a panel bar (groups) whose panels
-    // hold session tabs. The main window's groups is ui_->groupTabs.
-    QList<QTabWidget*> groupBars() const;
-    QTabWidget* groupsOf(QWidget* panel) const;
-    QMainWindow* hostOf(QTabWidget* groups) const;
-    PanelWindow* panelWindowOf(QWidget* widget) const;
-    SessionFullscreenController* fullscreenFor(QWidget* widget) const;
+    FullscreenWindow* fullscreenWindowOf(const SessionPane* pane) const;
     void exitFullscreenFor(SessionPane* pane);
-    void configureGroups(QTabWidget* groups);
-    QWidget* createPanel(QTabWidget* groups, const QString& name = {});
-    void movePaneTo(SessionPane* pane, QTabWidget* destination, int index = -1);
-    void movePanel(QWidget* panel, QTabWidget* destination, int index = -1);
-    void closeEmptyPanel(QWidget* panel);
-    PanelWindow* createPanelWindow(QPoint position, QSize size);
-    void requestCloseWindow(PanelWindow* window);
-    void retireWindow(PanelWindow* window);
-    void lendDocks(PanelWindow* window, bool here);
-    QList<QPointer<PanelWindow>> panelWindows_, retiredWindows_;
-    QPointer<PanelWindow> lastWindow_, docksWindow_;
-    int nextWindow_ = 2;
-    // Tab/panel drag between bars and windows (Chrome-style tear-off).
-    struct TabDrag {
-        QPointer<QTabBar> bar; QPointer<QWidget> item; bool panel = false;
-        bool detached = false, synthetic = false; QPointer<PanelWindow> floating; QPoint offset; QPointer<QWidget> sourcePanel;
-    } drag_;
-    struct DropTarget { QPointer<QTabWidget> groups, sessions; int index = -1; };
-    DropTarget dropTarget(QPoint global, QWidget* exclude) const;
-    // The same blue drop highlight the docks show, over where a dragged tab lands.
-    void showDropHighlight(const DropTarget& target);
-    QPointer<QRubberBand> dropHighlight_;
-    bool tabDragEvent(QTabBar* bar, QEvent* event);
-    void finishDrag(QPoint global);
+    // A fullscreen session's own window and the panel position it returns to.
+    struct FullscreenEntry { QPointer<FullscreenWindow> window; QPointer<ads::CDockAreaWidget> origin; int index = -1; };
+    QList<FullscreenEntry> fullscreenWindows_;
+    // Every fullscreen window still alive, including those leaving fullscreen.
+    QList<QPointer<FullscreenWindow>> ownedFullscreen_;
+    void requestCloseFloating(ads::CFloatingDockContainer* window);
+    // Keeps a window that showed sessions alive until those sessions are gone.
+    void retireWindow(QWidget* window);
+    QList<QPointer<QWidget>> retiredWindows_;
+    // Shows the General placeholder while the main window has no session and
+    // marks panels for theme.qss; coalesced after Qt ADS layout changes.
+    void sessionLayoutChanged();
+    void updateSessionLayout();
+    bool sessionLayoutQueued_ = false;
+    QPointer<ads::CDockWidget> lastSession_;
+    int nextSessionDock_ = 1;
+    mutable int nextPanel_ = 1;
     Qt::WindowStates applicationFullscreenState_;
     QRect applicationFullscreenGeometry_;
     void showOptions();
     void openSettings(int page);
     void applyPreferences(PreferenceValues values);
     PreferenceValues currentPreferences() const;
-    // View > Panel Tabs shows or hides the General/Panel N row in every window.
-    void applyPanelTabs();
     bool commandAsControl_ = false, autoUpdate_ = true;
-    QString theme_ = "light", lightStyleSheet_;
-    void applyThemeStyle();
+    QString theme_ = "light";
     class AutoUpdater* updater_ = nullptr;
     QString promptedUpdate_;
     bool relaunchAfterUpdate_ = false, skipUpdateOnExit_ = false, updatePreferenceKnown_ = false, updateCheckRequested_ = false;
@@ -305,11 +304,11 @@ private:
     void updateNotificationDetails();
     void configureMenus();
     void rebuildJumpMenu();
+    void rebuildPanelsMenu();
     QAction* menuAction(QMenu* menu, const char* name, bool enabled, std::function<void()> command = {});
     void popup(QMenu* menu, const QPoint& position);
     QMenu* treeMenu(const QString& id, bool document = false);
     QMenu* sessionMenu(SessionPane* pane);
-    QMenu* groupMenu(QWidget* panel);
     QMenu* configMenu();
     QMenu* notificationMenu();
     void finishSshShutdown();
@@ -350,12 +349,12 @@ private:
     };
     std::optional<PendingPassword> pendingPassword_;
     ProfileEditor* editor_ = nullptr;
-    std::unique_ptr<Ui::MainWindow> ui_;
+    std::unique_ptr<ShellUi> ui_;
     rust::Box<rm::Core> core_;
     QHash<QString, QJsonObject> profiles_;
     std::optional<Qt::SortOrder> treeOrder_;
     QList<QPointer<SessionPane>> reconnectQueue_; // Tools > Reconnect all, one credential prompt at a time.
-    QList<ProfileReference> fullscreenOnOpen_;
+    QList<ProfileReference> fullscreenOnOpen_, newPanelOnOpen_;
     QList<ExternalTool> externalTools_;
     QString externalToolsPath_; // "Connect in fullscreen mode" requests awaiting their tab.
     QString dataPath_, lastError_;
@@ -370,8 +369,6 @@ private:
     Attempt credentialAttempt_;
     QPointer<QDialog> credentialDialog_;
     QPointer<SessionPane> credentialPage_;
-    QPointer<QTabWidget> credentialOwner_;
     quint64 credentialToken_ = 0;
-    int nextPanel_ = 1;
     QTimer* pollTimer_ = nullptr;
 };

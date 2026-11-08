@@ -42,10 +42,13 @@ add_custom_target(rust_core_build DEPENDS "${RUST_LIBRARY}")
 add_library(rust_core STATIC IMPORTED GLOBAL)
 set_target_properties(rust_core PROPERTIES IMPORTED_LOCATION "${RUST_LIBRARY}")
 file(MAKE_DIRECTORY "${CARGO_TARGET}/cxxbridge")
+add_subdirectory(vendor/qtads)
+add_subdirectory(vendor/qtpropertybrowser)
 add_library(rm_frontend STATIC
     app/Branding.cpp app/Branding.h app/ui/branding.qrc app/UpdateCheck.cpp app/UpdateCheck.h app/AutoUpdate.cpp app/AutoUpdate.h app/update/update.qrc app/OpenH264.cpp app/OpenH264.h
-    app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp app/MainWindow.h app/ui/test.ui app/ui/preview-icons.qrc
-    app/ProfileEditor.cpp app/ProfileEditor.h app/PropertyDelegate.cpp app/PropertyDelegate.h app/RdpTarget.cpp app/RdpTarget.h
+    app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp app/MainWindow.h app/ui/test.ui app/ui/ConnectionsPane.ui app/ui/ConfigPane.ui app/ui/NotificationsPane.ui app/ui/preview-icons.qrc
+    app/Shell.cpp app/Shell.h app/Appearance.cpp app/Appearance.h app/ui/theme.qrc
+    app/ProfileEditor.cpp app/ProfileEditor.h app/RdpTarget.cpp app/RdpTarget.h
     app/PointerCapture.cpp app/PointerCapture.h
     app/ConnectionTree.cpp app/ConnectionTree.h app/ConnectionIcons.cpp app/ConnectionIcons.h app/ThemeIcons.cpp app/ThemeIcons.h app/ConfigDescriptions.h
     app/ApplicationPreferences.cpp app/ApplicationPreferences.h app/OpenFileList.cpp app/OpenFileList.h app/ConnectionDefaults.cpp app/ConnectionDefaults.h app/OptionsDialog.cpp app/OptionsDialog.h app/ui/OptionsDialog.ui
@@ -55,7 +58,7 @@ add_library(rm_frontend STATIC
     app/TerminalAppearancePage.cpp app/TerminalAppearancePage.h app/ui/TerminalAppearancePage.ui
     app/SessionClipboard.cpp app/SessionClipboard.h app/ClipboardTransfer.cpp app/ClipboardTransfer.h app/RemoteCursor.h
     app/PerformanceTrace.cpp app/PerformanceTrace.h app/DesktopUpdate.cpp app/DesktopUpdate.h
-    app/SessionFullscreenController.cpp app/SessionFullscreenController.h app/PanelWindow.cpp app/PanelWindow.h
+    app/SessionFullscreenController.cpp app/SessionFullscreenController.h app/FullscreenWindow.cpp app/FullscreenWindow.h
     app/Credentials.cpp app/Credentials.h app/ui/CredentialsDialog.ui
     app/SshCredentialsDialog.cpp app/SshCredentialsDialog.h app/ui/SshCredentialsDialog.ui
     app/SshWorker.cpp app/SshWorker.h core/include/SshEventSink.h
@@ -74,15 +77,15 @@ qt6_add_shaders(rm_frontend "rm_desktop_shaders"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/app/shaders"
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/app/shaders/desktop.vert"
           "${CMAKE_CURRENT_SOURCE_DIR}/app/shaders/desktop.frag")
-set_source_files_properties(app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp PROPERTIES
-    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/test.ui")
+set_source_files_properties(app/Shell.cpp app/MainWindow.cpp app/MainWindowMenus.cpp app/MainWindowTree.cpp app/MainWindowImport.cpp app/MainWindowCredentials.cpp app/MainWindowDocument.cpp app/MainWindowFiles.cpp app/MainWindowPasswords.cpp PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/test.ui;${CMAKE_CURRENT_SOURCE_DIR}/app/ui/ConnectionsPane.ui;${CMAKE_CURRENT_SOURCE_DIR}/app/ui/ConfigPane.ui;${CMAKE_CURRENT_SOURCE_DIR}/app/ui/NotificationsPane.ui")
 add_dependencies(rm_frontend rust_core_build)
 target_compile_definitions(rm_frontend PRIVATE RM_SECRET_OPENSSL=1)
 # Only files that include Version.h rebuild when the release version changes.
 configure_file(cmake/Version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/Version.h" @ONLY)
 target_include_directories(rm_frontend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(rm_frontend PUBLIC app core/include "${CARGO_TARGET}/cxxbridge")
-target_link_libraries(rm_frontend PUBLIC rust_core Qt6::Widgets Qt6::Network VTerm::vterm Threads::Threads OpenSSL::Crypto ${CMAKE_DL_LIBS})
+target_link_libraries(rm_frontend PUBLIC rust_core rm_qtads rm_qtpropertybrowser Qt6::Widgets Qt6::Network VTerm::vterm Threads::Threads OpenSSL::Crypto ${CMAKE_DL_LIBS})
 target_link_libraries(rm_frontend PRIVATE Qt6::GuiPrivate)
 if(APPLE)
     enable_language(OBJCXX)

@@ -1,0 +1,23 @@
+# Qt Advanced Docking System 5.1.1, static. See SOURCE-PROVENANCE.
+if(TARGET rm_qtads)
+    return()
+endif()
+set(QtADS_VERSION_MAJOR 5)
+set(QtADS_VERSION_MINOR 1)
+set(QtADS_VERSION_PATCH 1)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/ads_version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/qtads/ads_version.h" @ONLY)
+file(GLOB RM_QTADS_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp" "${CMAKE_CURRENT_LIST_DIR}/src/*.h")
+if(UNIX AND NOT APPLE)
+    list(APPEND RM_QTADS_SOURCES "${CMAKE_CURRENT_LIST_DIR}/src/linux/FloatingWidgetTitleBar.cpp" "${CMAKE_CURRENT_LIST_DIR}/src/linux/FloatingWidgetTitleBar.h")
+endif()
+add_library(rm_qtads STATIC ${RM_QTADS_SOURCES} "${CMAKE_CURRENT_LIST_DIR}/ads.qrc")
+set_target_properties(rm_qtads PROPERTIES AUTOMOC ON AUTOUIC OFF AUTORCC ON CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_definitions(rm_qtads PUBLIC ADS_STATIC)
+target_include_directories(rm_qtads PUBLIC "${CMAKE_CURRENT_LIST_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}/qtads")
+target_link_libraries(rm_qtads PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
+if(UNIX AND NOT APPLE)
+    # Floating windows use xcb hints on X11; Qt's xcb platform plugin already requires libxcb.
+    target_link_libraries(rm_qtads PRIVATE Qt6::GuiPrivate PUBLIC xcb)
+endif()
+# Third-party code: its warnings are not ours to fix.
+target_compile_options(rm_qtads PRIVATE "$<$<CXX_COMPILER_ID:Clang,AppleClang,GNU>:-w>")
