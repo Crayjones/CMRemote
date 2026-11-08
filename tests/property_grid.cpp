@@ -720,7 +720,10 @@ private slots:
         QCOMPARE(tree->columnCount(), 2);
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("General")); QVERIFY(tree->topLevelItem(0)->isHidden());
         QCOMPARE(tree->topLevelItem(1)->text(0), QString("Display")); QVERIFY(!tree->topLevelItem(1)->isHidden());
-        QVERIFY(tree->visualItemRect(gridRow(window, "name")).height() <= tree->fontMetrics().height() + 8);
+        const int rowHeight = tree->visualItemRect(gridRow(window, "name")).height(), textHeight = tree->fontMetrics().height();
+        // theme.qss gives rows a 19 px minimum and the property delegate adds 4: 23 px on every
+        // platform, whatever the font. A persistent editor would make the row taller.
+        QVERIFY2(rowHeight <= std::max(textHeight, 19) + 4 + 2, qPrintable(QString("row %1, text %2").arg(rowHeight).arg(textHeight)));
         QCOMPARE(gridRow(window, "password")->text(1), QString()); QVERIFY(gridRow(window, "password")->flags() & Qt::ItemIsEditable);
         QVERIFY(!window.findChild<QPushButton*>("saveButton")); QVERIFY(!window.findChild<QPushButton*>("discardButton"));
     }

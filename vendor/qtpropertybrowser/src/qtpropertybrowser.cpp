@@ -1618,6 +1618,13 @@ QtAbstractPropertyBrowser::QtAbstractPropertyBrowser(QWidget *parent)
 */
 QtAbstractPropertyBrowser::~QtAbstractPropertyBrowser()
 {
+    // CMRemote patch: stop listening to the property managers first. A manager can
+    // outlive this destructor (one owned by a child of this widget is deleted later,
+    // by ~QWidget) and its properties' removal signals must not reach this browser's
+    // already freed private data.
+    for (auto it = d_ptr->m_managerToProperties.cbegin(); it != d_ptr->m_managerToProperties.cend(); ++it)
+        QObject::disconnect(it.key(), nullptr, this, nullptr);
+
     const auto indexes = topLevelItems();
     for (QtBrowserItem *item : indexes)
         d_ptr->clearIndex(item);

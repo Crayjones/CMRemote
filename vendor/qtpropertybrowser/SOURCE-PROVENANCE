@@ -14,7 +14,10 @@ Not retained: the button and group-box browsers and images/ (cursor-property ico
 CMakeLists.txt here is CMRemote's own static build.
 
 CMRemote patch (src/qtpropertybrowser.cpp, ~QtAbstractPropertyBrowser, marked "CMRemote
-patch"): upstream keeps every browser's manager-to-factory bindings in process-global maps
+patch"), two parts. First, the browser disconnects from its property managers before
+anything else: a manager owned by one of the browser's children is deleted after the
+browser's destructor (by ~QWidget), and its property-removed signals reached the browser's
+freed private data (a crash on Linux at every Config grid teardown). Second, upstream keeps every browser's manager-to-factory bindings in process-global maps
 keyed by raw pointers and never removes them when the browser is destroyed. A later browser
 allocated at the same address then found the stale binding and called into the destroyed
 factory. The destructor now removes the browser's map entries (only map entries; it never
