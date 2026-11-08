@@ -38,7 +38,7 @@ for key, artifact in previous['artifacts'].items():
 
 a['freerdp'] = fetch('https://pub.freerdp.com/releases/freerdp-3.32.1.tar.gz', 'freerdp.tar.gz')
 a['openssl'] = fetch('https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz', 'openssl.tar.gz')
-a['zlib'] = fetch('https://zlib.net/zlib-1.3.2.tar.gz', 'zlib.tar.gz')
+a['zlib'] = fetch('https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz', 'zlib.tar.gz')
 for key, version, url, filename in (
     ('libvterm', '0.3.3', 'https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz', 'libvterm-0.3.3.tar.gz'),
     ('russh', '0.64.1', 'https://static.crates.io/crates/russh/russh-0.64.1.crate', 'russh-0.64.1.crate'),
