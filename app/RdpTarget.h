@@ -1,6 +1,7 @@
 #pragma once
 #include <QJsonObject>
 #include <QSize>
+#include <QStringList>
 #include <QString>
 #include <optional>
 namespace rm { struct RdpOptions; struct RdpTarget; struct SshTarget; struct VncTarget; struct SessionInfo; }
@@ -19,8 +20,11 @@ struct RdpOptions {
     QString sound = "local"; // local | remote | none
     bool clipboard = false; // share text with the remote computer from the start
     bool gatewayEnabled() const { return gatewayUsage != "never"; }
+    // mRemoteNG SmartSize scales a screen-sized desktop and never resizes the session.
+    bool dynamicResize() const { return automaticResize && resolution != "smart_size"; }
     bool operator==(const RdpOptions& other) const;
-    QSize initialSize(QSize panel) const;
+    // screen: the display the session opens on (SmartSize and Fullscreen use its size).
+    QSize initialSize(QSize panel, QSize screen = {}) const;
     QJsonObject json() const;
 };
 struct SessionTarget {
@@ -43,6 +47,13 @@ struct SessionTarget {
     QString endpoint() const { return (host.contains(':') ? "[" + host + "]" : host) + ":" + QString::number(port); }
     QJsonObject overrides() const;
 };
+// Core Resolution names: fit, smart_size, fullscreen, then the fixed sizes ("WxH").
+// Defined here so Qt-only builds (the UI preview) can list them without the core.
+inline const QStringList& rdpResolutions() {
+    static const QStringList names{"fit", "smart_size", "fullscreen", "800x600", "1024x768", "1152x864", "1280x720", "1280x800", "1280x1024",
+        "1366x768", "1440x900", "1600x900", "1600x1200", "1680x1050", "1920x1080", "1920x1200", "2048x1536", "2560x1440", "2560x1600", "2560x2048", "3840x2160"};
+    return names;
+}
 rm::RdpOptions bridgeOptions(const RdpOptions& options);
 rm::RdpTarget bridgeTarget(const SessionTarget& target);
 rm::SshTarget bridgeSshTarget(const SessionTarget& target);

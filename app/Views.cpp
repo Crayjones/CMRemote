@@ -21,6 +21,7 @@
 #include <rhi/qrhi.h>
 #include <rhi/qshader.h>
 #include <algorithm>
+#include <utility>
 
 void DesktopView::prepareWindow(QWidget* window) {
 #ifdef Q_OS_MACOS
@@ -365,6 +366,40 @@ quint32 DesktopView::scanCode(int key) {
     default:return 0;
     }
 }
+#ifdef Q_OS_MACOS
+bool rmNativeIsoKeyboard(); // NativeWindowMac.mm
+#endif
+quint32 DesktopView::physicalScanCode(quint32 nativeScanCode, quint32 nativeVirtualKey, bool isoKeyboard) {
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(nativeScanCode);
+    if (nativeVirtualKey == 0x0a) return isoKeyboard ? 0x29 : 0x56; // kVK_ISO_Section
+    if (nativeVirtualKey == 0x32) return isoKeyboard ? 0x56 : 0x29; // kVK_ANSI_Grave
+    // kVK_* virtual key codes (ANSI positions). 0 is kVK_ANSI_A but also what synthesized
+    // events carry, so it never maps; the A key always has a Qt key code anyway.
+    static const std::pair<quint32, quint32> keys[] = {
+        {0x01,0x1f},{0x02,0x20},{0x03,0x21},{0x04,0x23},{0x05,0x22},{0x06,0x2c},{0x07,0x2d},{0x08,0x2e},{0x09,0x2f},
+        {0x0b,0x30},{0x0c,0x10},{0x0d,0x11},{0x0e,0x12},{0x0f,0x13},{0x10,0x15},{0x11,0x14},{0x12,0x02},
+        {0x13,0x03},{0x14,0x04},{0x15,0x05},{0x16,0x07},{0x17,0x06},{0x18,0x0d},{0x19,0x0a},{0x1a,0x08},{0x1b,0x0c},
+        {0x1c,0x09},{0x1d,0x0b},{0x1e,0x1b},{0x1f,0x18},{0x20,0x16},{0x21,0x1a},{0x22,0x17},{0x23,0x19},{0x25,0x26},
+        {0x26,0x24},{0x27,0x28},{0x28,0x25},{0x29,0x27},{0x2a,0x2b},{0x2b,0x33},{0x2c,0x35},{0x2d,0x31},{0x2e,0x32},
+        {0x2f,0x34},{0x31,0x39},{0x41,0x53},{0x43,0x37},{0x45,0x4e},{0x4b,0x135},{0x4c,0x11c},{0x4e,0x4a},
+        {0x52,0x52},{0x53,0x4f},{0x54,0x50},{0x55,0x51},{0x56,0x4b},{0x57,0x4c},{0x58,0x4d},{0x59,0x47},{0x5b,0x48},{0x5c,0x49}};
+    for (const auto& [key, scan] : keys) if (key == nativeVirtualKey) return scan;
+    return 0;
+#elif defined(Q_OS_WIN)
+    Q_UNUSED(nativeVirtualKey); Q_UNUSED(isoKeyboard);
+    // Qt reports the WM_KEYDOWN scancode with the extended-key flag as 0x100, like RDP.
+    return nativeScanCode <= 0x1ff ? nativeScanCode : 0;
+#else
+    Q_UNUSED(nativeVirtualKey); Q_UNUSED(isoKeyboard);
+    // XKB keycodes are evdev codes + 8; evdev numbers the main block like PC scancodes.
+    if (nativeScanCode < 9) return 0;
+    const auto code = nativeScanCode - 8;
+    if (code == 96) return 0x11c; // keypad Enter
+    if (code == 98) return 0x135; // keypad divide
+    return code <= 0x58 ? code : 0;
+#endif
+}
 namespace { std::atomic<bool> commandSendsControl{false}; }
 void DesktopView::setCommandAsControl(bool enabled) { commandSendsControl = enabled; }
 bool DesktopView::commandAsControl() { return commandSendsControl; }
@@ -430,6 +465,14 @@ void DesktopView::key(QKeyEvent* e, bool down) {
     if (mock_) emit mockInput(QString("Key %1 %2").arg(e->key()).arg(down ? "down" : "up"));
     else {
         auto scan = scanCode(e->key());
+        // Shifted symbols (@, |, ", {, ~, …) have no key code of their own: send the
+        // physical key and let Shift reach the remote too. Unicode packets instead are
+        // dropped by Windows PowerShell's line editor (PSReadLine on Server 2022).
+#ifdef Q_OS_MACOS
+        if (!scan) scan = physicalScanCode(e->nativeScanCode(), e->nativeVirtualKey(), rmNativeIsoKeyboard());
+#else
+        if (!scan) scan = physicalScanCode(e->nativeScanCode(), e->nativeVirtualKey());
+#endif
 #ifdef Q_OS_MACOS
         // Qt reports Command as Key_Control and physical Control as Key_Meta. By
         // default each sends the key it is labeled with: Control → Ctrl, Command → Windows.

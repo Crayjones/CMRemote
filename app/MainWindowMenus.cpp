@@ -309,11 +309,33 @@ void MainWindow::returnFromFullscreen(QPointer<FullscreenWindow> window, QPointe
 }
 void MainWindow::resetLayout() {
     ui_->resetDocks();
-    for (auto* toolbar : {ui_->quickConnectToolbar, ui_->externalToolsToolbar, ui_->multiSshToolbar}) {
+    // One row: the menus, then Quick Connect beside them.
+    for (auto* toolbar : shellToolbars()) {
         removeToolBar(toolbar); addToolBar(Qt::TopToolBarArea, toolbar);
         toolbar->setMovable(!ui_->actionLockToolbars->isChecked() && !(quickConnectInTitleBar_ && toolbar == ui_->quickConnectToolbar));
     }
+    if (menuToolbar_) menuToolbar_->show();
     ui_->quickConnectToolbar->show(); ui_->externalToolsToolbar->hide(); ui_->multiSshToolbar->hide();
+}
+void MainWindow::placeMenuBarInToolbar() {
+    if (menuToolbar_) return;
+    // Like mRemoteNG's menu strip: File/View/Tools/Help can share a row with Quick
+    // Connect and move like any toolbar. Reparenting takes the menu bar out of the
+    // window's own menu row (menuBar() would then create an empty one; use ui_->menubar).
+    auto* bar = new QToolBar("Menu Bar", this); bar->setObjectName("menuToolbar");
+    bar->setAllowedAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea); bar->setFloatable(false);
+    // The menus cannot be hidden: the toolbar context menu does not list them.
+    bar->toggleViewAction()->setVisible(false);
+    ui_->menubar->setNativeMenuBar(false);
+    ui_->menubar->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    bar->addWidget(ui_->menubar);
+    menuToolbar_ = bar;
+}
+QList<QToolBar*> MainWindow::shellToolbars() const {
+    QList<QToolBar*> bars;
+    if (menuToolbar_) bars << menuToolbar_;
+    bars << ui_->quickConnectToolbar << ui_->externalToolsToolbar << ui_->multiSshToolbar;
+    return bars;
 }
 void MainWindow::notification(const QString& text, Notice level) {
     const auto icon = level == Notice::Error ? style()->standardIcon(QStyle::SP_MessageBoxCritical)
@@ -401,7 +423,7 @@ void MainWindow::configureMenus() {
     connect(ui_->actionAddPanel, &QAction::triggered, this, &MainWindow::addPanel);
     connect(ui_->actionResetLayout, &QAction::triggered, this, &MainWindow::resetLayout);
     connect(ui_->actionLockToolbars, &QAction::toggled, this, [this](bool locked) {
-        for (auto* bar : {ui_->quickConnectToolbar, ui_->externalToolsToolbar, ui_->multiSshToolbar})
+        for (auto* bar : shellToolbars())
             bar->setMovable(!locked && !(quickConnectInTitleBar_ && bar == ui_->quickConnectToolbar));
     });
     connect(ui_->actionFullscreen, &QAction::toggled, this, [this](bool full) {

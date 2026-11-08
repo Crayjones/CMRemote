@@ -300,7 +300,11 @@ void TerminalView::keyPressEvent(QKeyEvent* event) {
                 if (event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z) text = QString(QChar((flags & Qt::ShiftModifier ? 'A' : 'a') + event->key() - Qt::Key_A));
                 else if (event->key() >= Qt::Key_Space && event->key() <= Qt::Key_AsciiTilde) text = QString(QChar(event->key()));
             }
-            typed = send(screen_->encodeText(text, modifiers(flags)));
+            // libvterm encodes Shift+Space as CSI 32;2u, which shells print as "2u";
+            // like xterm, Shift does not change Space.
+            auto modifier = modifiers(flags);
+            if (event->key() == Qt::Key_Space) modifier = VTermModifier(modifier & ~VTERM_MOD_SHIFT);
+            typed = send(screen_->encodeText(text, modifier));
         }
         if (typed) followInput();
     }

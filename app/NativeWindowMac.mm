@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#include <Carbon/Carbon.h>
 #include <QPointer>
 #include <QWidget>
 #include <memory>
@@ -50,3 +51,6 @@ QSize rmNativeTitleBarInset(QWidget* widget) {
     const int height = int(NSHeight(window.frame) - NSHeight(window.contentLayoutRect));
     return QSize(x, height > 0 ? height : 28);
 }
+
+// The current hardware keyboard is an ISO layout (Apple swaps two key codes on those).
+bool rmNativeIsoKeyboard() { return KBGetLayoutType(LMGetKbdType()) == kKeyboardISO; }

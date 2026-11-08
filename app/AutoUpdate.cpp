@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -14,9 +15,20 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QThreadPool>
+#include <algorithm>
+#include <vector>
 #ifdef Q_OS_UNIX
 #include <cerrno>
 #include <signal.h>
+#endif
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <objbase.h>
+#include <shellapi.h>
+#include <winver.h>
 #endif
 
 // Q_INIT_RESOURCE must be outside a namespace so static-library linking finds
@@ -41,6 +53,12 @@ bool safeName(const QString& name) {
 bool isSha256(const QString& text) {
     static const QRegularExpression shape("^[0-9a-f]{64}$");
     return shape.match(text).hasMatch();
+}
+// A short status file the helper writes (its progress or why it stopped); links are ignored.
+QByteArray readSmall(const QString& path) {
+    if (QFileInfo(path).isSymLink()) return {};
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.read(MaxRecord) : QByteArray();
 }
 // Small JSON records the updater and its helper own; links and oversized files are ignored.
 std::optional<QJsonObject> readRecord(const QString& path) {
@@ -80,6 +98,48 @@ bool processAlive(qint64 pid) {
     Q_UNUSED(pid); return false;
 #endif
 }
+void stopProcess(qint64 pid) {
+#ifdef Q_OS_UNIX
+    ::kill(pid_t(pid), SIGTERM);
+#else
+    Q_UNUSED(pid);
+#endif
+}
+// KiB copied so far into the newest "<target>.updating-*" folder a Windows setup is filling.
+qint64 stagedKiB(const QString& target) {
+    const QFileInfo installed(target);
+    const auto stages = installed.dir().entryInfoList({installed.fileName() + ".updating-*"}, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot, QDir::Time);
+    if (stages.isEmpty() || stages.first().isSymLink()) return 0;
+    qint64 bytes = 0;
+    QDirIterator files(stages.first().filePath(), QDir::Files | QDir::Hidden | QDir::NoSymLinks, QDirIterator::Subdirectories);
+    while (files.hasNext()) { files.next(); bytes += files.fileInfo().size(); }
+    return bytes / 1024;
+}
+#ifdef Q_OS_WIN
+// Setup programs that can stage while CMRemote stays open say so in their version resource
+// (scripts/release.py); older ones install only after CMRemote has closed.
+bool setupStages(const QString& path) {
+    const auto file = QDir::toNativeSeparators(path).toStdWString();
+    DWORD ignored = 0;
+    const DWORD size = ::GetFileVersionInfoSizeW(file.c_str(), &ignored);
+    if (!size) return false;
+    std::vector<char> data(size);
+    if (!::GetFileVersionInfoW(file.c_str(), 0, size, data.data())) return false;
+    struct Translation { WORD language, codepage; };
+    Translation* translations = nullptr; UINT length = 0;
+    if (!::VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<void**>(&translations), &length)) return false;
+    for (UINT i = 0; i < length / sizeof(Translation); ++i) {
+        const auto key = QString("\\StringFileInfo\\%1%2\\CMRemoteUpdate").arg(translations[i].language, 4, 16, QChar('0')).arg(translations[i].codepage, 4, 16, QChar('0')).toStdWString();
+        wchar_t* value = nullptr; UINT characters = 0;
+        if (::VerQueryValueW(data.data(), key.c_str(), reinterpret_cast<void**>(&value), &characters) && characters
+            && QString::fromWCharArray(value) == "staged") return true;
+    }
+    return false;
+}
+#endif
+// The setup program commit() chose; runPendingSetup() starts it once CMRemote's window is gone.
+struct PendingSetup { QString package, parameters, version, updates; };
+std::optional<PendingSetup>& pendingSetup() { static std::optional<PendingSetup> pending; return pending; }
 // As published release names and build-info.json spell it (scripts/package.py).
 QString buildArchitecture() {
 #if defined(Q_PROCESSOR_ARM_64)
@@ -91,7 +151,7 @@ QString buildArchitecture() {
 #endif
 }
 Updates::Installation unsupported(const QString& reason) { Updates::Installation none; none.reason = reason; return none; }
-#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX)
+#if defined(Q_OS_MACOS) || defined(Q_OS_LINUX) || defined(Q_OS_WIN)
 // build-info.json from scripts/package.py: only published GitHub packages of this version update themselves.
 QString releasePackageProblem(const QString& path, QJsonObject* info) {
     const auto record = readRecord(path);
@@ -137,8 +197,17 @@ Installation detectInstallation() {
     const auto target = file.canonicalFilePath();
     if (!QFileInfo(QFileInfo(target).absolutePath()).isWritable()) return unsupported("CMRemote cannot replace " + target + ": its folder is not writable.");
     return {Installation::AppImage, target, {}, buildArchitecture(), {}};
+#elif defined(Q_OS_WIN)
+    // <install folder>\RemoteManager.exe beside the Uninstall.exe the setup program writes.
+    const auto folder = QFileInfo(QCoreApplication::applicationDirPath()).canonicalFilePath();
+    QJsonObject info;
+    if (const auto problem = releasePackageProblem(folder + "/share/build-info.json", &info); !problem.isEmpty()) return unsupported(problem);
+    const QFileInfo uninstaller(folder + "/Uninstall.exe");
+    if (!uninstaller.isFile() || uninstaller.isSymLink())
+        return unsupported("This portable copy cannot update itself. Install CMRemote with its setup program, or download the new version from GitHub.");
+    return {Installation::WindowsSetup, QDir::toNativeSeparators(folder), {}, buildArchitecture(), {}};
 #else
-    return unsupported("Windows installs updates with the setup program from GitHub.");
+    return unsupported("This platform cannot update itself; download the new version from GitHub.");
 #endif
 }
 std::optional<Asset> installerFor(const QList<Asset>& assets, const QString& version, const Installation& installation) {
@@ -146,6 +215,7 @@ std::optional<Asset> installerFor(const QList<Asset>& assets, const QString& ver
     switch (installation.kind) {
     case Installation::MacBundle: suffix = "-macos-" + installation.architecture + ".dmg"; break;
     case Installation::AppImage: suffix = "-linux-" + installation.architecture + ".appimage"; break;
+    case Installation::WindowsSetup: suffix = "-windows-" + installation.architecture + "-setup.exe"; break;
     case Installation::None: return std::nullopt;
     }
     const auto expected = "CMRemote-" + version + suffix;
@@ -179,6 +249,11 @@ AutoUpdater::AutoUpdater(Options options, QObject* parent)
 AutoUpdater::~AutoUpdater() { cancel(); }
 QString AutoUpdater::directory() const { return QDir(options_.dataDirectory).filePath("updates"); }
 void AutoUpdater::fail(const QString& text) { emit log("Update: " + text); }
+void AutoUpdater::failDownload(const QString& text) {
+    fail(text); manual_ = false;
+    // Check for Updates said this version was downloading: tell the user it stopped.
+    if (std::exchange(reportDownload_, false)) emit downloadFailed(downloadVersion_, text);
+}
 
 void AutoUpdater::recover() {
     if (lock_) return;
@@ -202,8 +277,17 @@ void AutoUpdater::recover() {
     if (const auto failed = readRecord(QDir(dir).filePath("failed.json"))) failedVersion_ = failed->value("version").toString();
     if (const auto skipped = readRecord(QDir(dir).filePath("skipped.json"))) skippedVersion_ = skipped->value("version").toString();
     // What the helper reported after the previous exit.
-    const auto resultPath = QDir(dir).filePath("result.json");
-    if (const auto result = readRecord(resultPath)) {
+    const auto resultPath = QDir(dir).filePath("result.json"), installingPath = QDir(dir).filePath("installing.json");
+    auto result = readRecord(resultPath);
+    // A Windows setup program reports nothing back: the version now running says whether it installed.
+    if (const auto installing = readRecord(installingPath); installing && !result) {
+        const auto version = installing->value("version").toString();
+        const bool installed = Updates::compareVersions(Updates::currentVersion(), version).value_or(-1) >= 0;
+        result = QJsonObject{{"version", version}, {"status", installed ? "installed" : "failed"},
+                             {"message", installed ? QString() : QString("Setup did not finish. Close every CMRemote window before it runs.")}};
+    }
+    removeEntry(installingPath);
+    if (result) {
         const auto version = clip(result->value("version").toString()), message = clip(result->value("message").toString());
         if (result->value("status").toString() == "installed" && Updates::compareVersions(Updates::currentVersion(), version).value_or(-1) >= 0) {
             emit log("Update: " + (message.isEmpty() ? "CMRemote " + version + " was installed." : message));
@@ -251,7 +335,8 @@ void AutoUpdater::setAutomatic(bool automatic) {
     if (daily_.isActive()) return;
     daily_.start();
     QTimer::singleShot(options_.firstCheckMs, this, [this] { if (automatic_ && !busy()) checkNow(false); });
-    if (!first && ready()) emit readyToInstall(readyVersion_);
+    // A saved update recovered before the preference was known is offered now.
+    if (ready()) emit readyToInstall(readyVersion_);
 }
 bool AutoUpdater::offered() const {
     return ready() && usable_ && installation_.supported() && readyVersion_ != skippedVersion_ && (automatic_ || manualVersion_ == readyVersion_);
@@ -290,7 +375,7 @@ void AutoUpdater::checkNow(bool manual) {
     if (check_) return; // reported when it finishes
     if (reply_ || hashing_) {
         // A download already knows its release; a saved update being verified checks afterwards.
-        if (manual && latest_) reportCheck(true, *latest_, {}, true);
+        if (manual && latest_) { reportDownload_ = true; downloadVersion_ = latest_->version; reportCheck(true, *latest_, {}, true); }
         else if (manual) checkAfterVerify_ = true;
         return;
     }
@@ -339,11 +424,12 @@ void AutoUpdater::finishCheck(const Updates::Release& release) {
         emit readyToInstall(readyVersion_); return;
     }
     if (ready()) discardReady(); // superseded by a newer release
+    if (manual_) { reportDownload_ = true; downloadVersion_ = release.version; }
     reportCheck(true, release, {}, true);
     if (!asset->sha256.isEmpty()) { download(*asset, release.version, asset->sha256); return; }
     // Older releases publish digests only in SHA256SUMS.txt.
     const auto sums = std::find_if(release.assets.begin(), release.assets.end(), [](const auto& a) { return a.name == "SHA256SUMS.txt"; });
-    if (sums == release.assets.end()) { fail(asset->name + " has no published SHA-256; it was not downloaded."); manual_ = false; return; }
+    if (sums == release.assets.end()) { failDownload(asset->name + " has no published SHA-256; it was not downloaded."); return; }
     QNetworkRequest request{QUrl(sums->url)};
     request.setHeader(QNetworkRequest::UserAgentHeader, "CMRemote/" + current); request.setTransferTimeout(30000);
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -356,10 +442,10 @@ void AutoUpdater::finishCheck(const Updates::Release& release) {
         reply_.clear();
         const auto bytes = reply->read(MaxSums + 1);
         if (reply->error() != QNetworkReply::NoError || bytes.size() > MaxSums) {
-            fail("SHA256SUMS.txt download failed: " + (bytes.size() > MaxSums ? QString("it is too large.") : reply->errorString())); manual_ = false; return;
+            failDownload("SHA256SUMS.txt download failed: " + (bytes.size() > MaxSums ? QString("it is too large.") : reply->errorString())); return;
         }
         const auto sha = Updates::checksumFor(bytes, asset.name);
-        if (sha.isEmpty()) { fail("SHA256SUMS.txt has no single checksum for " + asset.name + "; it was not downloaded."); manual_ = false; return; }
+        if (sha.isEmpty()) { failDownload("SHA256SUMS.txt has no single checksum for " + asset.name + "; it was not downloaded."); return; }
         download(asset, version, sha);
     });
 }
@@ -373,7 +459,7 @@ void AutoUpdater::download(const Updates::Asset& asset, const QString& version, 
     removeEntry(partialPath);
     partial_ = std::make_unique<QFile>(partialPath);
     if (!partial_->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
-        fail("cannot write " + partialPath + "."); partial_.reset(); manual_ = false; return;
+        partial_.reset(); failDownload("cannot write " + partialPath + "."); return;
     }
     partial_->setPermissions(QFile::ReadOwner | QFile::WriteOwner);
     hash_ = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
@@ -405,14 +491,14 @@ void AutoUpdater::download(const Updates::Asset& asset, const QString& version, 
         reply_.clear();
         if (reply->error() == QNetworkReply::NoError) take();
         const bool flushed = partial_->flush(); partial_->close();
-        const auto discard = [this] { partial_->remove(); partial_.reset(); hash_.reset(); manual_ = false; };
+        const auto discard = [this](const QString& text) { partial_->remove(); partial_.reset(); hash_.reset(); failDownload(text); };
         if (problem->isEmpty() && reply->error() != QNetworkReply::NoError) *problem = reply->errorString();
         if (problem->isEmpty() && !flushed) *problem = "it could not be written to disk";
         if (problem->isEmpty() && expectedSize_ > 0 && *received != expectedSize_) *problem = "it is incomplete";
-        if (!problem->isEmpty()) { fail("download of " + name + " failed: " + *problem + "."); discard(); return; }
+        if (!problem->isEmpty()) { discard("download of " + name + " failed: " + *problem + "."); return; }
         const auto actual = QString::fromLatin1(hash_->result().toHex());
-        if (actual != sha256) { fail(name + " failed verification (SHA-256 " + actual + ", expected " + sha256 + "); it was deleted."); discard(); return; }
-        if (!partial_->rename(target)) { fail("cannot move the download to " + target + "."); discard(); return; }
+        if (actual != sha256) { discard(name + " failed verification (SHA-256 " + actual + ", expected " + sha256 + "); it was deleted."); return; }
+        if (!partial_->rename(target)) { discard("cannot move the download to " + target + "."); return; }
         partial_.reset(); hash_.reset();
         markReady(target, version, sha256, *received);
     });
@@ -432,9 +518,8 @@ void AutoUpdater::verifyCached(const QString& path, const QString& version, cons
                 guard->markReady(path, version, sha256, actualSize);
             } else {
                 removeEntry(path); removeEntry(QDir(guard->directory()).filePath("pending.json"));
-                guard->manual_ = false;
-                if (fresh) guard->fail("an earlier download of CMRemote " + version + " did not match; it was deleted. Checking again downloads it anew.");
-                else guard->fail("the saved CMRemote " + version + " update changed on disk; it was deleted.");
+                if (fresh) guard->failDownload("an earlier download of CMRemote " + version + " did not match; it was deleted. Checking again downloads it anew.");
+                else guard->failDownload("the saved CMRemote " + version + " update changed on disk; it was deleted.");
             }
             // Check for Updates was chosen while the saved update was being verified.
             if (std::exchange(guard->checkAfterVerify_, false) && !guard->busy()) { guard->manual_ = true; guard->startCheck(); }
@@ -444,11 +529,11 @@ void AutoUpdater::verifyCached(const QString& path, const QString& version, cons
 void AutoUpdater::markReady(const QString& path, const QString& version, const QString& sha256, qint64 size) {
     const QJsonObject record{{"schema", 1}, {"version", version}, {"asset", QFileInfo(path).fileName()}, {"sha256", sha256}, {"size", size}};
     if (!writeRecord(QDir(directory()).filePath("pending.json"), record)) {
-        fail("cannot record the downloaded update; it was deleted."); removeEntry(path); manual_ = false; return;
+        removeEntry(path); failDownload("cannot record the downloaded update; it was deleted."); return;
     }
     readyPath_ = path; readyVersion_ = version; readySha_ = sha256; readySize_ = size;
     if (manual_) manualVersion_ = version;
-    manual_ = false;
+    manual_ = false; reportDownload_ = false;
     emit log("Update: CMRemote " + version + " was downloaded and verified (SHA-256 " + sha256 + ").");
     emit readyToInstall(version);
 }
@@ -459,7 +544,7 @@ void AutoUpdater::cancel() {
     if (auto reply = reply_) { reply_.clear(); reply->disconnect(this); reply->abort(); reply->deleteLater(); }
     if (partial_) { partial_->close(); partial_->remove(); partial_.reset(); }
     hash_.reset();
-    hashing_ = false; manual_ = false; reportCheck_ = false; checkAfterVerify_ = false;
+    hashing_ = false; manual_ = false; reportCheck_ = false; checkAfterVerify_ = false; reportDownload_ = false;
 }
 void AutoUpdater::discardReady() {
     removeEntry(readyPath_); removeEntry(QDir(directory()).filePath("pending.json"));
@@ -506,23 +591,46 @@ void AutoUpdater::prepare() {
         }, Qt::QueuedConnection);
     });
 }
+bool AutoUpdater::showsInstallProgress() const {
+    if (installation_.kind != Updates::Installation::WindowsSetup) return true;
+#ifdef Q_OS_WIN
+    return ready() && setupStages(readyPath_);
+#else
+    return false;
+#endif
+}
 void AutoUpdater::startHelper() {
-#ifdef Q_OS_UNIX
-    const auto script = helperScript();
-    if (script.isEmpty()) { failPreparation("This kind of installation cannot update itself."); return; }
+#ifdef Q_OS_WIN
+    legacySetup_ = installation_.kind == Updates::Installation::WindowsSetup && !setupStages(readyPath_);
+#else
+    legacySetup_ = installation_.kind == Updates::Installation::WindowsSetup;
+#endif
+    if (legacySetup_) {
+        // An older setup installs only once CMRemote has closed: CMRemote starts it as it exits
+        // (Updates::runPendingSetup) and setup waits for it to close.
+        session_ = readyPath_; preparing_ = false;
+        emit log("Update: CMRemote " + readyVersion_ + " is ready to install when CMRemote closes.");
+        emit preparationFinished(true, {});
+        return;
+    }
     const auto session = QDir(directory()).filePath("session-" + QString::number(QRandomGenerator::system()->generate64(), 16));
     const auto removeSession = [session] { QDir(session).removeRecursively(); };
     if (!QDir().mkdir(session) || !QFile::setPermissions(session, Private)) { failPreparation("Cannot create " + session + "."); return; }
+    const auto pid = options_.parentPid ? options_.parentPid : QCoreApplication::applicationPid();
+    const auto generation = generation_;
+    emit preparationProgress(-1);
+#ifdef Q_OS_UNIX
+    const auto script = helperScript();
+    if (script.isEmpty()) { removeSession(); failPreparation("This kind of installation cannot update itself."); return; }
     const auto scriptPath = QDir(session).filePath("install.sh");
     QSaveFile file(scriptPath);
     if (!file.open(QIODevice::WriteOnly) || file.write(script.toUtf8()) < 0 || !file.commit() || !QFile::setPermissions(scriptPath, Private)) {
         removeSession(); failPreparation("Cannot write the update helper."); return;
     }
-    const auto pid = options_.parentPid ? options_.parentPid : QCoreApplication::applicationPid();
+    QProcess helper;
     QStringList arguments{scriptPath, session, QString::number(pid), readyPath_, readySha_, readyVersion_, installation_.target, directory()};
     if (installation_.kind == Updates::Installation::MacBundle)
         arguments << installation_.identifier << (installation_.architecture == "x64" ? "x86_64" : installation_.architecture);
-    QProcess helper;
     helper.setProgram("/bin/sh"); helper.setArguments(arguments); helper.setWorkingDirectory(directory());
     // The helper outlives the AppImage mount: drop the package's library and plugin paths.
     auto environment = QProcessEnvironment::systemEnvironment();
@@ -532,32 +640,122 @@ void AutoUpdater::startHelper() {
     helper.setStandardOutputFile(QProcess::nullDevice()); helper.setStandardErrorFile(QProcess::nullDevice());
     qint64 helperPid = 0;
     if (!helper.startDetached(&helperPid)) { removeSession(); failPreparation("Cannot start the update helper."); return; }
-    // The helper acknowledges before CMRemote commits to closing.
-    auto* wait = new QTimer(this); wait->setInterval(25);
+    watchHelper(session, generation, [helperPid] { return processAlive(helperPid); }, [helperPid] { stopProcess(helperPid); });
+#elif defined(Q_OS_WIN)
+    // The new version's setup is the helper. "runas" shows the Windows permission prompt while
+    // CMRemote is still open; off the GUI thread, which ShellExecuteEx blocks until it is answered.
+    // NSIS: quoted /SESSION= for spaces, /D= last and unquoted.
+    const auto file = QDir::toNativeSeparators(readyPath_).toStdWString(), folder = QDir::toNativeSeparators(directory()).toStdWString();
+    const auto parameters = QString("/SESSION=\"%1\" /PID=%2 /D=%3").arg(QDir::toNativeSeparators(session)).arg(pid).arg(installation_.target).toStdWString();
+    const auto owner = reinterpret_cast<quintptr>(::GetForegroundWindow());
+    QPointer<AutoUpdater> guard(this);
+    QThreadPool::globalInstance()->start([guard, generation, session, file, folder, parameters, owner] {
+        const HRESULT com = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        SHELLEXECUTEINFOW info{};
+        info.cbSize = sizeof(info); info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+        info.hwnd = reinterpret_cast<HWND>(owner); info.lpVerb = L"runas";
+        info.lpFile = file.c_str(); info.lpParameters = parameters.c_str(); info.lpDirectory = folder.c_str(); info.nShow = SW_HIDE;
+        const bool started = ::ShellExecuteExW(&info) && info.hProcess;
+        const DWORD code = started ? 0 : ::GetLastError();
+        if (SUCCEEDED(com)) ::CoUninitialize();
+        const auto process = reinterpret_cast<quintptr>(started ? info.hProcess : nullptr);
+        QMetaObject::invokeMethod(QCoreApplication::instance(), [guard, generation, session, process, code] {
+            const std::shared_ptr<void> handle(reinterpret_cast<HANDLE>(process), [](HANDLE h) { if (h) ::CloseHandle(h); });
+            if (!guard) return;
+            if (!process) {
+                QDir(session).removeRecursively();
+                guard->failPreparation(code == ERROR_CANCELLED ? QString("Administrator permission was declined, so CMRemote was not updated.")
+                                                               : "Windows could not start Setup (error " + QString::number(code) + ").");
+                return;
+            }
+            guard->watchHelper(session, generation, [handle] { return ::WaitForSingleObject(handle.get(), 0) == WAIT_TIMEOUT; },
+                               [handle] { ::TerminateProcess(handle.get(), 1); });
+        }, Qt::QueuedConnection);
+    });
+#else
+    removeSession(); failPreparation("This kind of installation cannot update itself.");
+#endif
+}
+void AutoUpdater::watchHelper(const QString& session, quint64 generation, std::function<bool()> alive, std::function<void()> stop) {
+    // The helper copies the new version before CMRemote commits to closing.
+    const auto removeSession = [session] { QDir(session).removeRecursively(); };
+    auto* wait = new QTimer(this); wait->setInterval(50);
     auto elapsed = std::make_shared<QElapsedTimer>(); elapsed->start();
-    const auto generation = generation_;
-    connect(wait, &QTimer::timeout, this, [this, wait, elapsed, session, helperPid, generation, removeSession] {
-        const bool acknowledged = QFileInfo(QDir(session).filePath("ready")).isFile();
-        if (!acknowledged && processAlive(helperPid) && elapsed->elapsed() < options_.helperTimeoutMs) return;
-        wait->deleteLater();
-        if (generation != generation_ || !ready()) { failPreparation("The update was canceled."); return; }
-        if (!acknowledged) {
-            if (processAlive(helperPid)) ::kill(pid_t(helperPid), SIGTERM);
-            removeSession(); failPreparation("The update helper did not start."); return;
+    auto shown = std::make_shared<int>(-1); auto ticks = std::make_shared<int>(0);
+    connect(wait, &QTimer::timeout, this, [this, wait, elapsed, shown, ticks, session, generation, alive, stop, removeSession] {
+        const QDir dir(session);
+        const bool started = QFileInfo(dir.filePath("started")).isFile(), staged = QFileInfo(dir.filePath("ready")).isFile();
+        const auto refused = QFileInfo(dir.filePath("error")).isFile() ? QString::fromUtf8(readSmall(dir.filePath("error"))).trimmed() : QString();
+        const bool running = alive();
+        if (started && !staged && refused.isEmpty() && running) {
+            qint64 done = 0, total = 0;
+            if (const auto parts = QString::fromLatin1(readSmall(dir.filePath("progress"))).split(' '); parts.size() == 2) {
+                done = parts.value(0).toLongLong(); total = parts.value(1).toLongLong();
+            } else if (++*ticks % 5 == 0) {
+                // Windows setup reports only the total; the copy beside the installed version shows how far it is.
+                total = QString::fromLatin1(readSmall(dir.filePath("total"))).trimmed().toLongLong();
+                done = stagedKiB(installation_.target);
+            } else total = -1;
+            if (total >= 0) {
+                if (const int percent = total > 0 ? int(std::clamp<qint64>(done * 100 / total, 0, 100)) : -1; percent != *shown)
+                    emit preparationProgress(*shown = percent);
+            }
         }
+        const int limit = started ? options_.stagingTimeoutMs : options_.helperTimeoutMs;
+        if (!staged && refused.isEmpty() && running && elapsed->elapsed() < limit) return;
+        wait->deleteLater();
+        if (generation != generation_ || !ready()) {
+            if (alive()) stop();
+            removeSession(); failPreparation("The update was canceled."); return;
+        }
+        if (!staged) {
+            if (alive()) stop();
+            removeSession();
+            failPreparation(!refused.isEmpty() ? refused : started ? "The update helper stopped before the new version was ready." : "The update helper did not start.");
+            return;
+        }
+        emit preparationProgress(100);
         session_ = session; preparing_ = false;
         emit log("Update: CMRemote " + readyVersion_ + " is ready to install when CMRemote closes.");
         emit preparationFinished(true, {});
     });
     wait->start();
-#else
-    failPreparation("This kind of installation cannot update itself.");
-#endif
 }
 bool AutoUpdater::commit(bool relaunch, QString* error) {
     const auto report = [error](const QString& text) { if (error) *error = text; return false; };
     if (!prepared() || !installOnExit()) return report("No update is prepared.");
+    if (installation_.kind == Updates::Installation::WindowsSetup && legacySetup_) {
+        // NSIS: /UPDATE shows only the progress page, /RELAUNCH reopens CMRemote (not elevated)
+        // when it closes, /D= last and unquoted.
+        const auto parameters = QString("/UPDATE") + (relaunch ? " /RELAUNCH" : "") + " /D=" + installation_.target;
+        if (!writeRecord(QDir(directory()).filePath("installing.json"), {{"schema", 1}, {"version", readyVersion_}})) return report("Cannot start the installation.");
+        pendingSetup() = PendingSetup{QDir::toNativeSeparators(readyPath_), parameters, readyVersion_, directory()};
+        return true;
+    }
+    // Windows: the next start judges the result from the version it runs.
+    if (installation_.kind == Updates::Installation::WindowsSetup
+        && !writeRecord(QDir(directory()).filePath("installing.json"), {{"schema", 1}, {"version", readyVersion_}})) return report("Cannot start the installation.");
     QSaveFile file(QDir(session_).filePath("commit"));
     if (!file.open(QIODevice::WriteOnly) || file.write(relaunch ? "1" : "0") != 1 || !file.commit()) return report("Cannot start the installation.");
     return true;
+}
+void Updates::runPendingSetup() {
+    auto& pending = pendingSetup();
+    if (!pending) return;
+    const auto setup = *std::exchange(pending, std::nullopt);
+#ifdef Q_OS_WIN
+    // Setup's manifest requires administrator rights; "runas" shows the Windows permission prompt.
+    const auto file = setup.package.toStdWString(), parameters = setup.parameters.toStdWString(), folder = QDir::toNativeSeparators(setup.updates).toStdWString();
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info); info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI; info.lpVerb = L"runas";
+    info.lpFile = file.c_str(); info.lpParameters = parameters.c_str(); info.lpDirectory = folder.c_str(); info.nShow = SW_SHOWNORMAL;
+    if (::ShellExecuteExW(&info)) return;
+    const auto code = ::GetLastError();
+    const QString message = code == ERROR_CANCELLED ? QString("Administrator permission was declined, so Setup did not run.")
+                                                    : "Windows could not start Setup (error " + QString::number(code) + ").";
+#else
+    const QString message = "This platform has no setup program.";
+#endif
+    removeEntry(QDir(setup.updates).filePath("installing.json"));
+    writeRecord(QDir(setup.updates).filePath("result.json"), {{"schema", 1}, {"status", "failed"}, {"version", setup.version}, {"message", message}});
 }

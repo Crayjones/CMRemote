@@ -1,4 +1,5 @@
 #include "SessionPane.h"
+#include <QScreen>
 #include "Views.h"
 #include "TerminalScreen.h"
 #include "SshWorker.h"
@@ -123,6 +124,7 @@ void SessionPane::startRdp(RdpConfig config) {
     desktop_->resetRemoteCursor(); desktop_->setFrame({});
     desktop_->setPerformanceTrace(config.performance);
     layout()->activate(); config.panelSize = desktop_->size();
+    if (const auto* screen = desktop_->screen()) config.screenSize = screen->size();
     const auto options = config.options;
     worker_ = new RdpWorker(std::move(config), this);
     QPointer<RdpWorker> worker = worker_;

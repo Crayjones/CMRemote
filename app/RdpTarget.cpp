@@ -3,11 +3,15 @@
 #include "remotemanager-core/src/bridge.rs.h"
 static QString qstr(const rust::String& s) { return QString::fromUtf8(s.data(), qsizetype(s.size())); }
 bool RdpOptions::operator==(const RdpOptions& other) const { return json() == other.json(); }
-QSize RdpOptions::initialSize(QSize panel) const {
+QSize RdpOptions::initialSize(QSize panel, QSize screen) const {
     if (resolution == "fit") return QSize(qBound(200, panel.width(), 4096), qBound(200, panel.height(), 4096));
-    if (resolution == "800x600") return {800, 600};
-    if (resolution == "1280x720") return {1280, 720};
-    if (resolution == "1920x1080") return {1920, 1080};
+    // Like mRemoteNG: SmartSize and Fullscreen connect at the screen's resolution.
+    if (resolution == "smart_size" || resolution == "fullscreen") {
+        const auto size = screen.isValid() ? screen : panel;
+        return QSize(qBound(200, size.width(), 8192), qBound(200, size.height(), 8192));
+    }
+    const auto parts = resolution.split('x');
+    if (parts.size() == 2 && rdpResolutions().contains(resolution)) return {parts[0].toInt(), parts[1].toInt()};
     return {1024, 768};
 }
 QJsonObject RdpOptions::json() const {

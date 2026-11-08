@@ -41,6 +41,11 @@ public:
     quint64 presentedRevision() const { return presentedRevision_; }
     bool rendererAvailable() const { return rendererError_.isEmpty(); }
     static quint32 scanCode(int qtKey);
+    // The scancode of the physical key behind a native key event (0: unknown), so the
+    // remote layout composes shifted symbols the way Microsoft's client sends them.
+    // isoKeyboard (macOS): Apple ISO keyboards report the key left of 1 and the key
+    // beside left Shift swapped relative to ANSI.
+    static quint32 physicalScanCode(quint32 nativeScanCode, quint32 nativeVirtualKey, bool isoKeyboard = false);
     // macOS: Command sends Control and physical Control sends Windows/Super, instead
     // of each key sending what it is labeled. Applies to every remote desktop view.
     static void setCommandAsControl(bool enabled);

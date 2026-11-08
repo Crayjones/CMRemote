@@ -139,6 +139,7 @@ ManifestDPIAware true
 SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
 !define PRODUCT "@PRODUCT@"
 !define VERSION "@VERSION@"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}"
@@ -152,11 +153,27 @@ VIAddVersionKey "ProductName" "${PRODUCT}"
 VIAddVersionKey "FileDescription" "${PRODUCT} Setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
+; CMRemote 0.1.6+ reads this before starting setup: it can stage while CMRemote stays open.
+VIAddVersionKey "CMRemoteUpdate" "staged"
 !define MUI_ICON "@ICON@"
 !define MUI_UNICON "@ICON@"
-!define MUI_FINISHPAGE_RUN "$INSTDIR\RemoteManager.exe"
+; CMRemote's own updater passes /UPDATE: only the progress page shows, and it closes when done.
+Var Updating
+; Staged update: CMRemote passes /SESSION="<folder>" /PID=<its process>. Setup runs silently,
+; copies the new version beside the installed one while CMRemote shows the progress, reports
+; SESSION\ready (or SESSION\error), waits for CMRemote to exit and swaps the folders only if
+; CMRemote wrote SESSION\commit ("1": reopen it). Without a commit it removes the copy.
+Var Session
+Var Parent
+Var Stage
+Var Relaunch
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipWhenUpdating
 !insertmacro MUI_PAGE_DIRECTORY
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW ShowUpdateProgress
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION Launch
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipWhenUpdating
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -167,6 +184,56 @@ Function .onInit
     Abort
   ${EndIf}
   SetRegView 64
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  IfErrors staged
+    StrCpy $Updating 1
+    SetAutoClose true
+  staged:
+  ClearErrors
+  ${GetOptions} $0 "/SESSION=" $Session
+  IfErrors 0 +2
+    StrCpy $Session ""
+  StrCmp $Session "" done
+    SetSilent silent
+    ${GetOptions} $0 "/PID=" $1
+    ; Opened now, while CMRemote waits for this setup, so the process id cannot be reused.
+    System::Call 'kernel32::OpenProcess(i 0x00100000, i 0, i r1) p .s'
+    Pop $Parent
+  done:
+FunctionEnd
+; Before CMRemote closes: tell it why nothing will be installed, and change nothing.
+Function Refuse
+  Exch $0
+  SetOutPath "$TEMP"
+  RMDir /r "$Stage"
+  FileOpen $1 "$Session\error" w
+  FileWrite $1 "$0"
+  FileClose $1
+  SetErrorLevel 2
+  Quit
+FunctionEnd
+Function WriteSessionFile
+  Exch $0
+  FileOpen $1 "$Session\$0" w
+  FileClose $1
+  Pop $0
+FunctionEnd
+Function SkipWhenUpdating
+  StrCmp $Updating 1 0 +2
+    Abort
+FunctionEnd
+Function ShowUpdateProgress
+  StrCmp $Updating 1 0 done
+    !insertmacro MUI_HEADER_TEXT "Updating ${PRODUCT}" "Installing ${PRODUCT} ${VERSION} in $INSTDIR"
+    SetDetailsView show
+  done:
+FunctionEnd
+Function Launch
+  ; Through Explorer, so CMRemote runs as the signed-in user rather than with setup's
+  ; administrator rights.
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\RemoteManager.exe"'
 FunctionEnd
 Function un.onInit
   SetRegView 64
@@ -178,8 +245,20 @@ Function .onInstFailed
     Rename "$INSTDIR.previous" "$INSTDIR"
   done:
 FunctionEnd
-Section "Install"
+Function .onInstSuccess
+  ; CMRemote's Restart & Update passes /RELAUNCH (staged: commit "1"): reopen it once setup is done.
+  StrCmp $Relaunch 1 launch
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH" $1
+  IfErrors done
+  launch:
+    Call Launch
+  done:
+FunctionEnd
+Section "Install" SEC_INSTALL
   SetShellVarContext all
+  StrCmp $Session "" 0 staging
   ; An interrupted earlier setup left the installed version aside: restore it first.
   IfFileExists "$INSTDIR.previous\RemoteManager.exe" 0 staged
     RMDir /r "$INSTDIR"
@@ -189,18 +268,95 @@ Section "Install"
   ; version cannot be loaded, and a failed copy rolls back in .onInstFailed. A folder
   ; without CMRemote in it is never moved or removed.
   IfFileExists "$INSTDIR\RemoteManager.exe" 0 copy
+    StrCpy $0 0
+  retry:
     ClearErrors
     Rename "$INSTDIR" "$INSTDIR.previous"
     IfErrors 0 copy
+      ; CMRemote's updater starts setup as CMRemote exits: give it up to 30 seconds to close.
+      StrCmp $Updating 1 wait
+      IfSilent 0 busy
+  wait:
+      IntCmp $0 60 busy
+      IntCmp $0 0 0 +2 +2
+        DetailPrint "Waiting for ${PRODUCT} to close..."
+      IntOp $0 $0 + 1
+      Sleep 500
+      Goto retry
+  busy:
       MessageBox MB_ICONSTOP "Close ${PRODUCT} and run Setup again. The installed version was not changed." /SD IDOK
       SetErrorLevel 2
       Quit
   copy:
-  SetOutPath "$INSTDIR"
+  DetailPrint "Installing ${PRODUCT} ${VERSION} in $INSTDIR"
+  StrCpy $Stage "$INSTDIR"
+  Goto extract
+  staging:
+  ; CMRemote is still open: the new version goes beside it, and CMRemote reads its size.
+  System::Call 'kernel32::GetCurrentProcessId() i .r0'
+  StrCpy $Stage "$INSTDIR.updating-$0"
+  RMDir /r "$Stage"
+  IfFileExists "$INSTDIR\RemoteManager.exe" 0 +2
+    RMDir /r "$INSTDIR.previous"
+  SectionGetSize ${SEC_INSTALL} $0
+  FileOpen $1 "$Session\total" w
+  FileWrite $1 "$0"
+  FileClose $1
+  Push "started"
+  Call WriteSessionFile
+  extract:
+  SetOutPath "$Stage"
   ClearErrors
   File /r "@PACKAGE@\*"
-  IfErrors 0 +2
-    Abort "Copying ${PRODUCT} failed; the previous version is restored."
+  IfErrors 0 extracted
+    StrCmp $Session "" 0 +2
+      Abort "Copying ${PRODUCT} failed; the previous version is restored."
+    Push "Setup could not copy the new version into the ${PRODUCT} folder."
+    Call Refuse
+  extracted:
+  StrCmp $Session "" register
+  SetOutPath "$TEMP"
+  Push "ready"
+  Call WriteSessionFile
+  ; CMRemote closes now; without a commit (a canceled quit or a crash) nothing changes.
+  System::Call 'kernel32::WaitForSingleObject(p $Parent, i -1) i'
+  System::Call 'kernel32::CloseHandle(p $Parent)'
+  IfFileExists "$Session\commit" commit
+    RMDir /r "$Stage"
+    RMDir /r "$Session"
+    Quit
+  commit:
+  FileOpen $1 "$Session\commit" r
+  FileRead $1 $Relaunch 1
+  FileClose $1
+  ; Only the two folders trade places; files CMRemote just closed may stay busy briefly.
+  IfFileExists "$INSTDIR\RemoteManager.exe" 0 swap
+    StrCpy $0 0
+  aside:
+    ClearErrors
+    Rename "$INSTDIR" "$INSTDIR.previous"
+    IfErrors 0 swap
+      IntCmp $0 40 abandon
+      IntOp $0 $0 + 1
+      Sleep 250
+      Goto aside
+  abandon:
+    ; The installed version stays; CMRemote reports that setup did not finish when it next starts.
+    RMDir /r "$Stage"
+    RMDir /r "$Session"
+    StrCmp $Relaunch 1 0 +2
+      Call Launch
+    SetErrorLevel 2
+    Quit
+  swap:
+  ClearErrors
+  Rename "$Stage" "$INSTDIR"
+  IfErrors 0 swapped
+    Rename "$INSTDIR.previous" "$INSTDIR"
+    Goto abandon
+  swapped:
+  RMDir /r "$Session"
+  register:
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
   CreateShortcut "$SMPROGRAMS\${PRODUCT}\${PRODUCT}.lnk" "$INSTDIR\RemoteManager.exe" "" "$INSTDIR\RemoteManager.exe" 0

@@ -288,6 +288,41 @@ private slots:
         QApplication::sendEvent(&rdp, &press); QApplication::sendEvent(&rdp, &repeat);
         QCOMPARE(keys.count(), 2); QVERIFY(keys.at(1).at(2).toBool()); QCOMPARE(text.count(), 0); // held keys repeat on the remote
     }
+    void shiftedSymbolsSendThePhysicalKeyNotUnicode() {
+        // Native key codes of the US "2", "'" and "\\" keys on this platform.
+#if defined(Q_OS_MACOS)
+        const quint32 two[] = {0, 0x13}, quote[] = {0, 0x27}, backslash[] = {0, 0x2a};
+        QCOMPARE(DesktopView::physicalScanCode(0, 0x32, false), quint32(0x29)); // ANSI grave
+        QCOMPARE(DesktopView::physicalScanCode(0, 0x32, true), quint32(0x56));  // ISO key beside left Shift
+        QCOMPARE(DesktopView::physicalScanCode(0, 0x0a, true), quint32(0x29));
+        QCOMPARE(DesktopView::physicalScanCode(0, 0x4c), quint32(0x11c));       // keypad Enter
+#elif defined(Q_OS_WIN)
+        const quint32 two[] = {0x03, 0}, quote[] = {0x28, 0}, backslash[] = {0x2b, 0};
+        QCOMPARE(DesktopView::physicalScanCode(0x135, 0), quint32(0x135));
+#else
+        const quint32 two[] = {11, 0}, quote[] = {48, 0}, backslash[] = {51, 0};
+        QCOMPARE(DesktopView::physicalScanCode(104, 0), quint32(0x11c));
+        QCOMPARE(DesktopView::physicalScanCode(94, 0), quint32(0x56));
+#endif
+        QCOMPARE(DesktopView::physicalScanCode(0, 0), quint32(0)); // synthesized events carry no native key
+        DesktopView rdp(false);
+        QSignalSpy keys(&rdp, &DesktopView::keyInput); QSignalSpy text(&rdp, &DesktopView::textInput);
+        const auto press = [&](Qt::Key key, const QString& symbol, const quint32* native) {
+            QKeyEvent down(QEvent::KeyPress, key, Qt::ShiftModifier, native[0], native[1], 0, symbol);
+            QKeyEvent up(QEvent::KeyRelease, key, Qt::ShiftModifier, native[0], native[1], 0, symbol);
+            QApplication::sendEvent(&rdp, &down); QApplication::sendEvent(&rdp, &up);
+        };
+        press(Qt::Key_At, "@", two); press(Qt::Key_QuoteDbl, "\"", quote); press(Qt::Key_Bar, "|", backslash);
+        QCOMPARE(text.count(), 0);
+        QCOMPARE(keys.count(), 6);
+        QCOMPARE(keys.at(0).at(0).value<quint32>(), quint32(0x03)); QVERIFY(keys.at(0).at(1).toBool());
+        QCOMPARE(keys.at(1).at(0).value<quint32>(), quint32(0x03)); QVERIFY(!keys.at(1).at(1).toBool());
+        QCOMPARE(keys.at(2).at(0).value<quint32>(), quint32(0x28));
+        QCOMPARE(keys.at(4).at(0).value<quint32>(), quint32(0x2b));
+        // A character with no known physical key still arrives as text.
+        QKeyEvent euro(QEvent::KeyPress, Qt::Key_unknown, Qt::NoModifier, QString::fromUtf8("€"));
+        QApplication::sendEvent(&rdp, &euro); QCOMPARE(text.count(), 1);
+    }
     void pointerCaptureNeedsPermissionAndFrame() {
         DesktopView view(false); QSignalSpy changed(&view, &DesktopView::pointerCaptureChanged);
         view.setPointerCaptured(true); QVERIFY(!view.pointerCaptured());
@@ -909,9 +944,30 @@ private slots:
 #endif
         Q_UNUSED(folder);
     }
+    void menusShareTheQuickConnectRowAndMoveLikeToolbars() {
+#ifdef Q_OS_MACOS
+        if (QGuiApplication::platformName() == "cocoa") QSKIP("macOS keeps the native menu bar");
+#endif
+        QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.resize(1200, 650); w.show(); WAIT_STORE(w);
+        auto* menus = w.findChild<QToolBar*>("menuToolbar"); QVERIFY(menus);
+        auto* menubar = w.findChild<QMenuBar*>("menubar"); QVERIFY(menus->isAncestorOf(menubar)); QVERIFY(menubar->isVisible());
+        QVERIFY(!w.menuWidget()); // no separate menu row above the toolbars
+        auto* quick = w.findChild<QToolBar*>("quickConnectToolbar");
+        QCOMPARE(w.toolBarArea(menus), Qt::TopToolBarArea); QCOMPARE(w.toolBarArea(quick), Qt::TopToolBarArea); QVERIFY(!w.toolBarBreak(quick));
+        QTRY_COMPARE(menus->geometry().top(), quick->geometry().top());
+        QVERIFY(menus->geometry().right() < quick->geometry().left());
+        QVERIFY(menus->isMovable()); QVERIFY(!menus->isFloatable()); QVERIFY(!menus->toggleViewAction()->isVisible());
+        auto* lock = w.findChild<QAction*>("actionLockToolbars");
+        lock->setChecked(true); QVERIFY(!menus->isMovable()); QVERIFY(!quick->isMovable());
+        lock->setChecked(false); QVERIFY(menus->isMovable()); QVERIFY(quick->isMovable());
+        // Moved elsewhere, Reset layout puts the menus back beside Quick Connect.
+        w.addToolBar(Qt::BottomToolBarArea, menus); QCOMPARE(w.toolBarArea(menus), Qt::BottomToolBarArea);
+        w.findChild<QAction*>("actionResetLayout")->trigger();
+        QCOMPARE(w.toolBarArea(menus), Qt::TopToolBarArea); QVERIFY(!w.toolBarBreak(quick)); QVERIFY(menubar->isVisible()); QVERIFY(!w.menuWidget());
+    }
     void viewMenuMatchesOriginalOrder() {
         QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.show(); WAIT_STORE(w);
-        QStringList top; for (auto* action : w.menuBar()->actions()) top << action->text().remove('&');
+        QStringList top; for (auto* action : w.findChild<QMenuBar*>("menubar")->actions()) top << action->text().remove('&');
         QCOMPARE(top, QStringList({"File", "View", "Tools", "Help"}));
         QStringList order; for (auto* action : w.findChild<QMenu*>("menuView")->actions()) order << (action->isSeparator() ? "|" : action->text());
         QCOMPARE(order, QStringList({"New Panel", "Connection Panels", "|", "Connections", "Config", "Notifications", "Screenshots", "|", "Jump To", "Reset layout", "Lock toolbar positions", "|", "Quick Connect Toolbar", "External Tools Toolbar", "Multi SSH Toolbar", "|", "Full Screen"}));
@@ -1055,8 +1111,10 @@ private slots:
         w.setUpdateSource(answer("newer.json", "v999.0.0")); action->trigger();
         auto text = dialogText(); QVERIFY2(text.startsWith("CMRemote 999.0.0 is available. You have " + Updates::currentVersion()), qPrintable(text));
         QVERIFY(text.contains("href=\"https://github.com/Crayjones/CMRemote/releases/tag/v999.0.0\""));
+        w.setUpdatesUnavailable("Development builds do not update themselves."); action->trigger();
+        text = dialogText(); QVERIFY2(text.contains("You have " + Updates::currentVersion() + ".\nDevelopment builds do not update themselves.\nDownload it from GitHub"), qPrintable(text));
         w.setUpdateSource(answer("same.json", "v" + Updates::currentVersion())); action->trigger();
-        text = dialogText(); QVERIFY2(text.startsWith("You have the latest version, CMRemote " + Updates::currentVersion() + "."), qPrintable(text));
+        text = dialogText(); QVERIFY2(text.startsWith("CMRemote is up to date.\nYou have version " + Updates::currentVersion() + ", the latest release."), qPrintable(text));
         w.setUpdateSource(QUrl::fromLocalFile(dir.filePath("missing.json"))); action->trigger();
         text = dialogText(); QVERIFY2(text.startsWith("Could not check for updates:"), qPrintable(text));
         QVERIFY(text.contains("href=\"https://github.com/Crayjones/CMRemote/releases\""));

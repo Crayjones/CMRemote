@@ -1,4 +1,5 @@
 #include "ProfileEditor.h"
+#include "RdpTarget.h"
 #include "ConfigDescriptions.h"
 #include "ConnectionIcons.h"
 #include "qttreepropertybrowser_p.h"
@@ -52,7 +53,7 @@ const std::vector<Field> fields = {
     {"gateway_credentials", "Gateway Credentials", "Gateway", "choice", "Choose whether the gateway uses the connection's credentials.", true, "rdp"},
     {"gateway_username", "Gateway Username", "Gateway", "text", "Gateway account user name.", true, "rdp"},
     {"gateway_domain", "Gateway Domain", "Gateway", "text", "Gateway account domain.", true, "rdp"},
-    {"resolution", "Resolution", "Appearance", "choice", "Initial remote desktop size. Fit to Panel captures the panel size when connecting. The server may negotiate a different size.", true, "rdp"},
+    {"resolution", "Resolution", "Appearance", "choice", "Initial remote desktop size, as in mRemoteNG. Fit to Panel captures the panel size when connecting. Smart Size connects at the screen resolution and scales it to the panel without resizing the session. Fullscreen connects at the screen resolution in full screen. The server may negotiate a different size.", true, "rdp"},
     {"automatic_resize", "Automatic resize", "Appearance", "bool", "This native client uses FreeRDP, not Microsoft's RDC. Request later desktop-size changes when the panel changes size; requires server display-control support. No keeps the initial remote size and scales pointer coordinates to it.", true, "rdp"},
     {"color_depth", "Colors", "Appearance", "choice", "Request 16, 24 or 32-bit color. The server may negotiate a different depth.", true, "rdp"},
     {"cache_bitmaps", "Cache bitmaps", "Appearance", "bool", "Request bitmap caching. The server may ignore this preference.", true, "rdp"},
@@ -340,7 +341,11 @@ void ProfileEditor::render() {
             if (boolean) options = {choice("No", false), choice("Yes", true)};
             if (key == "protocol") options = {choice("RDP", "rdp"), choice("SSH", "ssh"), choice("VNC", "vnc")};
             if (key == "ssh_auth") options = {choice("Password", "password"), choice("Private key", "private_key")};
-            if (key == "resolution") options = {choice("Fit to Panel", "fit"), choice("800 × 600", "800x600"), choice("1024 × 768", "1024x768"), choice("1280 × 720", "1280x720"), choice("1920 × 1080", "1920x1080")};
+            if (key == "resolution") {
+                // mRemoteNG's names: Fit to Panel, Smart Size, Fullscreen, then 1.77's fixed sizes.
+                options = {choice("Fit to Panel", "fit"), choice("Smart Size", "smart_size"), choice("Fullscreen", "fullscreen")};
+                for (const auto& name : rdpResolutions().mid(3)) options << choice(QString(name).replace('x', " × "), name);
+            }
             if (key == "color_depth") options = {choice("16-bit", 16), choice("24-bit", 24), choice("32-bit", 32)};
             if (key == "security_protocol") options = {choice("Automatic", "auto"), choice("NLA / CredSSP", "nla"), choice("Extended NLA", "ext"), choice("TLS", "tls"), choice("Legacy RDP Security", "rdp")};
             if (key == "server_auth") options = {choice("Always connect, even if authentication fails", "always"), choice("Don't connect if authentication fails", "required"), choice("Accept unverified certificates for this session", "warn")};

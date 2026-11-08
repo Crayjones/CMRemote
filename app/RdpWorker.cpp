@@ -118,7 +118,7 @@ struct RdpWorker::Context {
             self->channels->displayReady = monitors > 0;
             self->channels->maxArea = quint64(a) * b;
         }
-        emit self->worker->resizeAvailable(monitors > 0 && self->worker->config_.options.automaticResize);
+        emit self->worker->resizeAvailable(monitors > 0 && self->worker->config_.options.dynamicResize());
         return CHANNEL_RC_OK;
     }
     static void clipboardBatch(Context* self, const RdpInputQueue::Batch& batch) {
@@ -409,7 +409,7 @@ void RdpWorker::text(QString text) { if (text.size() > 4096) return; Command c{1
 void RdpWorker::pointer(quint16 flags, quint16 x, quint16 y) { Command c{2}; c.flags = flags; c.x = x; c.y = y; enqueue(std::move(c)); }
 void RdpWorker::relativePointer(quint16 flags, qint16 dx, qint16 dy) { Command c{3}; c.flags = flags; c.x = quint16(dx); c.y = quint16(dy); enqueue(std::move(c)); }
 void RdpWorker::resizeDesktop(QSize size) {
-    if (stopping_ || !config_.options.automaticResize) return;
+    if (stopping_ || !config_.options.dynamicResize()) return;
     checkInputResult(input_.resize(size));
 }
 void RdpWorker::localClipboard(QString text) {
@@ -429,9 +429,9 @@ std::optional<ClipboardDelivery> RdpWorker::takeClipboard() {
     auto delivery = std::move(pendingClipboard_); pendingClipboard_.reset(); clipboardNotificationPending_ = false; return delivery;
 }
 
-bool RdpWorker::applyProfileSettings(rdp_settings* settings, const SessionTarget& target, QSize panelSize) {
+bool RdpWorker::applyProfileSettings(rdp_settings* settings, const SessionTarget& target, QSize panelSize, QSize screenSize) {
     const auto normalized = normalizeRdpTarget(target); if (!settings || !normalized) return false;
-    const auto& o = target.options; const auto size = o.initialSize(panelSize);
+    const auto& o = target.options; const auto size = o.initialSize(panelSize, screenSize);
     return freerdp_settings_set_string(settings, FreeRDP_ServerHostname, normalized->host.toUtf8().constData()) &&
         freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, target.port) &&
         freerdp_settings_set_string(settings, FreeRDP_Username, target.username.toUtf8().constData()) &&
@@ -445,8 +445,8 @@ bool RdpWorker::applyProfileSettings(rdp_settings* settings, const SessionTarget
         freerdp_settings_set_bool(settings, FreeRDP_DisableWallpaper, !o.wallpaper) &&
         freerdp_settings_set_bool(settings, FreeRDP_DisableThemes, !o.themes) &&
         freerdp_settings_set_bool(settings, FreeRDP_AllowFontSmoothing, o.fontSmoothing) &&
-        freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, o.automaticResize) &&
-        freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, o.automaticResize);
+        freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, o.dynamicResize()) &&
+        freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, o.dynamicResize());
 }
 void RdpWorker::run() {
     if (!input_.healthy()) {
@@ -479,7 +479,7 @@ void RdpWorker::run() {
     auto* settings = instance->context->settings;
     bool configured = QDir().mkpath(config_.configDirectory) &&
         freerdp_settings_set_string(settings, FreeRDP_ActionScript, nullptr) &&
-        applyProfileSettings(settings, {config_.host, config_.port, config_.username, config_.domain, config_.options}, config_.panelSize) &&
+        applyProfileSettings(settings, {config_.host, config_.port, config_.username, config_.domain, config_.options}, config_.panelSize, config_.screenSize) &&
         freerdp_settings_set_string(settings, FreeRDP_Password, config_.password.constData()) &&
         freerdp_settings_set_string(settings, FreeRDP_ConfigPath, config_.configDirectory.toUtf8().constData()) &&
         freerdp_settings_set_uint32(settings, FreeRDP_KeyboardLayout, 0x0409) &&
@@ -525,7 +525,7 @@ void RdpWorker::run() {
         {
         std::lock_guard<std::mutex> lock(channels.mutex);
         const auto size = batch.size;
-        if (config_.options.automaticResize && size.isValid() && channels.display && channels.displayReady) {
+        if (config_.options.dynamicResize() && size.isValid() && channels.display && channels.displayReady) {
             DISPLAY_CONTROL_MONITOR_LAYOUT monitor{}; monitor.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
             monitor.Width = std::clamp(size.width(), 200, 8192) & ~1;
             monitor.Height = std::clamp(size.height(), 200, 8192);

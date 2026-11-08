@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QNetworkAccessManager>
 #include <QProcess>
 #include <QPushButton>
@@ -129,6 +130,8 @@ private slots:
         const Updates::Installation image{Updates::Installation::AppImage, "/tmp/CMRemote.AppImage", {}, "x86_64", {}};
         QCOMPARE(Updates::installerFor(assets, "1.0.0", image)->name, QString("CMRemote-1.0.0-linux-x86_64.appimage"));
         QVERIFY(!Updates::installerFor(assets, "1.0.1", image));
+        const Updates::Installation setup{Updates::Installation::WindowsSetup, "C:\\Program Files\\CMRemote", {}, "x64", {}};
+        QCOMPARE(Updates::installerFor(assets, "1.0.0", setup)->name, QString("CMRemote-1.0.0-windows-x64-setup.exe"));
         QVERIFY(!Updates::installerFor(assets, "1.0.0", Updates::Installation{}));
         // Larger than any installer CMRemote accepts.
         QVERIFY(!Updates::installerFor({{"CMRemote-1.0.0-linux-x86_64.appimage", "u", {}, 1ll << 40}}, "1.0.0", image));
@@ -279,9 +282,13 @@ private slots:
         QSignalSpy ready(&updater, &AutoUpdater::readyToInstall), prepared(&updater, &AutoUpdater::preparationFinished);
         updater.checkNow(true); QVERIFY(ready.wait(5000));
         QVERIFY(!updater.commit(false)); // nothing prepared yet
+        QSignalSpy progress(&updater, &AutoUpdater::preparationProgress);
         updater.accept(); updater.prepare(); QVERIFY(prepared.wait(5000)); QVERIFY2(prepared.first().at(0).toBool(), qPrintable(prepared.first().at(1).toString()));
         QVERIFY(updater.prepared());
-        // The helper is waiting: nothing changes while CMRemote still runs.
+        QVERIFY(!progress.isEmpty()); QCOMPARE(progress.last().first().toInt(), 100);
+        // The new version is copied beside the old one while CMRemote runs; nothing else changes.
+        const auto staged = QDir(f.dir.filePath("apps")).entryList({".CMRemote.AppImage.updating-*"}, QDir::Files | QDir::Hidden);
+        QCOMPARE(staged.size(), 1); QCOMPARE(read(f.dir.filePath("apps/" + staged.first())), bytes);
         QTest::qWait(300); QCOMPARE(read(f.target()), appImage("old version"));
         QVERIFY(updater.commit(false));
         parent.exit();
@@ -321,8 +328,8 @@ private slots:
             QSignalSpy ready(&updater, &AutoUpdater::readyToInstall), prepared(&updater, &AutoUpdater::preparationFinished);
             updater.checkNow(true); QVERIFY(ready.wait(5000));
             updater.accept(); updater.prepare(); QVERIFY(prepared.wait(5000)); QVERIFY(prepared.first().at(0).toBool());
-            // Changed after the last check: the helper rehashes after CMRemote exits.
-            write(f.updates() + "/" + packageName(), appImage("swapped"));
+            // Another install started after the copy was ready: the swap after CMRemote exits fails.
+            QVERIFY(QDir().mkdir(f.updates() + "/install.lock"));
             QVERIFY(updater.commit(true));
             parent.exit();
             QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(f.updates() + "/result.json"), 10000);
@@ -330,6 +337,8 @@ private slots:
         QCOMPARE(record(f.updates() + "/result.json").value("status").toString(), QString("failed"));
         QCOMPARE(read(f.target()), appImage("old version"));
         QCOMPARE(read(f.sentinel()), QByteArray("unrelated"));
+        QCOMPARE(entries(f.dir.filePath("apps")), QStringList({"CMRemote.AppImage", "notes.txt"}));
+        QVERIFY(QDir().rmdir(f.updates() + "/install.lock")); // that other install finished
         {
             AutoUpdater next(f.options(source)); QSignalSpy log(&next, &AutoUpdater::log);
             QTRY_VERIFY(logged(log, "installing CMRemote " + Newer + " failed"));
@@ -345,6 +354,25 @@ private slots:
             manual.checkNow(true);
             QVERIFY(ready.wait(5000)); // an explicit check retries
         }
+    }
+    void refusedCopyKeepsCMRemoteOpenAndChangesNothing() {
+        Fixture f;
+        Parent parent;
+        auto options = f.options(f.publish(Newer, {{packageName(), appImage("refused")}})); options.parentPid = parent.pid();
+        AutoUpdater updater(options);
+        QSignalSpy ready(&updater, &AutoUpdater::readyToInstall), prepared(&updater, &AutoUpdater::preparationFinished);
+        updater.checkNow(true); QVERIFY(ready.wait(5000));
+        const auto apps = f.dir.filePath("apps");
+        QVERIFY(QFile::setPermissions(apps, QFile::ReadOwner | QFile::ExeOwner));
+        updater.accept(); updater.prepare(); QVERIFY(prepared.wait(10000));
+        QFile::setPermissions(apps, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QVERIFY(!prepared.first().at(0).toBool());
+        QVERIFY2(prepared.first().at(1).toString().contains("Cannot write the new version beside"), qPrintable(prepared.first().at(1).toString()));
+        QVERIFY(!updater.prepared()); QVERIFY(!updater.commit(true));
+        QCOMPARE(entries(apps), QStringList({"CMRemote.AppImage", "notes.txt"}));
+        QCOMPARE(read(f.target()), appImage("old version"));
+        QCOMPARE(entries(f.updates()).filter("session-"), QStringList());
+        QVERIFY(!QFile::exists(f.updates() + "/result.json"));
     }
     void readyPromptInstallsOnlyWhenTheUserChooses() {
         Fixture f; const auto bytes = appImage("from window");
@@ -362,6 +390,10 @@ private slots:
         clickButton(prompt, "Install When I Quit");
         QVERIFY(w.isVisible()); QVERIFY(updater->installOnExit());
         w.close();
+        // CMRemote stays open with a progress window while the new version is copied.
+        auto* progress = w.findChild<QProgressDialog*>("updateProgress");
+        QVERIFY(progress); QVERIFY(progress->isVisible()); QVERIFY(w.isVisible());
+        QVERIFY(progress->labelText().contains("Installing CMRemote " + Newer)); QVERIFY(progress->labelText().contains("quits when it is done"));
         QTRY_VERIFY_WITH_TIMEOUT(!w.isVisible(), 10000);
         QVERIFY(updater->prepared());
         QStringList sessions = entries(f.updates()).filter("session-"); QCOMPARE(sessions.size(), 1);
@@ -439,14 +471,42 @@ private slots:
         auto* updater = new AutoUpdater(f.options(f.publish(Newer, {{packageName(), appImage("menu")}}))); w.attachUpdater(updater);
         auto* action = w.findChild<QAction*>("actionCheckUpdates");
         action->trigger(); action->trigger();
-        QTRY_VERIFY_WITH_TIMEOUT(w.findChild<QMessageBox*>("updateReady"), 5000);
-        const auto dialogs = w.findChildren<QMessageBox*>("updateDialog");
-        QCOMPARE(dialogs.size(), 1);
-        QVERIFY(dialogs.first()->text().contains("It is downloading now. When it is ready, CMRemote asks whether to install it."));
+        // A newer installable release: downloading, then straight to the install choice.
+        QMessageBox* downloading = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((downloading = w.findChild<QMessageBox*>("updateDownloading")), 5000);
+        QVERIFY(downloading->text().contains("Downloading it now"));
+        QMessageBox* prompt = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((prompt = w.findChild<QMessageBox*>("updateReady")) && prompt->isVisible(), 5000);
+        QTRY_VERIFY(!w.findChild<QMessageBox*>("updateDownloading"));
+        QCOMPARE(w.findChildren<QMessageBox*>("updateDialog").size(), 0);
         // Nothing left queued: a later automatic check opens no dialog.
-        dialogs.first()->close(); delete dialogs.first();
+        prompt->close(); QTRY_VERIFY(!w.findChild<QMessageBox*>("updateReady"));
         updater->setAutomatic(true); QTest::qWait(300);
         QCOMPARE(w.findChildren<QMessageBox*>("updateDialog").size(), 0);
+    }
+    void checkForUpdatesSaysWhenThisIsTheLatestVersion() {
+        Fixture f;
+        MainWindow w(f.dir.filePath("confCons.xml"), true); w.show(); WAIT_STORE(w);
+        auto* updater = new AutoUpdater(f.options(f.publish(Updates::currentVersion(), {{packageName(Updates::currentVersion()), appImage("same")}})));
+        w.attachUpdater(updater);
+        w.findChild<QAction*>("actionCheckUpdates")->trigger();
+        QMessageBox* dialog = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((dialog = w.findChild<QMessageBox*>("updateDialog")), 5000);
+        QVERIFY(dialog->text().contains("CMRemote is up to date."));
+        QVERIFY(dialog->text().contains("You have version " + Updates::currentVersion()));
+        QVERIFY(!w.findChild<QMessageBox*>("updateReady")); QVERIFY(!updater->ready());
+    }
+    void checkForUpdatesReportsAFailedDownload() {
+        Fixture f;
+        MainWindow w(f.dir.filePath("confCons.xml"), true); w.show(); WAIT_STORE(w);
+        auto* updater = new AutoUpdater(f.options(f.publish(Newer, {{packageName(), appImage("corrupt"), true, -1, QString(64, 'a')}})));
+        w.attachUpdater(updater);
+        w.findChild<QAction*>("actionCheckUpdates")->trigger();
+        QMessageBox* dialog = nullptr;
+        QTRY_VERIFY_WITH_TIMEOUT((dialog = w.findChild<QMessageBox*>("updateDialog")), 5000);
+        QVERIFY(dialog->text().contains("could not be downloaded"));
+        QTRY_VERIFY(!w.findChild<QMessageBox*>("updateDownloading"));
+        QVERIFY(!w.findChild<QMessageBox*>("updateReady")); QVERIFY(!updater->ready());
     }
     void checkDuringSavedUpdateVerificationIsAnswered() {
         Fixture f;
