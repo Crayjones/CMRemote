@@ -48,6 +48,8 @@
   </widget>
   <widget class="QToolBar" name="quickConnectToolbar">
    <property name="windowTitle"><string>Quick connect</string></property>
+   <property name="allowedAreas"><set>Qt::TopToolBarArea|Qt::BottomToolBarArea</set></property>
+   <property name="floatable"><bool>false</bool></property>
    <property name="iconSize"><size><width>16</width><height>16</height></size></property>
    <attribute name="toolBarArea"><enum>TopToolBarArea</enum></attribute>
    <widget class="QWidget" name="quickConnectControls">

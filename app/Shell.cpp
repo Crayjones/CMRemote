@@ -83,6 +83,23 @@ static void giveCollapsedPanelsRoom(ads::CDockAreaWidget* area) {
     sizes[at] = total / 2; sizes[donor] = total - total / 2; splitter->setSizes(sizes);
 }
 
+// Pane drags may split or tab with other panes; session drags must stay out
+// of pane-only areas. Apply this to both the preview and the eventual drop.
+class ShellDockManager final : public ads::CDockManager {
+public:
+    using ads::CDockManager::CDockManager;
+    ads::DockWidgetAreas allowedDockAreas(ads::CDockAreaWidget* target, QWidget* dragged) const override {
+        if (target && !isSessionPanel(target)) {
+            if (auto* dock = qobject_cast<ads::CDockWidget*>(dragged); isSessionDock(dock)) return ads::NoDockWidgetArea;
+            if (auto* area = qobject_cast<ads::CDockAreaWidget*>(dragged); area && isSessionPanel(area)) return ads::NoDockWidgetArea;
+            if (auto* container = qobject_cast<ads::CDockContainerWidget*>(dragged))
+                for (int i = 0; i < container->dockAreaCount(); ++i)
+                    if (isSessionPanel(container->dockArea(i))) return ads::NoDockWidgetArea;
+        }
+        return ads::CDockManager::allowedDockAreas(target, dragged);
+    }
+};
+
 void markSessionPanels(ads::CDockManager* manager) {
     QList<ads::CDockContainerWidget*> containers{manager};
     for (auto* floating : manager->floatingWidgets()) containers.append(floating->dockContainer());
@@ -92,9 +109,8 @@ void markSessionPanels(ads::CDockManager* manager) {
         if (panel) panels << area;
         // Session panels take the space panels and window resizes free or claim; the side panes keep their size.
         auto policy = area->sizePolicy(); policy.setHorizontalStretch(panel ? 1 : 0); policy.setVerticalStretch(panel ? 1 : 0); area->setSizePolicy(policy);
-        // Nothing docks inside the side panes' column, so sessions never end up squeezed among them;
-        // panes and sessions still dock at the window's edges and into session panels.
-        area->setAllowedAreas(panel ? ads::AllDockAreas : ads::NoDockWidgetArea);
+        // The drag source, not a blanket area ban, keeps sessions out of side panes.
+        area->setAllowedAreas(ads::AllDockAreas);
         if (area->property("sessionPanel").toBool() == panel) continue;
         area->setProperty("sessionPanel", panel);
         for (auto* widget : QList<QWidget*>{area, area->titleBar()}) { widget->style()->unpolish(widget); widget->style()->polish(widget); }
@@ -157,7 +173,7 @@ void ShellUi::setupUi(QMainWindow* window) {
     configureDocking();
     // The dock manager becomes the window's central widget.
     auto* empty = window->takeCentralWidget();
-    dockManager = new ads::CDockManager(window); dockManager->setObjectName("dockManager");
+    dockManager = new ShellDockManager(window); dockManager->setObjectName("dockManager");
     // The General panel holds this tabless placeholder, so it keeps its place
     // in the layout while every session is closed or moved elsewhere.
     documentsDock = paneDock(dockManager, "documentsDock", "General", empty);

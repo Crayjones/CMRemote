@@ -52,7 +52,7 @@ add_library(rm_frontend STATIC
     app/PointerCapture.cpp app/PointerCapture.h
     app/ConnectionTree.cpp app/ConnectionTree.h app/ConnectionIcons.cpp app/ConnectionIcons.h app/ThemeIcons.cpp app/ThemeIcons.h app/ConfigDescriptions.h
     app/ApplicationPreferences.cpp app/ApplicationPreferences.h app/OpenFileList.cpp app/OpenFileList.h app/ConnectionDefaults.cpp app/ConnectionDefaults.h app/OptionsDialog.cpp app/OptionsDialog.h app/ui/OptionsDialog.ui
-    app/SessionPane.cpp app/SessionPane.h app/IdleTimeout.h app/Views.cpp app/Views.h
+    app/SessionPane.cpp app/SessionPane.h app/IdleTimeout.h app/RdpDesktopFit.h app/Views.cpp app/Views.h
     app/TerminalScreen.cpp app/TerminalScreen.h app/TerminalView.cpp
     app/TerminalAppearance.cpp app/TerminalAppearance.h app/TerminalAppearanceService.cpp app/TerminalAppearanceService.h
     app/TerminalAppearancePage.cpp app/TerminalAppearancePage.h app/ui/TerminalAppearancePage.ui
@@ -161,6 +161,10 @@ if(RM_BUILD_TESTS)
     target_link_libraries(auto_update_test PRIVATE rm_frontend Qt6::Test)
     add_test(NAME auto_update COMMAND auto_update_test)
     set_tests_properties(auto_update PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+    add_executable(rdp_desktop_fit_test tests/rdp_desktop_fit.cpp)
+    target_link_libraries(rdp_desktop_fit_test PRIVATE rm_frontend Qt6::Test)
+    add_test(NAME rdp_desktop_fit COMMAND rdp_desktop_fit_test)
+    set_tests_properties(rdp_desktop_fit PROPERTIES TIMEOUT 30)
     add_executable(desktop_updates_test tests/desktop_updates.cpp)
     target_link_libraries(desktop_updates_test PRIVATE rm_frontend Qt6::Test)
     add_test(NAME desktop_updates COMMAND desktop_updates_test)

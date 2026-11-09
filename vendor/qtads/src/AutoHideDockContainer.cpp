@@ -118,6 +118,17 @@ struct AutoHideDockContainerPrivate
 	QSize Size; // creates invalid size
 	QPointer<CAutoHideTab> SideTab;
 	QSize SizeCache;
+	// CMRemote patch: keep dock neighbors, not just the outer sidebar edge.
+	struct RestoreAnchor
+	{
+		QPointer<CDockWidget> Widget;
+		DockWidgetArea Area;
+		int TabIndex = -1;
+		QSize Size;
+	};
+	QList<RestoreAnchor> RestoreAnchors;
+	QSize RestoreSize;
+	SideBarLocation RestoreSideBar = SideBarNone;
 
 	/**
 	 * Private data constructor
@@ -361,6 +372,63 @@ void CAutoHideDockContainer::addDockWidget(CDockWidget* DockWidget)
     auto IsRestoringState = DockWidget->dockManager()->isRestoringState();
     if (OldDockArea && !IsRestoringState)
     {
+		if (!OldDockArea->isAutoHide())
+		{
+			// CMRemote patch: remember tabs and nearest splitter neighbors before
+			// removing the pane. QPointers allow neighbors to close in the meantime.
+			d->RestoreAnchors.clear();
+			d->RestoreSideBar = OldDockArea->calculateSideTabBarArea();
+			d->RestoreSize = OldDockArea->size();
+			const auto Tabs = OldDockArea->dockWidgets();
+			for (auto Tab : Tabs)
+			{
+				if (Tab != DockWidget)
+					d->RestoreAnchors.append({Tab, CenterDockWidgetArea,
+						Tabs.indexOf(DockWidget) < Tabs.indexOf(Tab) ? 0 : -1});
+			}
+			QWidget* Child = OldDockArea;
+			while (auto Splitter = qobject_cast<QSplitter*>(Child->parentWidget()))
+			{
+				const int Index = Splitter->indexOf(Child);
+				for (int i = 0; i < Splitter->count(); ++i)
+				{
+					if (i == Index) continue;
+					auto Sibling = Splitter->widget(i);
+					auto Areas = Sibling->findChildren<CDockAreaWidget*>();
+					if (auto Area = qobject_cast<CDockAreaWidget*>(Sibling)) Areas.prepend(Area);
+					const auto Side = Splitter->orientation() == Qt::Vertical
+						? (Index < i ? TopDockWidgetArea : BottomDockWidgetArea)
+						: (Index < i ? LeftDockWidgetArea : RightDockWidgetArea);
+					for (auto Area : Areas)
+						for (auto Neighbor : Area->openedDockWidgets())
+							d->RestoreAnchors.append({Neighbor, Side, -1, Area->size()});
+				}
+				Child = Splitter;
+			}
+			// A previously hidden neighbor is absent from the splitter. Its saved
+			// relation supplies the reverse anchor, so either restore order works.
+			for (auto Hidden : dockContainer()->autoHideWidgets())
+			{
+				if (Hidden == this || Hidden->d->RestoreSideBar != d->RestoreSideBar
+					|| !Hidden->dockWidget() || Hidden->dockWidget()->autoHideDockContainer() != Hidden) continue;
+				for (const auto& Anchor : Hidden->d->RestoreAnchors)
+				{
+					if (Anchor.Widget != DockWidget) continue;
+					auto Side = Anchor.Area;
+					switch (Side)
+					{
+					case LeftDockWidgetArea: Side = RightDockWidgetArea; break;
+					case RightDockWidgetArea: Side = LeftDockWidgetArea; break;
+					case TopDockWidgetArea: Side = BottomDockWidgetArea; break;
+					case BottomDockWidgetArea: Side = TopDockWidgetArea; break;
+					default: break;
+					}
+					d->RestoreAnchors.prepend({Hidden->dockWidget(), Side, Anchor.TabIndex == 0 ? -1 : 0, Hidden->d->RestoreSize});
+					if (Anchor.Size.isValid()) d->RestoreSize = Anchor.Size;
+					break;
+				}
+			}
+		}
 		// The initial size should be a little bit bigger than the original dock
 		// area size to prevent that the resize handle of this auto hid dock area
 		// is near of the splitter of the old dock area.
@@ -417,6 +485,51 @@ void CAutoHideDockContainer::moveContentsToParent()
 	auto DockContainer = dockContainer();
 	auto targetArea = d->getDockWidgetArea(d->SideTabBarArea);
 
+	// CMRemote patch: restore the former split/tab when an anchor still lives
+	// in this container. Moving to another sidebar deliberately uses that edge.
+	auto Insert = [this, DockContainer](DockWidgetArea Side, CDockAreaWidget* Target, int TabIndex = -1)
+	{
+		QList<QPair<QPointer<QSplitter>, QList<int>>> Ancestors;
+		for (QWidget* Child = Target; Child; Child = Child->parentWidget())
+		{
+			auto Splitter = qobject_cast<QSplitter*>(Child->parentWidget());
+			if (!Splitter) break;
+			Ancestors.append({Splitter, Splitter->sizes()});
+		}
+		auto Area = DockContainer->addDockWidget(Side, d->DockWidget, Target, TabIndex);
+		// Splitting vertically must not change the sidebar column's width.
+		for (const auto& Saved : Ancestors)
+			if (Saved.first && Saved.first->count() == Saved.second.size()) Saved.first->setSizes(Saved.second);
+		if (Side == CenterDockWidgetArea || !d->RestoreSize.isValid()) return;
+		auto Splitter = qobject_cast<QSplitter*>(Area->parentWidget());
+		if (!Splitter || Splitter->count() < 2) return;
+		auto Sizes = Splitter->sizes();
+		const int Index = Splitter->indexOf(Area);
+		int Total = 0;
+		for (int Size : Sizes) Total += Size;
+		const int Original = Splitter->orientation() == Qt::Horizontal ? d->RestoreSize.width() : d->RestoreSize.height();
+		const int Desired = qMin(Original, Total);
+		const int Others = Total - Sizes[Index];
+		if (Desired <= 0 || Others <= 0) return;
+		for (int i = 0; i < Sizes.size(); ++i)
+			if (i != Index) Sizes[i] = Sizes[i] * (Total - Desired) / Others;
+		Sizes[Index] = Desired;
+		Splitter->setSizes(Sizes);
+	};
+	if (d->RestoreSideBar == d->SideTabBarArea)
+	{
+		for (const auto& Anchor : d->RestoreAnchors)
+		{
+			auto Neighbor = Anchor.Widget.data();
+			if (!Neighbor || Neighbor->isAutoHide() || Neighbor->isClosed() || Neighbor->dockContainer() != DockContainer) continue;
+			if (auto Area = Neighbor->dockAreaWidget())
+			{
+				Insert(Anchor.Area, Area, Anchor.TabIndex);
+				return;
+			}
+		}
+	}
+
 	// If the widget has a preferred auto-hide location, try to find an existing
 	// opened dock area that contains a widget with the same preferred location
 	// and merge as a tab instead of creating a new split.
@@ -439,7 +552,7 @@ void CAutoHideDockContainer::moveContentsToParent()
 		}
 	}
 
-	DockContainer->addDockWidget(targetArea, d->DockWidget);
+	Insert(targetArea, nullptr);
 }
 
 

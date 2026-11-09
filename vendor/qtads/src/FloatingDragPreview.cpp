@@ -210,7 +210,7 @@ void FloatingDragPreviewPrivate::updateDropOverlays(const QPoint &GlobalPos)
 	// all other allowed areas are from the container
 	if (VisibleDockAreas == 1 && DockArea)
 	{
-		AllowedContainerAreas.setFlag(CenterDockWidgetArea, DockArea->allowedAreas().testFlag(CenterDockWidgetArea));
+		AllowedContainerAreas.setFlag(CenterDockWidgetArea, DockManager->allowedDockAreas(DockArea, Content).testFlag(CenterDockWidgetArea));
 	}
 
 	if (isContentPinnable())
@@ -222,7 +222,7 @@ void FloatingDragPreviewPrivate::updateDropOverlays(const QPoint &GlobalPos)
 	if (DockArea && DockArea->isVisible() && VisibleDockAreas >= 0 && DockArea != ContentSourceArea)
 	{
 		DockAreaOverlay->enableDropPreview(true);
-		DockAreaOverlay->setAllowedAreas( (VisibleDockAreas == 1) ? NoDockWidgetArea : DockArea->allowedAreas());
+		DockAreaOverlay->setAllowedAreas( (VisibleDockAreas == 1) ? NoDockWidgetArea : DockManager->allowedDockAreas(DockArea, Content));
 		DockWidgetArea Area = DockAreaOverlay->showOverlay(DockArea, GlobalPos);
 
 		// A CenterDockWidgetArea for the dockAreaOverlay() indicates that
