@@ -144,6 +144,36 @@ class Versioning(unittest.TestCase):
             self.assertTrue(name.startswith('CMRemote-' + release.version() + '-' + platform + '-' + arch))
         self.assertTrue((ROOT / '.github/release-notes.md').is_file())
 
+    def test_release_can_skip_windows_for_a_manual_upload(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        inputs = workflow.split('    inputs:', 1)[1].split('\npermissions:', 1)[0]
+        self.assertIn('      build_windows:\n', inputs)
+        windows_input = inputs.split('      build_windows:\n', 1)[1]
+        for setting in ('type: boolean', 'default: true'):
+            self.assertIn(setting, windows_input)
+        windows = workflow.split('\n  windows:\n', 1)[1].split('\n  publish:\n', 1)[0]
+        self.assertIn('if: ${{ inputs.build_windows }}', windows)
+
+        import itertools
+        import re
+        from types import SimpleNamespace
+        publish = workflow.split('\n  publish:\n', 1)[1]
+        self.assertIn('needs: [prepare, macos, linux, windows]', publish)
+        condition = publish.split('    if: >-\n', 1)[1].split('    runs-on:', 1)[0].strip()
+        self.assertTrue(condition.startswith('${{') and condition.endswith('}}'))
+        expression = ' '.join(condition[3:-2].split()).replace('&&', ' and ').replace('||', ' or ')
+        expression = re.sub(r'!(?!=)', ' not ', expression).strip()
+        for build_windows, canceled in itertools.product((False, True), repeat=2):
+            for results in itertools.product(('success', 'failure', 'cancelled', 'skipped'), repeat=4):
+                needs = SimpleNamespace(**{name: SimpleNamespace(result=result)
+                                          for name, result in zip(('prepare', 'macos', 'linux', 'windows'), results)})
+                actual = eval(expression, {'__builtins__': {}}, {
+                    'inputs': SimpleNamespace(build_windows=build_windows),
+                    'cancelled': lambda: canceled, 'needs': needs})
+                expected = (not canceled and all(result == 'success' for result in results[:3]) and
+                            (results[3] == 'success' or (not build_windows and results[3] == 'skipped')))
+                self.assertEqual(actual, expected, (build_windows, canceled, results))
+
     def test_app_reads_the_same_version(self):
         template = (ROOT / 'cmake/Version.h.in').read_text()
         self.assertIn('#define RM_VERSION "@PROJECT_VERSION@"', template)

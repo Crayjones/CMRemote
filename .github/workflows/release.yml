@@ -8,6 +8,10 @@ on:
       version:
         description: Version to release, for example 0.2.0
         required: true
+      build_windows:
+        description: Build Windows packages (disable to upload locally built Windows files later)
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -137,6 +141,7 @@ jobs:
   windows:
     name: Windows x64
     needs: prepare
+    if: ${{ inputs.build_windows }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     steps:
@@ -168,6 +173,13 @@ jobs:
   publish:
     name: Publish release
     needs: [prepare, macos, linux, windows]
+    if: >-
+      ${{ !cancelled() &&
+          needs.prepare.result == 'success' &&
+          needs.macos.result == 'success' &&
+          needs.linux.result == 'success' &&
+          (needs.windows.result == 'success' ||
+           (!inputs.build_windows && needs.windows.result == 'skipped')) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

@@ -322,6 +322,8 @@ Releases are built and published by GitHub Actions; nothing needs to be built lo
 2. The workflow sets that version in `CMakeLists.txt` (the single source the app, installers and About dialog read), commits it, and tags `v0.2.0`.
 3. It builds the macOS arm64 and x64 disk images, the Windows installer and portable zip, and the Linux AppImage and Flatpak from that tag as optimized Release builds, then publishes them with `SHA256SUMS.txt` on the [Releases page](https://github.com/Crayjones/CMRemote/releases). Release notes list the merged changes automatically.
 
+**Build Windows packages** defaults to on. Turn it off when building Windows locally: the workflow still publishes the macOS/Linux assets and their checksums, but does not build or upload Windows packages. Build Windows from the same release tag with `--update-channel github`, then upload its setup/portable files and replace `SHA256SUMS.txt` with one covering all release files.
+
 `scripts/set-version.py` prints the current version, or sets a new one (`python3 scripts/set-version.py 0.2.0`); it refuses malformed or older versions. The CI workflow runs the full test suite in the Linux container on every push to `main` and every pull request.
 
 RDP H.264 video uses Cisco's OpenH264, which CMRemote never ships: on first launch the app downloads Cisco's prebuilt library onto that device, checks its SHA-256 and loads it. **Options → Remote Desktop** turns it off or on; without it, sessions use the other RDP graphics formats. See [dependencies](dependencies.md).
