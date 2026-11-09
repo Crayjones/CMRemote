@@ -3,7 +3,7 @@ Upstream: https://github.com/githubuser0xFFFF/Qt-Advanced-Docking-System
 Tag v5.1.1, commit 023ce95934fecfd4cf5c672c9c404fabe0f54923
 License: LGPL-2.1-or-later (LICENSE, gnu-lgpl-v2.1.md, unchanged)
 
-Retained: src/*.cpp, src/*.h and src/linux/ unchanged except three patches; cmake/modules/ads_version.h.in
+Retained: src/*.cpp, src/*.h and src/linux/ with the local patches below; cmake/modules/ads_version.h.in
 as ads_version.h.in. Not retained: images/ and stylesheets/; ads.qrc is replaced
 by an empty resource of the same name, which DockManager still initializes. CMRemote sets
 CDockManager::DisableStylesheet and styles the docks from app/ui/theme.qss; dock
@@ -29,3 +29,23 @@ when it is brought back over a tab bar. Now, while the preview is over the tab b
 dock area holding tabs of the same kind (CMRemote's "session" tab property), the preview
 is dropped, the dock widget joins that area at the cursor (if it is another area), and
 the drag continues as an ordinary tab move.
+
+CMRemote patch (src/DockManager.h/.cpp, src/DockContainerWidget.h/.cpp,
+src/FloatingDragPreview.cpp, src/FloatingDockContainer.cpp, marked "CMRemote patch"):
+CDockManager::allowedDockAreas accepts the dragged widget as well as the target area.
+Floating windows (including Wayland platform drags), previews and drop commits consult
+this hook, so CMRemote can keep sessions out of pane-only areas without preventing
+Config, Connections and Notifications from splitting or tabbing with one another.
+
+CMRemote patch (src/FloatingDockContainer.cpp, marked "CMRemote patch"): releases
+clear the remembered drop target and always hide overlays, even outside any container.
+The target is guarded against deletion. On macOS, releasing a title-bar click without
+moving disarms the drag, ordinary mouse releases finish it too, and Escape or hiding
+an actively dragged window clears the drag state and overlays.
+
+CMRemote patch (src/AutoHideDockContainer.cpp, marked "CMRemote patch"): remember
+split/tab neighbors and sizes before auto-hiding a pane, including reciprocal
+anchors for already hidden neighbors. Repinning uses a surviving neighbor to
+restore the former stack or tab order in either pinning order, preserves outer
+splitter sizes, and guards deleted/moved neighbors. A different sidebar still
+restores at its own edge; saved-state loads retain the upstream fallback.

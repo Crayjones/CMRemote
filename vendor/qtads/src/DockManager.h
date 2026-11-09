@@ -315,6 +315,13 @@ public:
 	 */
 	virtual ~CDockManager() override;
 
+	/**
+	 * CMRemote patch: source-aware permissions shared by drag previews and drops.
+	 * The default implementation returns TargetArea->allowedAreas().
+	 */
+	virtual DockWidgetAreas allowedDockAreas(CDockAreaWidget* TargetArea,
+		QWidget* DraggedWidget) const;
+
     /**
      * Creates a new dock widget with the specified title and optional parent
      * widget.

@@ -33,6 +33,7 @@
 #include <QBoxLayout>
 #include <QApplication>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QPointer>
 #include <QAction>
 #include <QDebug>
@@ -374,7 +375,7 @@ struct FloatingDockContainerPrivate
 	QPointer<CDockManager> DockManager;
 	eDragState DraggingState = DraggingInactive;
 	QPoint DragStartMousePosition;
-	CDockContainerWidget *DropContainer = nullptr;
+	QPointer<CDockContainerWidget> DropContainer;
 	CDockAreaWidget *SingleDockArea = nullptr;
 	QPoint DragStartPos;
 	bool Hiding = false;
@@ -500,16 +501,20 @@ FloatingDockContainerPrivate::FloatingDockContainerPrivate(
 void FloatingDockContainerPrivate::titleMouseReleaseEvent()
 {
 	setState(DraggingInactive);
-	if (!DropContainer)
+	if (!DockManager)
 	{
 		return;
 	}
 
-	// DockManager will be unlinked from this within DropContainer->dropFloatingWidget
-	const auto OriginalDockManager = this->DockManager.data();
+	// CMRemote patch: clear the last target and hide overlays even when released
+	// outside every container. Do not reuse a previous drag's target.
+	QPointer<CDockContainerWidget> TargetContainer = DropContainer;
+	DropContainer = nullptr;
+	// DockManager will be unlinked from this within dropFloatingWidget.
+	const auto OriginalDockManager = this->DockManager;
 
-	if (DockManager->dockAreaOverlay()->dropAreaUnderCursor() != InvalidDockWidgetArea
-	 || DockManager->containerOverlay()->dropAreaUnderCursor() != InvalidDockWidgetArea)
+	if (TargetContainer && (DockManager->dockAreaOverlay()->dropAreaUnderCursor() != InvalidDockWidgetArea
+	 || DockManager->containerOverlay()->dropAreaUnderCursor() != InvalidDockWidgetArea))
 	{
 		CDockOverlay *Overlay = DockManager->containerOverlay();
 		if (!Overlay->dropOverlayRect().isValid())
@@ -538,11 +543,17 @@ void FloatingDockContainerPrivate::titleMouseReleaseEvent()
 				QApplication::processEvents();
 			}
 		}
-		DropContainer->dropFloatingWidget(_this, QCursor::pos());
+		if (TargetContainer)
+		{
+			TargetContainer->dropFloatingWidget(_this, QCursor::pos());
+		}
 	}
 
-	OriginalDockManager->containerOverlay()->hideOverlay();
-	OriginalDockManager->dockAreaOverlay()->hideOverlay();
+	if (OriginalDockManager)
+	{
+		OriginalDockManager->containerOverlay()->hideOverlay();
+		OriginalDockManager->dockAreaOverlay()->hideOverlay();
+	}
 }
 
 
@@ -596,7 +607,7 @@ void FloatingDockContainerPrivate::updateDropOverlays(const QPoint &GlobalPos)
 	}
 
 	CDockContainerWidget::showDropOverlays(DockManager, TopContainer, GlobalPos,
-		DockContainer->features().testFlag(CDockWidget::DockWidgetPinnable));
+		DockContainer->features().testFlag(CDockWidget::DockWidgetPinnable), DockContainer);
 }
 
 
@@ -605,6 +616,11 @@ void FloatingDockContainerPrivate::handleEscapeKey()
 {
 	ADS_PRINT("FloatingDockContainerPrivate::handleEscapeKey()");
 	setState(DraggingInactive);
+	DropContainer = nullptr;
+	if (!DockManager)
+	{
+		return;
+	}
 	DockManager->containerOverlay()->hideOverlay();
 	DockManager->dockAreaOverlay()->hideOverlay();
 }
@@ -1482,6 +1498,28 @@ CFloatingDockContainer* CFloatingDockContainer::floatingWidgetFromMimeData(
 //============================================================================
 bool CFloatingDockContainer::event(QEvent *e)
 {
+	// CMRemote patch: a title-bar click without a move must disarm the drag too.
+	// Cocoa may deliver an ordinary release; hiding or Escape cancels the drag.
+	if (!d->isState(DraggingInactive) && (e->type() == QEvent::Hide
+		|| (e->type() == QEvent::KeyPress
+			&& static_cast<QKeyEvent*>(e)->key() == Qt::Key_Escape)))
+	{
+		d->handleEscapeKey();
+	}
+	else if (e->type() == QEvent::NonClientAreaMouseButtonRelease
+		|| (e->type() == QEvent::MouseButtonRelease
+			&& static_cast<QMouseEvent*>(e)->button() == Qt::LeftButton))
+	{
+		if (d->isState(DraggingFloatingWidget))
+		{
+			d->titleMouseReleaseEvent();
+		}
+		else
+		{
+			d->setState(DraggingInactive);
+		}
+	}
+
 	switch (d->DraggingState)
 	{
 	case DraggingInactive:
@@ -1531,14 +1569,6 @@ bool CFloatingDockContainer::event(QEvent *e)
 
 		default:
 			break;
-		}
-		break;
-
-	case DraggingFloatingWidget:
-		if (e->type() == QEvent::NonClientAreaMouseButtonRelease)
-		{
-			ADS_PRINT("FloatingWidget::event QEvent::NonClientAreaMouseButtonRelease");
-			d->titleMouseReleaseEvent();
 		}
 		break;
 

@@ -94,6 +94,6 @@ private:
     TerminalView* terminal_ = nullptr;
 #ifdef RM_WITH_RDP
     RdpWorker* worker_ = nullptr;
-    bool resizeReady_ = false, acceptingFrames_ = false;
+    bool acceptingFrames_ = false;
 #endif
 };

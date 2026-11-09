@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QEvent>
 #include "RdpWorker.h"
+#include "RdpDesktopFit.h"
 #include "Credentials.h"
 #include "IdleTimeout.h"
 #include <QGuiApplication>
@@ -120,7 +121,7 @@ void SessionPane::startRdp(RdpConfig config) {
     setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
     const bool clipboardConsent = config.clipboard;
     const auto generation = ++connectionGeneration_;
-    active_ = true; ended_ = false; acceptingFrames_ = true; resizeReady_ = false;
+    active_ = true; ended_ = false; acceptingFrames_ = true;
     desktop_->resetRemoteCursor(); desktop_->setFrame({});
     desktop_->setPerformanceTrace(config.performance);
     layout()->activate(); config.panelSize = desktop_->size();
@@ -131,24 +132,26 @@ void SessionPane::startRdp(RdpConfig config) {
     auto current = [this, worker, generation] {
         return active_ && worker && worker_ == worker && generation == connectionGeneration_;
     };
-    auto* resizeTimer = new QTimer(worker_); resizeTimer->setSingleShot(true); resizeTimer->setInterval(200);
-    connect(worker_, &RdpWorker::frameAvailable, this, [this, worker, current, resizeTimer] {
+    auto* desktopFit = new RdpDesktopFit(worker_);
+    desktopFit->setViewport(desktop_->size());
+    connect(worker_, &RdpWorker::frameAvailable, this, [this, worker, current, desktopFit] {
         if (!current() || !acceptingFrames_ || !worker->isRunning()) return;
         const auto update = worker->takeUpdate();
         if (update.patches.empty()) return;
-        const bool first = desktop_->frame().isNull();
         if (!desktop_->applyUpdate(update)) {
+            desktopFit->setConnected(false);
             acceptingFrames_ = false; desktop_->resetRemoteCursor(); setClipboardSharingEnabled(false); connected_ = false; worker->stop();
             status_->setText("RDP desktop update rejected; closing session"); status_->show(); return;
         }
-        if (first && resizeReady_) resizeTimer->start();
+        desktopFit->setDesktop(desktop_->frame().size());
     }, Qt::QueuedConnection);
     connect(worker_, &RdpWorker::cursorAvailable, this, [this, worker, current] {
         if (!current() || !acceptingFrames_ || !worker->isRunning()) return;
         if (auto cursor = worker->takeCursor()) desktop_->setRemoteCursor(std::move(*cursor));
     }, Qt::QueuedConnection);
-    connect(worker_, &RdpWorker::stateChanged, this, [this, current, clipboardConsent](const QString& s, const QString& detail) {
+    connect(worker_, &RdpWorker::stateChanged, this, [this, current, clipboardConsent, desktopFit](const QString& s, const QString& detail) {
         if (!current()) return;
+        desktopFit->setConnected(s == "connected");
         if (s == "connected") idle_->start(); else idle_->stop();
         if (s == "disconnected" || s == "failed") {
             desktop_->setPointerCaptured(false);
@@ -163,15 +166,12 @@ void SessionPane::startRdp(RdpConfig config) {
             [worker](std::optional<TransientCredentials> credentials) { if (worker) worker->provideCredentials(std::move(credentials)); });
         if (dialog) dialog->setObjectName(gateway ? "rdpGatewayCredentials" : "rdpServerCredentials");
     }, Qt::QueuedConnection);
-    connect(desktop_, &DesktopView::viewportChanged, resizeTimer, [resizeTimer] { resizeTimer->start(); });
-    // Channel capabilities can arrive before the server finishes its initial desktop update.
-    connect(resizeTimer, &QTimer::timeout, this, [this, current] {
-        if (current() && resizeReady_ && !desktop_->frame().isNull()) worker_->resizeDesktop(desktop_->size());
+    connect(desktop_, &DesktopView::viewportChanged, desktopFit, &RdpDesktopFit::setViewport);
+    connect(desktopFit, &RdpDesktopFit::resizeRequested, this, [this, current](QSize size) {
+        if (current()) worker_->resizeDesktop(size);
     });
-    connect(worker_, &RdpWorker::resizeAvailable, this, [this, current, resizeTimer](bool ready) {
-        if (!current()) return;
-        resizeReady_ = ready;
-        if (ready && !desktop_->frame().isNull()) resizeTimer->start();
+    connect(worker_, &RdpWorker::resizeAvailable, this, [current, desktopFit](bool ready) {
+        if (current()) desktopFit->setAvailable(ready);
     }, Qt::QueuedConnection);
     // Idle = no local keyboard, text, pointer or wheel input to this session (V104).
     idle_->configure(options.idleMinutes);

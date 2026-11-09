@@ -453,7 +453,9 @@ private slots:
         auto* worker = pane->findChild<RdpWorker*>(); QVERIFY(worker); certificate(pane); QTRY_VERIFY_WITH_TIMEOUT(worker->negotiatedDesktop().isValid(), 30000);
         QCOMPARE(worker->negotiatedDesktop(), QSize(800, 600)); QCOMPARE(worker->negotiatedColorDepth(), automatic ? 24U : 16U);
         auto* view = pane->findChild<DesktopView*>(); QTRY_VERIFY_WITH_TIMEOUT(!view->frame().isNull(), 30000);
-        if (!automatic) QCOMPARE(view->frame().size(), QSize(800, 600));
+        // The first desktop must fit without a synthetic client resize.
+        if (automatic) QTRY_COMPARE_WITH_TIMEOUT(view->frame().size(), QSize(view->width() & ~1, view->height()), 15000);
+        else QCOMPARE(view->frame().size(), QSize(800, 600));
         window.resize(1120, 810); QSignalSpy frames(pane->findChild<RdpWorker*>(), &RdpWorker::frameAvailable);
         QTRY_VERIFY_WITH_TIMEOUT(frames.size() > 10, 10000);
         if (automatic) QTRY_COMPARE_WITH_TIMEOUT(view->frame().size(), QSize(view->width() & ~1, view->height()), 15000);

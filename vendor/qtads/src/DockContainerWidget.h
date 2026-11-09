@@ -138,10 +138,11 @@ protected:
 	 * Shared by the mouse tracked dragging (CFloatingDragPreview /
 	 * CFloatingDockContainer) and the Wayland platform drag and drop.
 	 * ContentPinnable is true, if the dragged content can be auto hidden.
+	 * CMRemote patch: DraggedWidget supplies the source-aware area permissions.
 	 */
 	static void showDropOverlays(CDockManager* DockManager,
 		CDockContainerWidget* TopContainer, const QPoint& GlobalPos,
-		bool ContentPinnable);
+		bool ContentPinnable, QWidget* DraggedWidget);
 
 	/**
 	 * Access function for the internal root splitter

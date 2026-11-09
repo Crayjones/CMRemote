@@ -19,6 +19,7 @@
 #include "FullscreenWindow.h"
 #include "SessionTabs.h"
 #include "DockOverlay.h"
+#include "FloatingDragPreview.h"
 #include <QApplication>
 #include <QDialog>
 #include "DockManager.h"
@@ -125,6 +126,18 @@ static QList<QWidget*> panelWindows() {
     return result;
 }
 static ads::CDockManager* dockManagerOf(QWidget& window) { return window.findChild<ads::CDockManager*>("dockManager"); }
+// Exercise the same overlay/drop entry points as ADS, with explicit positions.
+struct DockDropDriver : ads::CDockContainerWidget {
+    using ads::CDockContainerWidget::showDropOverlays;
+    using ads::CDockContainerWidget::dropFloatingWidget;
+    using ads::CDockContainerWidget::dropWidget;
+};
+static QPoint dockArrow(ads::CDockManager* manager, int overlay, int side) {
+    const auto crosses = manager->findChildren<ads::CDockOverlayCross*>(QString(), Qt::FindDirectChildrenOnly);
+    for (auto* label : crosses.at(overlay)->findChildren<QLabel*>())
+        if (label->property("dockWidgetArea").toInt() == side && label->isVisible()) return label->mapToGlobal(label->rect().center());
+    return {};
+}
 // Gives a session's tab focus, as clicking it does.
 static void focusTab(QWidget& window, SessionPane* pane) { dockManagerOf(window)->setDockWidgetFocused(sessionDockOf(pane)); }
 // Moves a session to a panel named in its tab's Move to panel menu.
@@ -620,10 +633,12 @@ private slots:
             for (auto* label : cross->findChildren<QLabel*>()) if (label->property("dockWidgetArea").toInt() == area && label->isVisible()) return label->mapToGlobal(label->rect().center());
             return QPoint();
         };
-        // The side panes offer no arrows: sessions never dock inside their column.
+        // The side panes offer no arrows for sessions, but remain available to pane drags.
         for (const auto* name : {"connectionsDock", "configDock"}) {
-            auto* area = w.findChild<ads::CDockWidget*>(name)->dockAreaWidget(); QCOMPARE(area->allowedAreas(), ads::DockWidgetAreas(ads::NoDockWidgetArea));
-            overlays.at(0)->setAllowedAreas(area->allowedAreas()); overlays.at(0)->showOverlay(area);
+            auto* area = w.findChild<ads::CDockWidget*>(name)->dockAreaWidget();
+            QCOMPARE(area->allowedAreas(), ads::DockWidgetAreas(ads::AllDockAreas));
+            QCOMPARE(manager->allowedDockAreas(area, floating->dockContainer()), ads::DockWidgetAreas(ads::NoDockWidgetArea));
+            DockDropDriver::showDropOverlays(manager, manager, area->mapToGlobal(area->rect().center()), false, floating->dockContainer());
             for (const auto target : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea, ads::CenterDockWidgetArea})
                 QVERIFY2(arrow(crosses.at(0), target).isNull(), name);
             overlays.at(0)->hideOverlay();
@@ -639,6 +654,130 @@ private slots:
         QTRY_VERIFY2(panel.area()->width() >= 150 && panel.area()->height() >= 150,
                       qPrintable(QString("%1x%2, side %3").arg(panel.area()->width()).arg(panel.area()->height()).arg(sidePane->width())));
         if (side == ads::LeftDockWidgetArea || side == ads::RightDockWidgetArea) QCOMPARE(sidePane->width(), sideWidth);
+    }
+    void floatingPanesDockBackBesideConnections_data() {
+        QTest::addColumn<QString>("name"); QTest::addColumn<int>("side"); QTest::addColumn<bool>("sessions");
+        for (const auto* name : {"configDock", "connectionsDock", "notificationsDock"})
+            for (const auto side : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea, ads::CenterDockWidgetArea})
+                for (const bool sessions : {false, true})
+                    QTest::newRow(qPrintable(QString("%1-%2-%3").arg(name).arg(int(side)).arg(sessions))) << QString(name) << int(side) << sessions;
+    }
+    void floatingPanesDockBackBesideConnections() {
+        QFETCH(QString, name); QFETCH(int, side); QFETCH(bool, sessions);
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        if (sessions) w.quickConnect("kept.invalid", true);
+        auto* manager = dockManagerOf(w); auto* dock = w.findChild<ads::CDockWidget*>(name);
+        auto* target = w.findChild<ads::CDockWidget*>(name == "connectionsDock" ? "configDock" : "connectionsDock");
+        auto* contents = dock->widget(); auto* area = target->dockAreaWidget();
+        // Repeated undock/redock preserves the actual pane, not a replacement widget.
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            dock->toggleView(true); dock->setFloating(); QTRY_COMPARE(floatingWindows().size(), 1);
+            auto* floating = floatingWindows().first(); QTRY_VERIFY(area->isVisible());
+            const auto over = area->mapToGlobal(area->rect().center());
+            DockDropDriver::showDropOverlays(manager, manager, over, true, floating->dockContainer());
+            for (const auto arrow : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea, ads::CenterDockWidgetArea})
+                QVERIFY2(!dockArrow(manager, 0, arrow).isNull(), qPrintable(QString("Missing pane target %1").arg(int(arrow))));
+            const auto point = dockArrow(manager, 0, side);
+            (manager->*&DockDropDriver::dropFloatingWidget)(floating, point);
+            for (auto* overlay : manager->findChildren<ads::CDockOverlay*>()) overlay->hideOverlay();
+            QTRY_VERIFY(floatingWindows().isEmpty()); QVERIFY(dock->isVisible()); QCOMPARE(dock->widget(), contents); QCOMPARE(dock->window(), &w);
+            auto* dockArea = dock->dockAreaWidget();
+            if (side == ads::CenterDockWidgetArea) QCOMPARE(dockArea, area);
+            else {
+                QVERIFY(dockArea != area);
+                const auto from = dockArea->mapTo(manager, QPoint()), to = area->mapTo(manager, QPoint());
+                if (side == ads::LeftDockWidgetArea) QVERIFY(from.x() < to.x());
+                if (side == ads::RightDockWidgetArea) QVERIFY(from.x() > to.x());
+                if (side == ads::TopDockWidgetArea) QVERIFY(from.y() < to.y());
+                if (side == ads::BottomDockWidgetArea) { QVERIFY(from.y() > to.y()); QCOMPARE(dockArea->width(), area->width()); }
+            }
+            QCOMPARE(w.sessionCount(), sessions ? size_t(1) : size_t(0));
+        }
+    }
+    void paneAndSessionPreviewsRespectSidebarTargets() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        w.quickConnect("kept.invalid", true);
+        auto* manager = dockManagerOf(w); auto* config = w.findChild<ads::CDockWidget*>("configDock");
+        auto* target = w.findChild<ads::CDockWidget*>("connectionsDock")->dockAreaWidget();
+        auto* session = sessionDockOf(w.findChild<SessionPane*>());
+        const auto over = target->mapToGlobal(target->rect().center());
+        for (auto* dock : {config, session}) {
+            for (const bool wholeArea : {false, true}) {
+                QPointer<ads::CFloatingDragPreview> preview = wholeArea ? new ads::CFloatingDragPreview(dock->dockAreaWidget()) : new ads::CFloatingDragPreview(dock);
+                preview->startFloating({20, 10}, dock->size(), ads::DraggingFloatingWidget, nullptr); preview->moveFloating(over);
+                for (const auto side : {ads::LeftDockWidgetArea, ads::RightDockWidgetArea, ads::TopDockWidgetArea, ads::BottomDockWidgetArea, ads::CenterDockWidgetArea})
+                    QCOMPARE(dockArrow(manager, 0, side).isNull(), dock == session);
+                preview->cancelDraggingSilently(); QTRY_VERIFY(preview.isNull());
+            }
+        }
+        // A stale preview must not bypass the policy at commit time, either.
+        auto* before = session->dockAreaWidget();
+        (manager->*&DockDropDriver::dropWidget)(session, ads::BottomDockWidgetArea, target, -1);
+        QCOMPARE(session->dockAreaWidget(), before); QCOMPARE(w.sessionCount(), size_t(1));
+    }
+    void floatingDragReleaseWithoutTargetClearsOverlays() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* manager = dockManagerOf(w); auto* config = w.findChild<ads::CDockWidget*>("configDock"); config->setFloating();
+        QTRY_COMPARE(floatingWindows().size(), 1); auto* floating = floatingWindows().first();
+        // Hide the only destination so startFloating cannot select a target at the
+        // real pointer position. Simulate overlays left visible by queued events.
+        w.hide();
+        static_cast<ads::IFloatingWidget*>(floating)->startFloating({20, 10}, floating->size(), ads::DraggingFloatingWidget, nullptr);
+        QTRY_VERIFY(config->isVisible());
+        for (auto* overlay : manager->findChildren<ads::CDockOverlay*>()) overlay->show();
+        static_cast<ads::IFloatingWidget*>(floating)->finishDragging(); QVERIFY(!floating->isDraggingActive());
+        for (auto* overlay : manager->findChildren<ads::CDockOverlay*>()) QVERIFY(!overlay->isVisible());
+        QVERIFY(config->isVisible()); QCOMPARE(config->window(), floating);
+    }
+    void macFloatingConfigDropsThroughTitleBar() {
+#ifndef Q_OS_MACOS
+        QSKIP("Cocoa floating-window title bar");
+#else
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
+        w.quickConnect("kept.invalid", true);
+        auto* manager = dockManagerOf(w); auto* config = w.findChild<ads::CDockWidget*>("configDock");
+        auto* target = w.findChild<ads::CDockWidget*>("connectionsDock")->dockAreaWidget();
+        auto* contents = config->widget();
+        for (int repeat = 0; repeat < 5; ++repeat) {
+            config->setFloating(); QTRY_COMPARE(floatingWindows().size(), 1); auto* floating = floatingWindows().first();
+            const auto over = target->mapToGlobal(target->rect().center()); QCursor::setPos(over);
+            if (QCursor::pos() != over) QSKIP("Moving the native cursor requires Accessibility permission");
+            QMouseEvent press(QEvent::NonClientAreaMouseButtonPress, QPointF(20, -10), QPointF(over), Qt::LeftButton, Qt::LeftButton, {});
+            QApplication::sendEvent(floating, &press); floating->move(floating->pos() + QPoint(30, 0));
+            QVERIFY(floating->isDraggingActive()); const auto bottom = dockArrow(manager, 0, ads::BottomDockWidgetArea); QVERIFY(!bottom.isNull());
+            QCursor::setPos(bottom); floating->move(floating->pos() + QPoint(1, 0));
+            QMouseEvent release(QEvent::NonClientAreaMouseButtonRelease, QPointF(20, -10), QPointF(bottom), Qt::LeftButton, Qt::NoButton, {});
+            QApplication::sendEvent(floating, &release);
+            QTRY_VERIFY(floatingWindows().isEmpty()); QVERIFY(config->isVisible()); QCOMPARE(config->widget(), contents); QCOMPARE(config->window(), &w);
+            QVERIFY(config->dockAreaWidget()->mapTo(manager, QPoint()).y() > target->mapTo(manager, QPoint()).y());
+            QCOMPARE(config->dockAreaWidget()->width(), target->width()); QCOMPARE(w.sessionCount(), size_t(1));
+            for (auto* overlay : manager->findChildren<ads::CDockOverlay*>()) QVERIFY(!overlay->isVisible());
+        }
+#endif
+    }
+    void macFloatingDragClickReleaseAndCancel() {
+#ifndef Q_OS_MACOS
+        QSKIP("Cocoa floating-window drag state");
+#else
+        QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.show(); WAIT_STORE(w);
+        auto* manager = dockManagerOf(w); auto* config = w.findChild<ads::CDockWidget*>("configDock"); config->setFloating();
+        QTRY_COMPARE(floatingWindows().size(), 1); auto* floating = floatingWindows().first();
+        auto* target = w.findChild<ads::CDockWidget*>("connectionsDock")->dockAreaWidget();
+        QMouseEvent press(QEvent::NonClientAreaMouseButtonPress, QPointF(20, -10), QPointF(floating->pos()), Qt::LeftButton, Qt::LeftButton, {});
+        QMouseEvent release(QEvent::NonClientAreaMouseButtonRelease, QPointF(20, -10), QPointF(floating->pos()), Qt::LeftButton, Qt::NoButton, {});
+        QApplication::sendEvent(floating, &press); QApplication::sendEvent(floating, &release);
+        floating->move(floating->pos() + QPoint(30, 0)); QVERIFY(!floating->isDraggingActive());
+        for (const auto cancel : {QEvent::KeyPress, QEvent::Hide, QEvent::MouseButtonRelease}) {
+            floating->show(); static_cast<ads::IFloatingWidget*>(floating)->startFloating({20, 10}, floating->size(), ads::DraggingFloatingWidget, nullptr);
+            DockDropDriver::showDropOverlays(manager, manager, target->mapToGlobal(target->rect().center()), true, floating->dockContainer());
+            QVERIFY(floating->isDraggingActive());
+            if (cancel == QEvent::KeyPress) QTest::keyClick(floating, Qt::Key_Escape);
+            else if (cancel == QEvent::Hide) floating->hide();
+            else QTest::mouseRelease(floating, Qt::LeftButton);
+            QVERIFY(!floating->isDraggingActive());
+            for (auto* overlay : manager->findChildren<ads::CDockOverlay*>()) QVERIFY(!overlay->isVisible());
+        }
+#endif
     }
     void pulledOutTabRejoinsTabBarUnderCursor() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(1000, 700); w.show(); WAIT_STORE(w);
@@ -897,6 +1036,61 @@ private slots:
         QVERIFY(connections->isVisible()); QVERIFY(config->isHidden());
         w.hide(); w.show(); QTest::qWait(80); QVERIFY(connections->isVisible()); QVERIFY(config->isHidden());
     }
+    void autoHiddenSidebarRestoresItsStack_data() {
+        QTest::addColumn<bool>("hideConfigFirst"); QTest::addColumn<bool>("restoreConfigFirst"); QTest::addColumn<bool>("session");
+        for (bool hideConfigFirst : {false, true}) for (bool restoreConfigFirst : {false, true}) for (bool session : {false, true})
+            QTest::newRow(qPrintable(QString("hide-%1-restore-%2-session-%3").arg(hideConfigFirst).arg(restoreConfigFirst).arg(session)))
+                << hideConfigFirst << restoreConfigFirst << session;
+    }
+    void autoHiddenSidebarRestoresItsStack() {
+        QFETCH(bool, hideConfigFirst); QFETCH(bool, restoreConfigFirst); QFETCH(bool, session);
+        QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.resize(1200, 800); w.show(); WAIT_STORE(w);
+        if (session) { w.quickConnect("mock.invalid", true); QTest::qWait(80); }
+        auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = w.findChild<ads::CDockWidget*>("configDock");
+        const auto contents = config->widget(); const auto width = connections->width();
+        const auto pin = [](ads::CDockWidget* dock) { dock->dockAreaWidget()->titleBar()->button(ads::TitleBarButtonAutoHide)->click(); };
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            pin(hideConfigFirst ? config : connections); pin(hideConfigFirst ? connections : config);
+            QVERIFY(connections->isAutoHide() && config->isAutoHide()); QTest::qWait(30);
+            pin(restoreConfigFirst ? config : connections); pin(restoreConfigFirst ? connections : config);
+            QTRY_VERIFY(!connections->isAutoHide() && !config->isAutoHide()); QTRY_VERIFY(connections->isVisible() && config->isVisible());
+            const auto upper = connections->dockAreaWidget()->geometry(), lower = config->dockAreaWidget()->geometry();
+            QCOMPARE(connections->dockAreaWidget()->parentWidget(), config->dockAreaWidget()->parentWidget());
+            QCOMPARE(upper.x(), lower.x()); QCOMPARE(upper.width(), lower.width()); QVERIFY(upper.bottom() < lower.top());
+            QTRY_VERIFY2(qAbs(connections->width() - width) <= 4, qPrintable(QString("Restored sidebar width %1, original %2").arg(connections->width()).arg(width))); QCOMPARE(config->widget(), contents);
+            QCOMPARE(w.sessionCount(), session ? size_t(1) : size_t(0));
+        }
+        // Auto-hiding just one pane also puts it back above/below its neighbor.
+        pin(config); QVERIFY(config->isAutoHide()); pin(config); QTRY_VERIFY(config->isVisible());
+        QCOMPARE(connections->dockAreaWidget()->parentWidget(), config->dockAreaWidget()->parentWidget());
+        QVERIFY(connections->dockAreaWidget()->geometry().bottom() < config->dockAreaWidget()->geometry().top());
+    }
+    void autoHiddenPanesKeepTabsAndRespectNewSidebars() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.resize(1200, 800); w.show(); WAIT_STORE(w);
+        auto* manager = dockManagerOf(w); auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = w.findChild<ads::CDockWidget*>("configDock");
+        manager->addDockWidget(ads::CenterDockWidgetArea, config, connections->dockAreaWidget()); QTest::qWait(30);
+        config->setAutoHide(true); config->setAutoHide(false);
+        QCOMPARE(config->dockAreaWidget(), connections->dockAreaWidget());
+        QCOMPARE(config->dockAreaWidget()->dockWidgets(), QList<ads::CDockWidget*>({connections, config}));
+        connections->setAutoHide(true); config->setAutoHide(true); QTest::qWait(30);
+        config->setAutoHide(false); connections->setAutoHide(false);
+        QCOMPARE(config->dockAreaWidget(), connections->dockAreaWidget());
+        QCOMPARE(config->dockAreaWidget()->dockWidgets(), QList<ads::CDockWidget*>({connections, config}));
+        w.findChild<QAction*>("actionResetLayout")->trigger(); QTest::qWait(30);
+        config->setAutoHide(true); config->setAutoHide(true, ads::SideBarRight); config->setAutoHide(false); QTest::qWait(30);
+        QVERIFY(config->dockAreaWidget()->mapToGlobal(QPoint()).x() > connections->dockAreaWidget()->mapToGlobal(QPoint()).x());
+        QVERIFY(config->dockAreaWidget()->mapToGlobal(QPoint()).x() > manager->findDockWidget("documentsDock")->dockAreaWidget()->mapToGlobal(QPoint()).x());
+    }
+    void autoHiddenPaneSurvivesRemovedNeighbor() {
+        QTemporaryDir dir; MainWindow w(dir.filePath("confCons.xml"), true); w.resize(1200, 800); w.show(); WAIT_STORE(w);
+        auto* manager = dockManagerOf(w); auto* connections = w.findChild<ads::CDockWidget*>("connectionsDock");
+        auto* neighbor = new ads::CDockWidget(manager, "Temporary pane"); neighbor->setWidget(new QWidget);
+        manager->addDockWidget(ads::BottomDockWidgetArea, neighbor, connections->dockAreaWidget());
+        neighbor->setAutoHide(true); connections->setAutoHide(true);
+        manager->removeDockWidget(neighbor); delete neighbor; QTest::qWait(30);
+        connections->setAutoHide(false); QTRY_VERIFY(connections->isVisible()); QVERIFY(!connections->isAutoHide());
+        QCOMPARE(connections->dockContainer(), static_cast<ads::CDockContainerWidget*>(manager));
+    }
     void longSessionStatusDoesNotSqueezeDocks() {
         QTemporaryDir dir; MainWindow w(dir.filePath("profiles.json"), true); w.resize(900, 650); w.show(); WAIT_STORE(w);
         w.quickConnect("first.invalid", true); QTest::qWait(80);
@@ -911,6 +1105,7 @@ private slots:
         QTemporaryDir dir; const auto path = dir.filePath("confCons.xml"); MainWindow w(path, true); w.resize(1200, 650); w.show(); WAIT_STORE(w);
         auto* button = w.findChild<QToolButton*>("quickConnectButton"); auto* combo = w.findChild<QComboBox*>("quickConnectCombo");
         auto* bar = w.findChild<QToolBar*>("quickConnectToolbar"); QVERIFY(!w.findChild<QComboBox*>("quickConnectProtocol"));
+        QCOMPARE(bar->allowedAreas(), Qt::ToolBarAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea)); QVERIFY(!bar->isFloatable());
         QCOMPARE(button->popupMode(), QToolButton::MenuButtonPopup); QVERIFY(button->menu());
         QStringList names; for (auto* action : button->menu()->actions()) names << action->text();
         QCOMPARE(names, QStringList({"RDP", "VNC", "SSH"}));
@@ -960,6 +1155,11 @@ private slots:
         auto* lock = w.findChild<QAction*>("actionLockToolbars");
         lock->setChecked(true); QVERIFY(!menus->isMovable()); QVERIFY(!quick->isMovable());
         lock->setChecked(false); QVERIFY(menus->isMovable()); QVERIFY(quick->isMovable());
+        // Quick Connect can share the first row, use another top row, or sit below.
+        QCOMPARE(quick->allowedAreas(), Qt::ToolBarAreas(Qt::TopToolBarArea | Qt::BottomToolBarArea)); QVERIFY(!quick->isFloatable());
+        w.addToolBar(Qt::BottomToolBarArea, quick); QCOMPARE(w.toolBarArea(quick), Qt::BottomToolBarArea);
+        QCOMPARE(quick->orientation(), Qt::Horizontal);
+        w.addToolBar(Qt::TopToolBarArea, quick); w.insertToolBarBreak(quick); QVERIFY(w.toolBarBreak(quick));
         // Moved elsewhere, Reset layout puts the menus back beside Quick Connect.
         w.addToolBar(Qt::BottomToolBarArea, menus); QCOMPARE(w.toolBarArea(menus), Qt::BottomToolBarArea);
         w.findChild<QAction*>("actionResetLayout")->trigger();

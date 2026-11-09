@@ -837,6 +837,15 @@ CDockOverlay* CDockManager::dockAreaOverlay() const
 
 
 //============================================================================
+DockWidgetAreas CDockManager::allowedDockAreas(CDockAreaWidget* TargetArea,
+	QWidget* DraggedWidget) const
+{
+	Q_UNUSED(DraggedWidget)
+	return TargetArea ? TargetArea->allowedAreas() : NoDockWidgetArea;
+}
+
+
+//============================================================================
 const QList<CDockContainerWidget*> CDockManager::dockContainers() const
 {
 	return d->Containers;

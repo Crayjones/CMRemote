@@ -546,14 +546,15 @@ void DockContainerWidgetPrivate::updateDropOverlays(const QPoint& GlobalPos,
 	// container under the cursor
 	bool ContentPinnable = FloatingWidget->dockContainer()->features().testFlag(
 		CDockWidget::DockWidgetPinnable);
-	CDockContainerWidget::showDropOverlays(DockManager, _this, GlobalPos, ContentPinnable);
+	CDockContainerWidget::showDropOverlays(DockManager, _this, GlobalPos, ContentPinnable,
+		FloatingWidget->dockContainer());
 }
 
 
 //============================================================================
 void CDockContainerWidget::showDropOverlays(CDockManager* DockManager,
 	CDockContainerWidget* TopContainer, const QPoint& GlobalPos,
-	bool ContentPinnable)
+	bool ContentPinnable, QWidget* DraggedWidget)
 {
 	auto ContainerOverlay = DockManager->containerOverlay();
 	auto DockAreaOverlay = DockManager->dockAreaOverlay();
@@ -565,7 +566,8 @@ void CDockContainerWidget::showDropOverlays(CDockManager* DockManager,
 	// all other allowed areas are from the container
 	if (VisibleDockAreas == 1 && DockArea)
 	{
-		AllowedContainerAreas.setFlag(CenterDockWidgetArea, DockArea->allowedAreas().testFlag(CenterDockWidgetArea));
+		AllowedContainerAreas.setFlag(CenterDockWidgetArea,
+			DockManager->allowedDockAreas(DockArea, DraggedWidget).testFlag(CenterDockWidgetArea));
 	}
 
 	if (ContentPinnable)
@@ -581,7 +583,7 @@ void CDockContainerWidget::showDropOverlays(CDockManager* DockManager,
 	{
 		DockAreaOverlay->enableDropPreview(true);
 		DockAreaOverlay->setAllowedAreas(
-		    (VisibleDockAreas == 1) ? NoDockWidgetArea : DockArea->allowedAreas());
+		    (VisibleDockAreas == 1) ? NoDockWidgetArea : DockManager->allowedDockAreas(DockArea, DraggedWidget));
 		DockWidgetArea Area = DockAreaOverlay->showOverlay(DockArea, GlobalPos);
 
 		// A CenterDockWidgetArea for the dockAreaOverlay() indicates that
@@ -1926,7 +1928,7 @@ void CDockContainerWidget::dropFloatingWidget(CFloatingDockContainer* FloatingWi
 	if (DockArea)
 	{
 		auto dropOverlay = d->DockManager->dockAreaOverlay();
-		dropOverlay->setAllowedAreas(DockArea->allowedAreas());
+		dropOverlay->setAllowedAreas(d->DockManager->allowedDockAreas(DockArea, FloatingWidget->dockContainer()));
 		dropArea = dropOverlay->showOverlay(DockArea, TargetPos);
 		if (ContainerDropArea != InvalidDockWidgetArea &&
 			ContainerDropArea != dropArea)
@@ -1997,6 +1999,11 @@ void CDockContainerWidget::dropWidget(QWidget* Widget, DockWidgetArea DropArea, 
     CDockWidget* SingleDockWidget = topLevelDockWidget();
 	if (TargetAreaWidget)
 	{
+		// CMRemote patch: enforce the same source-aware policy on preview drops.
+		if (!d->DockManager->allowedDockAreas(TargetAreaWidget, Widget).testFlag(DropArea))
+		{
+			return;
+		}
 		d->moveToNewSection(Widget, TargetAreaWidget, DropArea, TabIndex);
 	}
 	else if (internal::isSideBarArea(DropArea))
