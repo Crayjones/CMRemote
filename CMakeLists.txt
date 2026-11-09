@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(RemoteManager VERSION 0.2.0 LANGUAGES CXX)
+project(RemoteManager VERSION 0.2.1 LANGUAGES CXX)
 if(WIN32)
     enable_language(RC)
 endif()
