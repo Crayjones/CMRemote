@@ -12,16 +12,18 @@ bool VncGraphics::capture(const QRegion& damage, quint64 epoch, quint64 revision
     epoch_ = epoch; revision_ = revision;
     return true;
 }
-bool VncGraphics::geometry(quint16 w, quint16 h) {
-    if (!w || !h || w > MaxSide || h > MaxSide || quint64(w) * h > MaxPixels) return false;
-    if (framebuffer_.size() == QSize(w, h)) return true;
+uchar* VncGraphics::geometry(int w, int h) {
+    if (w <= 0 || h <= 0 || w > MaxSide || h > MaxSide || quint64(w) * quint64(h) > MaxPixels) return nullptr;
+    // A same-size NewFBSize keeps the pixels; the server refreshes them anyway.
+    if (framebuffer_.size() == QSize(w, h)) return framebuffer_.bits();
     QImage replacement(w, h, QImage::Format_RGB32);
-    if (replacement.isNull()) return false;
+    if (replacement.isNull() || replacement.bytesPerLine() != w * 4) return nullptr;
     replacement.fill(qRgb(0, 0, 0));
-    // New geometry is published at commit as a full snapshot of the new epoch.
+    // New geometry is published at commit as a full snapshot of the new epoch. The
+    // decoder writes through bits(); this image is never shared, so bits() never detaches.
     framebuffer_ = std::move(replacement);
     geometryPending_ = true; pending_ = QRegion(framebuffer_.rect());
-    return true;
+    return framebuffer_.bits();
 }
 bool VncGraphics::commit() {
     if (pending_.isEmpty() && !geometryPending_) return true;
@@ -33,30 +35,15 @@ bool VncGraphics::commit() {
     pending_ = {}; geometryPending_ = false;
     return true;
 }
-bool VncGraphics::rectangleValid(quint16 x, quint16 y, quint16 w, quint16 h) const {
-    return !framebuffer_.isNull() && w && h && quint32(x) + w <= quint32(framebuffer_.width()) &&
-        quint32(y) + h <= quint32(framebuffer_.height());
-}
-bool VncGraphics::raw(quint16 x, quint16 y, quint16 w, quint16 h, const uchar* bytes, size_t len) {
-    if (!rectangleValid(x, y, w, h) || !bytes || len != size_t(w) * h * 4) return false;
-    // Numeric QRgb construction is native-endian safe. The fourth wire byte is
-    // unused desktop padding, never transparency (unlike decoded cursor alpha).
-    for (int row = 0; row < h; ++row) {
-        auto* destination = reinterpret_cast<QRgb*>(framebuffer_.scanLine(y + row)) + x;
-        const auto* source = bytes + size_t(row) * w * 4;
-        for (int column = 0; column < w; ++column, source += 4)
-            destination[column] = qRgb(source[2], source[1], source[0]);
+bool VncGraphics::damage(int x, int y, int w, int h) {
+    if (framebuffer_.isNull() || x < 0 || y < 0 || w <= 0 || h <= 0 ||
+        qint64(x) + w > framebuffer_.width() || qint64(y) + h > framebuffer_.height()) return false;
+    // The fourth byte is RFB padding, never transparency: make it opaque for RGB32.
+    for (int row = y; row < y + h; ++row) {
+        auto* pixel = reinterpret_cast<QRgb*>(framebuffer_.scanLine(row)) + x;
+        for (int column = 0; column < w; ++column) pixel[column] |= 0xff000000u;
     }
     pending_ += QRect(x, y, w, h);
-    return true;
-}
-bool VncGraphics::copy(quint16 dstx, quint16 dsty, quint16 w, quint16 h, quint16 srcx, quint16 srcy) {
-    if (!rectangleValid(dstx, dsty, w, h) || !rectangleValid(srcx, srcy, w, h)) return false;
-    const auto source = framebuffer_.copy(QRect(srcx, srcy, w, h));
-    if (source.isNull()) return false;
-    for (int row = 0; row < h; ++row)
-        std::memcpy(framebuffer_.scanLine(dsty + row) + size_t(dstx) * 4, source.constScanLine(row), size_t(w) * 4);
-    pending_ += QRect(dstx, dsty, w, h);
     return true;
 }
 bool VncGraphics::cursor(quint16 hotx, quint16 hoty, quint16 w, quint16 h, const uchar* bytes, size_t len) {

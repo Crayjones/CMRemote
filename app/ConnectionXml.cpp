@@ -298,7 +298,7 @@ bool rekeyable(const Node& node, bool root, const ConnectionXml::Canceled& cance
 struct Field {
     const char *key, *attribute, *inherit;
     enum Kind { String, Boolean, Protocol, Port, Colors, Resolution, SshAuth, KeyPath,
-        SecurityProtocol, ServerAuth, Minutes, GatewayUsage, GatewayPort, GatewayCredentials, Sound } kind;
+        SecurityProtocol, ServerAuth, Minutes, GatewayUsage, GatewayPort, GatewayCredentials, Sound, SmartSize } kind;
 };
 const Field Fields[] = {
     {"protocol", "Protocol", "InheritProtocol", Field::Protocol}, {"host", "Hostname", "RmHostInherited", Field::String},
@@ -312,6 +312,7 @@ const Field Fields[] = {
     {"font_smoothing", "EnableFontSmoothing", "InheritEnableFontSmoothing", Field::Boolean},
     {"ssh_auth", "RmSshAuth", "RmSshAuthInherited", Field::SshAuth}, {"ssh_key_path", "RmSshKeyPath", "RmSshKeyPathInherited", Field::KeyPath},
     {"view_only", "VNCViewOnly", "InheritVNCViewOnly", Field::Boolean},
+    {"smart_size", "VNCSmartSizeMode", "InheritVNCSmartSizeMode", Field::SmartSize},
     // RDP security/gateway (I.rdpsecurity). Native mRemoteNG attributes where they exist.
     {"security_protocol", "RmRdpSecurity", "RmRdpSecurityInherited", Field::SecurityProtocol},
     {"server_auth", "RDPAuthenticationLevel", "InheritRDPAuthenticationLevel", Field::ServerAuth},
@@ -336,6 +337,8 @@ const std::vector<NativeChoice>& nativeChoices(Field::Kind kind) {
     static const std::vector<NativeChoice> usage{{"never", {"", "Never", "0"}}, {"always", {"Always", "1"}}, {"detect", {"Detect", "2"}}};
     static const std::vector<NativeChoice> credentials{{"same", {"", "Yes", "1"}}, {"separate", {"No", "0"}}};
     static const std::vector<NativeChoice> sound{{"local", {"", "BringToThisComputer", "0"}}, {"remote", {"LeaveAtRemoteComputer", "1"}}, {"none", {"DoNotPlay", "2"}}};
+    // SmartSFree (stretch without keeping the aspect ratio) is not supported and blocks Connect.
+    static const std::vector<NativeChoice> smartSize{{"aspect", {"", "SmartSAspect", "2"}}, {"off", {"SmartSNo", "0"}}};
     static const std::vector<NativeChoice> none;
     switch (kind) {
     case Field::SecurityProtocol: return security;
@@ -343,11 +346,13 @@ const std::vector<NativeChoice>& nativeChoices(Field::Kind kind) {
     case Field::GatewayUsage: return usage;
     case Field::GatewayCredentials: return credentials;
     case Field::Sound: return sound;
+    case Field::SmartSize: return smartSize;
     default: return none;
     }
 }
 const char* choiceReason(Field::Kind kind) {
-    return kind == Field::ServerAuth ? "authentication" : kind == Field::SecurityProtocol ? "preferences" : kind == Field::Sound ? "redirection" : "gateway";
+    return kind == Field::ServerAuth ? "authentication" : kind == Field::SecurityProtocol || kind == Field::SmartSize ? "preferences" :
+        kind == Field::Sound ? "redirection" : "gateway";
 }
 void reason(QJsonArray& reasons, const char* code) { const auto value = QString::fromLatin1(code); if (!reasons.contains(value)) reasons.push_back(value); }
 bool nativeBoolean(const QString& value) { bool result = false; boolean(value.trimmed(), result); return result; }
@@ -403,7 +408,7 @@ QJsonValue fieldValue(const Node& node, const Field& field, QJsonArray& reasons)
         if (trimmed == "Colors24Bit" || trimmed == "24") return 24;
         if (trimmed == "Colors32Bit" || trimmed == "32") return 32;
         reason(reasons, "colors"); return 32;
-    case Field::SecurityProtocol: case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound: {
+    case Field::SecurityProtocol: case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound: case Field::SmartSize: {
         const auto& choices = nativeChoices(field.kind);
         for (const auto& option : choices) if (option.native.contains(trimmed)) return QString::fromLatin1(option.model);
         // SmartCard/ExternalCredentialProvider/AccessToken gateway logons and
@@ -453,7 +458,7 @@ std::optional<SessionTarget> account(const std::vector<const Node*>& path) {
         if (!reasons.isEmpty() || target.sshAuth != "password") return std::nullopt;
         return normalizeSshTarget(target);
     }
-    // A VNC account is host and port only; the password is the VNC password.
+    // A saved VNC password is bound to host and port only; the username (VeNCrypt Plain) can change.
     if (target.protocol == "vnc") {
         if (!reasons.isEmpty()) return std::nullopt;
         target.username.clear(); return normalizeVncTarget(target);
@@ -493,10 +498,13 @@ bool inactiveSshAttribute(QString name) {
     return names.contains(name);
 }
 bool inactiveAttribute(const QString& protocol, QString name) {
+    // VNC shares text through the same Clipboard setting as RDP.
+    if (protocol == "vnc" && (name == "RedirectClipboard" || name == "InheritRedirectClipboard")) return false;
     if ((protocol == "ssh" || protocol == "vnc") && inactiveSshAttribute(name)) return true;
     if (name.startsWith("Inherit")) name.remove(0, 7);
-    if (protocol != "vnc") return name == "VNCViewOnly";
-    static const QSet<QString> names{"Username", "PuttySession", "RmSshAuth", "RmSshKeyPath", "RmSshAuthInherited", "RmSshKeyPathInherited"};
+    if (protocol != "vnc") return name == "VNCViewOnly" || name == "VNCSmartSizeMode";
+    // Username is active: VeNCrypt Plain sends it.
+    static const QSet<QString> names{"PuttySession", "RmSshAuth", "RmSshKeyPath", "RmSshAuthInherited", "RmSshKeyPathInherited"};
     return names.contains(name);
 }
 void criticalOptions(const std::vector<const Node*>& nodes, const QString& protocol, QJsonArray& reasons) {
@@ -535,7 +543,6 @@ void criticalOptions(const std::vector<const Node*>& nodes, const QString& proto
         // advertise Hextile. Keep it passive while negotiating Raw/ZRLE/CopyRect.
         choice("VNCEncoding", {"", "EncHextile", "3", "EncRaw", "0", "EncZRLE", "7"}, "preferences");
         choice("VNCColors", {"", "ColNormal", "0"}, "preferences");
-        choice("VNCSmartSizeMode", {"", "SmartSAspect", "2"}, "preferences"); // fit with aspect ratio only
     }
     for (const auto* node : nodes) {
         Node shape; shape.name = node->name; shape.uri = node->uri;
@@ -628,7 +635,7 @@ QJsonValue defaultValue(const Field& field, const QJsonObject& overrides) {
     case Field::SshAuth: return "password";
     case Field::Boolean: return QStringList{"automatic_resize", "wallpaper", "themes", "font_smoothing", "use_credssp"}.contains(field.key);
     case Field::Protocol: return "rdp";
-    case Field::SecurityProtocol: case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound:
+    case Field::SecurityProtocol: case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound: case Field::SmartSize:
         return QString::fromLatin1(nativeChoices(field.kind).front().model);
     case Field::Minutes: return 0;
     case Field::GatewayPort: return 443;
@@ -669,7 +676,7 @@ void patchField(Node& node, const Field& field, const QJsonValue& requested, boo
         node.setAttribute("RmResolution", name); break;
     }
     case Field::SecurityProtocol: native = value.toString(); break;
-    case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound:
+    case Field::ServerAuth: case Field::GatewayUsage: case Field::GatewayCredentials: case Field::Sound: case Field::SmartSize:
         // Write the mRemoteNG enum name (second native alias after the empty default).
         for (const auto& option : nativeChoices(field.kind)) if (option.model == value.toString()) {
             for (const auto& name : option.native) if (!name.isEmpty() && !name.front().isDigit()) { native = name; break; }
@@ -691,7 +698,7 @@ const std::pair<const char*, const char*> NativeNodeDefaults[] = {
     {"PostExtApp", ""}, {"MacAddress", ""}, {"UserField", ""}, {"EnvironmentTags", ""}, {"Favorite", "false"}, {"ExtApp", ""},
     {"StartProgram", ""}, {"StartProgramWorkDir", ""}, {"VNCCompression", "CompNone"}, {"VNCEncoding", "EncHextile"}, {"VNCAuthMode", "AuthVNC"},
     {"VNCProxyType", "ProxyNone"}, {"VNCProxyIP", ""}, {"VNCProxyPort", "0"}, {"VNCProxyUsername", ""}, {"VNCProxyPassword", ""},
-    {"VNCColors", "ColNormal"}, {"VNCSmartSizeMode", "SmartSAspect"}, {"RDGatewayExternalCredentialProvider", "None"}, {"RDGatewayUserViaAPI", ""},
+    {"VNCColors", "ColNormal"}, {"RDGatewayExternalCredentialProvider", "None"}, {"RDGatewayUserViaAPI", ""},
     {"RDGatewayPassword", ""}, {"RDGatewayAccessToken", ""}, {"UseRCG", "false"}, {"UseRestrictedAdmin", "false"},
     {"UseRedirectionServerName", "false"}, {"UserViaAPI", ""}, {"EC2InstanceId", ""}, {"EC2Region", "eu-central-1"},
     {"ExternalCredentialProvider", "None"}, {"ExternalAddressProvider", "None"}, {"VaultOpenbaoMount", ""}, {"VaultOpenbaoRole", ""},
@@ -705,7 +712,7 @@ const char* const NativeInheritDefaults[] = {
     "RedirectKeys", "RedirectPorts", "RedirectPrinters", "RedirectSmartCards", "RenderingEngine", "SSHOptions", "SSHTunnelConnectionName",
     "SoundQuality", "TabColor", "UseEnhancedMode", "UseRCG", "UseRedirectionServerName", "UseRestrictedAdmin", "UseVmId", "UserField",
     "UserViaAPI", "VNCAuthMode", "VNCColors", "VNCCompression", "VNCEncoding", "VNCProxyIP", "VNCProxyPassword", "VNCProxyPort",
-    "VNCProxyType", "VNCProxyUsername", "VNCSmartSizeMode", "VmId"};
+    "VNCProxyType", "VNCProxyUsername", "VmId"};
 bool patchNodes(DetachedNodes& nodes, const Profiles& before, const Profiles& requested, bool legacyResolutions, const ConnectionXml::Canceled& canceled) {
     for (auto i = requested.begin(); i != requested.end(); ++i) {
         if (stopped(canceled)) return false;

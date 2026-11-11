@@ -14,7 +14,8 @@ option(RM_BUILD_TESTS "Build headless Qt tests" ON)
 find_package(Qt6 6.12.0 EXACT REQUIRED COMPONENTS Core Gui Widgets Network ShaderTools GuiPrivate)
 find_package(VTerm 0.3.3 EXACT REQUIRED CONFIG)
 find_package(Threads REQUIRED)
-find_package(OpenSSL 3.5.9 EXACT REQUIRED COMPONENTS Crypto)
+find_package(OpenSSL 3.5.9 EXACT REQUIRED COMPONENTS Crypto SSL)
+find_package(LibVNCClient 0.9.15 EXACT REQUIRED CONFIG)
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
 if(NOT DEFINED ENV{CARGO_TARGET_DIR})
     message(FATAL_ERROR "Set CARGO_TARGET_DIR to build/<platform>/cargo, or use scripts/env.py")
@@ -31,12 +32,11 @@ else()
     set(RUST_LIBRARY "${RUST_OUTPUT}/debug/libremotemanager_core.a")
 endif()
 file(GLOB_RECURSE RUST_SOURCES CONFIGURE_DEPENDS core/src/*.rs)
-file(GLOB_RECURSE VNC_ENGINE_SOURCES CONFIGURE_DEPENDS vendor/vnc-rs/src/*.rs)
 
 add_custom_command(OUTPUT "${RUST_LIBRARY}"
     COMMAND "${CARGO_EXECUTABLE}" build --locked -p remotemanager-core
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    DEPENDS ${RUST_SOURCES} ${VNC_ENGINE_SOURCES} Cargo.toml Cargo.lock core/Cargo.toml core/build.rs core/include/SshEventSink.h core/include/VncEventSink.h vendor/vnc-rs/Cargo.toml
+    DEPENDS ${RUST_SOURCES} Cargo.toml Cargo.lock core/Cargo.toml core/build.rs core/include/SshEventSink.h
     VERBATIM)
 add_custom_target(rust_core_build DEPENDS "${RUST_LIBRARY}")
 add_library(rust_core STATIC IMPORTED GLOBAL)
@@ -62,7 +62,7 @@ add_library(rm_frontend STATIC
     app/Credentials.cpp app/Credentials.h app/ui/CredentialsDialog.ui
     app/SshCredentialsDialog.cpp app/SshCredentialsDialog.h app/ui/SshCredentialsDialog.ui
     app/SshWorker.cpp app/SshWorker.h core/include/SshEventSink.h
-    app/VncWorker.cpp app/VncWorker.h core/include/VncEventSink.h
+    app/VncWorker.cpp app/VncWorker.h app/VncSocket.cpp app/VncSocket.h app/VncCertificates.cpp app/VncCertificates.h app/VncCertificateDialog.cpp app/VncCertificateDialog.h
     app/VncGraphics.cpp app/VncGraphics.h app/VncDesktopView.cpp app/VncDesktopView.h
     app/VncAuthentication.cpp app/VncAuthentication.h app/VncCredentialsDialog.cpp app/VncCredentialsDialog.h app/ui/VncCredentialsDialog.ui
     app/SshHostKeyStore.cpp app/SshHostKeyStore.h app/SshHostKeyService.cpp app/SshHostKeyService.h app/SshHostKeyDialog.cpp app/SshHostKeyDialog.h
@@ -85,7 +85,7 @@ target_compile_definitions(rm_frontend PRIVATE RM_SECRET_OPENSSL=1)
 configure_file(cmake/Version.h.in "${CMAKE_CURRENT_BINARY_DIR}/generated/Version.h" @ONLY)
 target_include_directories(rm_frontend PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_include_directories(rm_frontend PUBLIC app core/include "${CARGO_TARGET}/cxxbridge")
-target_link_libraries(rm_frontend PUBLIC rust_core rm_qtads rm_qtpropertybrowser Qt6::Widgets Qt6::Network VTerm::vterm Threads::Threads OpenSSL::Crypto ${CMAKE_DL_LIBS})
+target_link_libraries(rm_frontend PUBLIC rust_core rm_qtads rm_qtpropertybrowser Qt6::Widgets Qt6::Network VTerm::vterm LibVNCClient::vncclient Threads::Threads OpenSSL::Crypto ${CMAKE_DL_LIBS})
 target_link_libraries(rm_frontend PRIVATE Qt6::GuiPrivate)
 if(APPLE)
     enable_language(OBJCXX)
@@ -94,7 +94,7 @@ if(APPLE)
     target_sources(rm_frontend PRIVATE app/PointerCaptureMac.mm app/NativeWindowMac.mm)
     target_link_libraries(rm_frontend PUBLIC "-framework Security" "-framework CoreFoundation" "-framework SystemConfiguration" "-framework AppKit" "-framework ApplicationServices" "-framework Carbon" iconv)
 elseif(WIN32)
-    target_link_libraries(rm_frontend PUBLIC ws2_32 userenv bcrypt ntdll shell32 ole32 version)
+    target_link_libraries(rm_frontend PUBLIC ws2_32 userenv bcrypt ntdll shell32 ole32 version crypt32)
 endif()
 if(RM_WITH_RDP)
     find_package(FreeRDP 3.32.1 EXACT REQUIRED CONFIG PATH_SUFFIXES FreeRDP3)
@@ -112,13 +112,16 @@ install(TARGETS RemoteManager BUNDLE DESTINATION . RUNTIME DESTINATION bin)
 if(RM_BUILD_TESTS)
     enable_testing()
     find_package(Qt6 REQUIRED COMPONENTS Test)
-    foreach(test vnc_graphics vnc_input vnc_sessions vnc_credentials vnc_worker)
+    foreach(test vnc_graphics vnc_input vnc_sessions vnc_credentials vnc_certificates vnc_worker)
         add_executable(${test}_test tests/${test}.cpp)
         target_link_libraries(${test}_test PRIVATE rm_frontend Qt6::Test)
         add_test(NAME ${test} COMMAND ${test}_test)
         set_tests_properties(${test} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
     endforeach()
     add_executable(vnc_integration tests/vnc_integration.cpp)
+    # Explicit TigerVNC fixture runner (scripts/vnc-fixture.py client); never part of CTest.
+    add_executable(vnc_fixture_test tests/vnc_fixture.cpp)
+    target_link_libraries(vnc_fixture_test PRIVATE rm_frontend Qt6::Test)
     target_link_libraries(vnc_integration PRIVATE rm_frontend Qt6::Test)
     # Explicit owned-loopback runner; native QRhi acceptance is never part of CTest.
     add_executable(ssh_integration tests/ssh_integration.cpp)

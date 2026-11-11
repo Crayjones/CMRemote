@@ -14,6 +14,7 @@
 #include "DataPaths.h"
 #include "QuickConnect.h"
 #include "OptionsDialog.h"
+#include "VncCertificates.h"
 #include "Appearance.h"
 #include "ThemeIcons.h"
 #include "OpenH264.h"
@@ -280,6 +281,8 @@ MainWindow::MainWindow(const QString& dataPath, bool testMode, QWidget* parent, 
     // "Match System" follows the OS; Appearance swaps the palette, icons follow here.
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [] { ThemeIcons::restyle(); });
     preferences_ = new ApplicationPreferences(preferencesPath, this);
+    vncTrust_ = std::make_unique<VncTrustStore>(preferencesPath.isEmpty() ? QString() : QFileInfo(preferencesPath).absoluteDir().filePath("vnc-certificates.json"));
+    if (const auto loaded = vncTrust_->load(); !loaded.ok) notification(loaded.error, Notice::Warning);
     if (!preferencesPath.isEmpty()) {
         openFiles_ = new OpenFileList(QFileInfo(preferencesPath).absoluteDir().filePath("open-files.json"), this);
         openFiles_->load([this](QStringList paths) { restoreOpenFiles(paths); });
@@ -337,7 +340,7 @@ PreferenceValues MainWindow::currentPreferences() const {
 void MainWindow::showOptions() { guard([this] { openSettings(0); }); }
 void MainWindow::openSettings(int page) {
     if (!optionsDialog_) {
-        auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_, terminalAppearance_); optionsDialog_ = dialog;
+        auto* dialog = new OptionsDialog(currentPreferences(), preferences_, this, openh264_, terminalAppearance_, vncTrust_.get()); optionsDialog_ = dialog;
         connect(dialog, &OptionsDialog::applied, this, &MainWindow::applyPreferences);
         connect(dialog, &OptionsDialog::themePreviewed, this, [](const QString& theme) { applyTheme(*qApp, theme); ThemeIcons::restyle(); });
         dialog->open();
@@ -797,7 +800,7 @@ void MainWindow::requestSession(const QString& profile, SessionTarget target, bo
 void MainWindow::attachSession(const QString& profile, SessionTarget target, bool mock, Panel owner,
                                QPointer<SessionPane> replacement, std::optional<TransientCredentials> credentials, DocumentId document,
                                std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication,
-                               std::optional<rust::Box<rm::vnc::Authentication>> vncAuthentication) {
+                               std::optional<VncAuthentication> vncAuthentication) {
     // A fullscreen session returns to its tab before it is replaced there.
     if (replacement) { exitFullscreenFor(replacement); if (!isOpenPane(replacement)) return; owner = panelOf(replacement); }
     // A panel that closed meanwhile opens the session where new sessions go.
@@ -819,7 +822,7 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
             replacement ? core.reopen_session(bytes(replacement->id()), mock) : core.open_session(bytes(profile), mock);
         info.host = bytes(target.host); info.port = target.port; info.username = bytes(target.username); info.domain = bytes(target.domain); info.options = bridgeOptions(target.options);
         info.ssh_auth = bytes(target.sshAuth); info.ssh_key_path = bytes(target.sshKeyPath); info.view_only = target.protocol == "vnc" && target.viewOnly;
-        if (target.protocol == "vnc") { info.username = std::string(); info.domain = std::string(); }
+        if (target.protocol == "vnc") info.domain = std::string();
         int index = -1; QString caption = (mock ? "MOCK · " : target.protocol.toUpper() + " · ") + qstr(info.title);
         auto* previous = replacement ? dockOf(replacement) : nullptr;
         if (previous) { index = owner->dockWidgets().indexOf(previous); caption = previous->windowTitle(); }
@@ -885,7 +888,17 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
         }
         if (!mock && target.protocol == "vnc") {
             VncWorker* worker = nullptr;
-            try { worker = pane->startVnc(std::move(*vncAuthentication)); }
+            // Saved connections inherit Clipboard up to Settings; Quick Connect uses Settings.
+            const bool clipboard = profile.isEmpty() ? clipboardDefault_ : target.options.clipboard;
+            // Re-read so certificates trusted in another window apply; a read error keeps the last good list.
+            vncTrust_->load();
+            VncWorker::Options options{vncTrust_->authorityCertificates(), vncTrust_->pinned(target.host, target.port), target.username};
+            connect(pane, &SessionPane::vncCertificateTrusted, this, [this](const QString& host, quint16 port, const QByteArray& certificate) {
+                const auto saved = vncTrust_->pin(host, port, certificate);
+                if (!saved.ok) notification("The VNC server certificate is trusted for this session only. " + saved.error, Notice::Warning);
+                else if (!saved.warning.isEmpty()) notification(saved.warning, Notice::Warning);
+            });
+            try { worker = pane->startVnc(std::move(*vncAuthentication), clipboard, std::move(options), target.smartSize); }
             catch (const std::exception&) { closePane(pane); fail("VNC worker could not start."); return; }
             if (!worker) { closePane(pane); fail("VNC worker could not start."); return; }
             vncWorkers_.insert(worker);

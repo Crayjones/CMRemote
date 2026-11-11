@@ -159,4 +159,4 @@ Cleanup defaults to dry-run, accepts only known generated directories, and rejec
 
 ## Next work
 
-RDP keyboard layouts, enterprise-domain interoperability, asynchronous RDP teardown, native clipboard/focus, server compatibility and performance remain separate work. SSH uses russh/libvterm with native Cocoa/Linux ARM64 XCB evidence; Windows/AMD64/Wayland SSH are untested. Decide license compatibility before linking LibVNCClient. Split/detached sessions and renderer/performance acceptance are not completed by SSH or terminal appearance.
+RDP keyboard layouts, enterprise-domain interoperability, asynchronous RDP teardown, native clipboard/focus, server compatibility and performance remain separate work. SSH uses russh/libvterm with native Cocoa/Linux ARM64 XCB evidence; Windows/AMD64/Wayland SSH are untested. Split/detached sessions and renderer/performance acceptance are not completed by SSH or terminal appearance.

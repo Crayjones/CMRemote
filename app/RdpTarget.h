@@ -34,14 +34,16 @@ struct SessionTarget {
     RdpOptions options;
     QString protocol = "rdp", sshAuth = "password", sshKeyPath;
     bool viewOnly = false;
+    bool smartSize = true; // VNC: fill the panel (SmartSAspect); false keeps the server's size (SmartSNo)
     bool sameAccount(const SessionTarget& other) const {
         if (protocol != other.protocol || host != other.host || port != other.port) return false;
-        if (protocol == "vnc") return true; // VNC does not use account/domain attributes.
+        // A VNC password belongs to the host and port; the username only matters to VeNCrypt Plain.
+        if (protocol == "vnc") return true;
         return username == other.username && (protocol == "ssh" ? sshAuth == other.sshAuth : domain == other.domain);
     }
     bool operator==(const SessionTarget& other) const {
         if (!sameAccount(other)) return false;
-        if (protocol == "vnc") return viewOnly == other.viewOnly;
+        if (protocol == "vnc") return viewOnly == other.viewOnly && smartSize == other.smartSize && username == other.username;
         return protocol == "ssh" ? sshKeyPath == other.sshKeyPath : options == other.options;
     }
     QString endpoint() const { return (host.contains(':') ? "[" + host + "]" : host) + ":" + QString::number(port); }

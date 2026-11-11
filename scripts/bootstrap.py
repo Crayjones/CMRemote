@@ -332,6 +332,137 @@ def install_libvterm(source, build, prefix, cmake, jobs, env, contract, cross=Fa
     validate_libvterm_sdk(prefix, build.parent, cmake, env, cross)
 
 
+LIBVNCCLIENT_FILES = ['include/rfb/' + name for name in ('rfbclient.h', 'rfbproto.h', 'rfbconfig.h', 'keysym.h', 'threading.h')]
+LIBVNCCLIENT_FILES += ['lib/libvncclient.a', 'share/licenses/libvncclient/COPYING',
+                       'lib/cmake/LibVNCClient/LibVNCClientConfig.cmake', 'lib/cmake/LibVNCClient/LibVNCClientConfigVersion.cmake']
+# (file, pinned upstream text, CMRemote replacement). ExtendedDesktopSize: TigerVNC and other servers may
+# number their only screen 0, which upstream discards, and SendExtDesktopSize sent an uninitialized screen
+# id/position/flags. A hidden cursor arrives as a 0x0 shape that upstream never reported. OpenSSL stays
+# the TLS backend, but VncAuth DES uses the bundled d3des: OpenSSL 3 keeps single DES in its legacy provider,
+# which a relocated package cannot be relied on to load.
+LIBVNCCLIENT_PATCHES = [
+    ('CMakeLists.txt',
+     'elseif(OPENSSL_FOUND)\n  message(STATUS "Building crypto with OpenSSL")\n',
+     'elseif(FALSE) # CMRemote: builtin SHA1/D3DES only\n  message(STATUS "Building crypto with OpenSSL")\n'),
+    ('src/libvncclient/rfbclient.c',
+     '          if (screen.id != 0 && screen.width && screen.height) {\n',
+     '          if (screen.width && screen.height) { /* CMRemote: screen id 0 is valid */\n'),
+    ('src/libvncclient/rfbclient.c',
+     '  rfbSetDesktopSizeMsg sdm;\n  rfbExtDesktopScreen screen;\n',
+     '  rfbSetDesktopSizeMsg sdm;\n  rfbExtDesktopScreen screen = client->screen; /* CMRemote: keep the server\'s screen id */\n'
+     '  screen.x = 0; screen.y = 0; screen.flags = 0; sdm.pad1 = 0; sdm.pad2 = 0;\n'),
+    # X509 hostname checks treated an IP literal as a DNS name, so a certificate's IP address entry never matched.
+    ('src/libvncclient/tls_openssl.c',
+     '    if(!X509_VERIFY_PARAM_set1_host(param, client->serverHost, strlen(client->serverHost)))\n',
+     '    if(!X509_VERIFY_PARAM_set1_ip_asc(param, client->serverHost) && /* CMRemote: IP literals */\n'
+     '       !X509_VERIFY_PARAM_set1_host(param, client->serverHost, strlen(client->serverHost)))\n'),
+    # The application reviews certificates OpenSSL cannot verify (system trust, imported
+    # authorities, pinned servers or a prompt) from OpenSSL's verify callback.
+    ('src/libvncclient/tls_openssl.c',
+     '    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, NULL);\n',
+     '    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, rfbClientTlsVerify); /* CMRemote */\n'),
+    ('src/libvncclient/tls_openssl.c',
+     'static SSL *\nopen_ssl_connection',
+     'int (*rfbClientTlsVerify)(int, X509_STORE_CTX *) = NULL; /* CMRemote */\n\nstatic SSL *\nopen_ssl_connection'),
+    ('include/rfb/rfbclient.h',
+     'extern rfbClientLogProc rfbClientLog,rfbClientErr;\n',
+     'extern rfbClientLogProc rfbClientLog,rfbClientErr;\n'
+     '/* CMRemote: OpenSSL verify callback for the X509 types; NULL keeps OpenSSL\'s own result.\n'
+     '   The SSL_CTX app data is the rfbClient. */\n'
+     'struct x509_store_ctx_st;\n'
+     'extern int (*rfbClientTlsVerify)(int preverify_ok, struct x509_store_ctx_st *ctx);\n'),
+    ('src/libvncclient/cursor.c',
+     '  if (width * height == 0)\n    return TRUE;\n',
+     '  if (width * height == 0) {\n    /* CMRemote: report the empty (hidden) cursor */\n'
+     '    if (client->GotCursorShape != NULL) client->GotCursorShape(client, 0, 0, 0, 0, bytesPerPixel);\n    return TRUE;\n  }\n'),
+]
+LIBVNCCLIENT_PATCH = hashlib.sha256(repr(LIBVNCCLIENT_PATCHES).encode()).hexdigest()
+
+
+def libvncclient_source(source, version):
+    return source / ('libvncserver-LibVNCServer-' + version)
+
+
+def patch_libvncclient(src):
+    for name, original, patched in LIBVNCCLIENT_PATCHES:
+        path = src / name
+        backup = path.with_name(path.name + '.orig')
+        if not backup.exists(): shutil.copy2(path, backup)
+    texts = {name: (src / name).with_name(Path(name).name + '.orig').read_text() for name, _, _ in LIBVNCCLIENT_PATCHES}
+    for name, original, patched in LIBVNCCLIENT_PATCHES:
+        if texts[name].count(original) != 1:
+            raise RuntimeError('LibVNCClient source differs from the pinned release: ' + name)
+        texts[name] = texts[name].replace(original, patched)
+    for name, text in texts.items(): (src / name).write_text(text)
+
+
+def libvncclient_options(prefix, host):
+    # Client library only: OpenSSL TLS/VeNCrypt and zlib encodings. Everything else stays off so
+    # no unpinned host library (GnuTLS, libjpeg, SASL, LZO, systemd, ...) is ever found.
+    off = ['WITH_GNUTLS', 'WITH_GCRYPT', 'WITH_JPEG', 'WITH_PNG', 'WITH_SDL', 'WITH_GTK', 'WITH_LIBSSHTUNNEL',
+           'WITH_SYSTEMD', 'WITH_FFMPEG', 'WITH_SASL', 'WITH_XCB', 'WITH_QT', 'WITH_LZO', 'WITH_WEBSOCKETS',
+           'WITH_TIGHTVNC_FILETRANSFER', 'WITH_EXAMPLES', 'WITH_TESTS', 'BUILD_SHARED_LIBS', 'LIBVNCSERVER_INSTALL']
+    options = ['-D' + option + '=OFF' for option in off]
+    # 0.9.15 declares cmake_minimum_required(3.4), which the pinned CMake 4 only accepts with a policy floor.
+    options += ['-DCMAKE_POLICY_VERSION_MINIMUM=3.5', '-DWITH_OPENSSL=ON', '-DWITH_ZLIB=ON', '-DWITH_THREADS=ON', '-DCMAKE_POSITION_INDEPENDENT_CODE=ON',
+                '-DOPENSSL_ROOT_DIR=' + str(prefix), '-DZLIB_ROOT=' + str(prefix)]
+    if host == 'macos': options += ['-DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew;/usr/local']
+    if host == 'windows': options += ['-DPREFER_WIN32THREADS=ON']
+    return options
+
+
+LIBVNCCLIENT_CONFIG = '''# Generated by scripts/bootstrap.py: static LibVNCClient @VERSION@ from the pinned SDK prefix.
+get_filename_component(_rm_vnc_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+include(CMakeFindDependencyMacro)
+find_dependency(OpenSSL 3.5.9 EXACT COMPONENTS SSL Crypto)
+find_dependency(Threads)
+# Link the SDK's static zlib so no zlib runtime is packaged.
+find_library(LIBVNCCLIENT_ZLIB NAMES libz.a libzs.a PATHS "${_rm_vnc_prefix}/lib" NO_DEFAULT_PATH REQUIRED)
+if(NOT TARGET LibVNCClient::vncclient)
+    add_library(LibVNCClient::vncclient STATIC IMPORTED)
+    set(_rm_vnc_links OpenSSL::SSL OpenSSL::Crypto "${LIBVNCCLIENT_ZLIB}" Threads::Threads)
+    if(WIN32)
+        list(APPEND _rm_vnc_links ws2_32)
+    endif()
+    set_target_properties(LibVNCClient::vncclient PROPERTIES
+        IMPORTED_LOCATION "${_rm_vnc_prefix}/lib/libvncclient.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_rm_vnc_prefix}/include"
+        INTERFACE_LINK_LIBRARIES "${_rm_vnc_links}")
+endif()
+'''
+LIBVNCCLIENT_VERSION_CONFIG = '''set(PACKAGE_VERSION "@VERSION@")
+set(PACKAGE_VERSION_COMPATIBLE FALSE)
+if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+    set(PACKAGE_VERSION_EXACT TRUE)
+endif()
+'''
+
+
+def install_libvncclient(source, build, prefix, cmake, jobs, env, contract, configure):
+    """configure: generator/toolchain/build-type options; contract['options'] adds the feature set."""
+    if dependency_current(prefix, 'libvncclient', contract, LIBVNCCLIENT_FILES): return
+    patch_libvncclient(source)
+    shutil.rmtree(build, ignore_errors=True)
+    run(cmake, '-S', source, '-B', build, *configure, *contract['options'], env=env)
+    run(cmake, '--build', build, '--parallel', str(jobs), '--target', 'vncclient', env=env)
+    config = build / 'include/rfb/rfbconfig.h'
+    defined = {line.split()[1] for line in config.read_text().splitlines() if line.startswith('#define ') and len(line.split()) > 2}
+    if not {'LIBVNCSERVER_HAVE_LIBSSL', 'LIBVNCSERVER_HAVE_LIBZ'} <= defined or defined & {'LIBVNCSERVER_HAVE_GNUTLS', 'LIBVNCSERVER_HAVE_SASL'}:
+        raise RuntimeError('LibVNCClient was configured without OpenSSL/zlib or with an unpinned TLS/SASL library')
+    headers = prefix / 'include/rfb'; headers.mkdir(parents=True, exist_ok=True)
+    for name in ('rfbclient.h', 'rfbproto.h', 'keysym.h', 'threading.h'):
+        shutil.copy2(source / 'include/rfb' / name, headers / name)
+    shutil.copy2(config, headers / 'rfbconfig.h')
+    shutil.copy2(build / 'libvncclient.a', prefix / 'lib/libvncclient.a')
+    notice = prefix / 'share/licenses/libvncclient'; notice.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source / 'COPYING', notice / 'COPYING')
+    package = prefix / 'lib/cmake/LibVNCClient'; package.mkdir(parents=True, exist_ok=True)
+    (package / 'LibVNCClientConfig.cmake').write_text(LIBVNCCLIENT_CONFIG.replace('@VERSION@', contract['version']))
+    (package / 'LibVNCClientConfigVersion.cmake').write_text(LIBVNCCLIENT_VERSION_CONFIG.replace('@VERSION@', contract['version']))
+    record_dependency(prefix, 'libvncclient', contract, LIBVNCCLIENT_FILES)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--platform', choices=['macos', 'linux'], required=True)
@@ -393,11 +524,17 @@ def main():
         flags = '-arch ' + machine
         env.update(CMAKE_OSX_ARCHITECTURES=machine, CFLAGS=flags, CXXFLAGS=flags, LDFLAGS=flags)
         run(dev / 'cargo/bin/rustup', 'target', 'add', machine + '-apple-darwin', env=env)
-    for key in ('openssl', 'zlib', 'openh264', 'freerdp', 'libvterm'):
+    for key in ('openssl', 'zlib', 'openh264', 'freerdp', 'libvterm', 'libvncclient'):
         version = lock['versions'][key]
-        src = source / (key + '-' + version)
+        src = libvncclient_source(source, version) if key == 'libvncclient' else source / (key + '-' + version)
         if not src.exists():
             unpack(artifact(key), source)
+        if key == 'libvncclient':
+            contract = {'version': version, 'source': a[key]['sha256'], 'arch': arch, 'patch': LIBVNCCLIENT_PATCH,
+                        'options': libvncclient_options(prefix, args.platform)}
+            install_libvncclient(src, builds / key, prefix, cmake, args.jobs, env, contract,
+                                 ['-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_PREFIX_PATH=' + str(prefix)])
+            continue
         if key == 'libvterm':
             contract = {'version': version, 'source': a[key]['sha256'], 'arch': arch,
                         'adapter': hashlib.sha256((ROOT / 'cmake/libvterm/CMakeLists.txt').read_bytes()).hexdigest()}

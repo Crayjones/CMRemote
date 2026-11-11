@@ -1,12 +1,12 @@
 #include "VncAuthentication.h"
+#include <algorithm>
 #include <stdexcept>
 
-rust::Box<rm::vnc::Authentication> vncPasswordAuthentication(Secret password) {
-    bool valid = password.size() >= 1 && password.size() <= 8;
-    for (size_t i = 0; i < password.size(); ++i) valid = valid && password.data()[i] >= 0x20 && password.data()[i] <= 0x7e;
-    if (!valid) throw std::invalid_argument("VNC password must contain 1–8 printable ASCII characters.");
-    rust::Vec<uint8_t> bytes; bytes.reserve(password.size());
-    for (size_t i = 0; i < password.size(); ++i) bytes.push_back(password.data()[i]);
-    password.clear(); return rm::vnc::password_auth(std::move(bytes));
+VncAuthentication vncPasswordAuthentication(Secret password) {
+    // LibVNCClient passes passwords as C strings; VncAuth itself uses only the first 8 bytes.
+    const bool valid = password.size() >= 1 && password.size() <= VncAuthentication::MaxPassword &&
+        std::none_of(password.data(), password.data() + password.size(), [](unsigned char byte) { return byte == 0; });
+    if (!valid) { password.clear(); throw std::invalid_argument("VNC passwords must be 1–4096 bytes without NUL characters."); }
+    VncAuthentication result; result.password.emplace(std::move(password)); return result;
 }
-rust::Box<rm::vnc::Authentication> vncPromptAuthentication() { return rm::vnc::prompt_auth(); }
+VncAuthentication vncPromptAuthentication() { return {}; }

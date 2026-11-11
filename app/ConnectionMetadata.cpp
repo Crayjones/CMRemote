@@ -114,7 +114,10 @@ std::optional<ConnectionBindings> ConnectionMetadata::decodeBindings(const Secre
     if (reader.left != 0 || stopped(canceled)) return std::nullopt; return result;
 }
 bool ConnectionMetadata::matches(const ConnectionBindings& bindings, const QString& fileId, const QString& consumer, const QString& owner,
-                                  const QByteArray& encryptedPassword, const SessionTarget& committedTarget) {
+                                  const QByteArray& encryptedPassword, const SessionTarget& connectionTarget) {
+    // A VNC password is bound to host and port; the connection's username (VeNCrypt Plain) is not part of it.
+    auto committedTarget = connectionTarget;
+    if (committedTarget.protocol == "vnc") { committedTarget.username.clear(); committedTarget.domain.clear(); }
     const auto file = uuid(fileId), boundFile = uuid(bindings.fileId), user = uuid(consumer), source = uuid(owner);
     if (!validVersion(bindings.version) || bindings.version < minimumVersion(committedTarget.protocol) ||
         !file || !boundFile || *file != *boundFile || !user || !source || !target(committedTarget) || encryptedPassword.isEmpty() ||

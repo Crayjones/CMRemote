@@ -44,6 +44,9 @@ named_enum!(GatewayUsage, "Invalid gateway usage", Never, { Never => "never", Al
 named_enum!(GatewayCredentials, "Invalid gateway credentials", Same, { Same => "same", Separate => "separate" });
 // Remote audio; mRemoteNG RDPSounds (BringToThisComputer/LeaveAtRemoteComputer/DoNotPlay).
 named_enum!(Sound, "Invalid sound redirection", Local, { Local => "local", Remote => "remote", None => "none" });
+// VNC desktop sizing; mRemoteNG VNCSmartSizeMode (SmartSAspect/SmartSNo). Aspect fills the
+// panel (server resize, otherwise aspect-fit scaling); Off keeps the server's size at 1:1.
+named_enum!(VncSmartSize, "Invalid VNC SmartSize mode", Aspect, { Aspect => "aspect", Off => "off" });
 pub const MAX_IDLE_MINUTES: u16 = 240;
 
 // RDP desktop size. Fit, SmartSize and Fullscreen are mRemoteNG 1.78's RDPResolutions;
@@ -147,6 +150,8 @@ pub struct Overrides {
     pub ssh_key_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smart_size: Option<VncSmartSize>,
 }
 // Derived by the XML worker, not editable profile settings. Codes carry no
 // source attribute values, plugin data or ciphertext into the Rust projection.
@@ -212,13 +217,11 @@ pub fn validate_account(username: &str, domain: &str) -> Result<(), String> {
 }
 
 fn validate_profile_account(protocol: Protocol, username: &str, domain: &str) -> Result<(), String> {
-    // VNC has no account fields: imported RDP/SSH account attributes are passive.
-    if protocol == Protocol::Vnc {
-        if domain.len() > 4096 || domain.contains('\0') { return Err("Invalid passive domain".into()); }
-        return Ok(());
+    // SSH and VNC (VeNCrypt Plain) send the username literally; Domain is passive for both.
+    if protocol != Protocol::Ssh && protocol != Protocol::Vnc { return validate_account(username, domain); }
+    if username.len() > 4096 || username.chars().any(char::is_control) {
+        return Err(if protocol == Protocol::Vnc { "Invalid VNC username" } else { "Invalid SSH username" }.into());
     }
-    if protocol != Protocol::Ssh { return validate_account(username, domain); }
-    if username.len() > 4096 || username.chars().any(char::is_control) { return Err("Invalid SSH username".into()); }
     if domain.len() > 4096 || domain.contains('\0') { return Err("Invalid passive domain".into()); }
     Ok(())
 }
@@ -326,6 +329,7 @@ pub struct Effective {
     pub ssh_auth: SshAuth,
     pub ssh_key_path: String,
     pub view_only: bool,
+    pub smart_size: VncSmartSize,
     pub sources: HashMap<String, String>,
     pub unsupported: Vec<NativeUnsupported>,
 }
@@ -405,10 +409,10 @@ impl Document {
             apply!(cache_bitmaps); apply!(wallpaper); apply!(themes); apply!(font_smoothing);
             apply!(security_protocol); apply!(server_auth); apply!(use_credssp); apply!(idle_minutes); apply!(load_balance_info);
             apply!(gateway_usage); apply!(gateway_host); apply!(gateway_port); apply!(gateway_username); apply!(gateway_domain); apply!(gateway_credentials); apply!(sound); apply!(clipboard);
-            apply!(ssh_auth); apply!(ssh_key_path); apply!(view_only);
+            apply!(ssh_auth); apply!(ssh_key_path); apply!(view_only); apply!(smart_size);
         }
         let protocol = overrides.protocol.unwrap_or(Protocol::Rdp);
-        for field in ["protocol", "host", "port", "username", "description", "icon", "domain", "console_session", "resolution", "automatic_resize", "color_depth", "cache_bitmaps", "wallpaper", "themes", "font_smoothing", "security_protocol", "server_auth", "use_credssp", "idle_minutes", "load_balance_info", "gateway_usage", "gateway_host", "gateway_port", "gateway_username", "gateway_domain", "gateway_credentials", "sound", "clipboard", "ssh_auth", "ssh_key_path", "view_only"] {
+        for field in ["protocol", "host", "port", "username", "description", "icon", "domain", "console_session", "resolution", "automatic_resize", "color_depth", "cache_bitmaps", "wallpaper", "themes", "font_smoothing", "security_protocol", "server_auth", "use_credssp", "idle_minutes", "load_balance_info", "gateway_usage", "gateway_host", "gateway_port", "gateway_username", "gateway_domain", "gateway_credentials", "sound", "clipboard", "ssh_auth", "ssh_key_path", "view_only", "smart_size"] {
             sources.entry(field.into()).or_insert("default".into());
         }
         Ok(Effective {
@@ -423,7 +427,8 @@ impl Document {
             gateway_host: overrides.gateway_host.unwrap_or_default(), gateway_port: overrides.gateway_port.unwrap_or(443),
             gateway_username: overrides.gateway_username.unwrap_or_default(), gateway_domain: overrides.gateway_domain.unwrap_or_default(),
             gateway_credentials: overrides.gateway_credentials.unwrap_or_default(), sound: overrides.sound.unwrap_or_default(), clipboard: overrides.clipboard.unwrap_or(clipboard_default),
-            ssh_auth: overrides.ssh_auth.unwrap_or_default(), ssh_key_path: overrides.ssh_key_path.unwrap_or_default(), view_only: overrides.view_only.unwrap_or(false), sources, unsupported,
+            ssh_auth: overrides.ssh_auth.unwrap_or_default(), ssh_key_path: overrides.ssh_key_path.unwrap_or_default(), view_only: overrides.view_only.unwrap_or(false),
+            smart_size: overrides.smart_size.unwrap_or_default(), sources, unsupported,
         })
     }
 

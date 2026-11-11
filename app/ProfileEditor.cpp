@@ -32,12 +32,12 @@ const std::vector<Field> fields = {
     {"icon", "Icon", "Display", "choice", "The icon is saved by name. Unavailable imported icons are preserved and shown with a default icon.", true},
     {"parent", "Parent", "Display", "choice", "Choose the folder this connection inherits its settings from.", false},
     {"host", "Hostname/IP", "Connection", "text", "Remote hostname or IP address. An empty local value is an explicit override.", true},
-    {"username", "Username", "Connection", "text", "SSH sends this username literally; Domain is inactive. For RDP with a separate Domain, use an unqualified username. A qualified RDP username or UPN requires an empty Domain.", true, "rdp,ssh"},
+    {"username", "Username", "Connection", "text", "SSH sends this username literally; Domain is inactive. VNC sends it for the VeNCrypt Plain security types (Plain, TLSPlain, X509Plain) and ignores it otherwise. For RDP with a separate Domain, use an unqualified username. A qualified RDP username or UPN requires an empty Domain.", true, "rdp,ssh,vnc"},
     {"password", "Password", "Connection", "password", "Saved password. Type a new one to replace it; saved passwords are never shown.", true},
     {"domain", "Domain", "Connection", "text", "RDP account domain, at most 256 UTF-8 bytes. Empty preserves qualified usernames or UPNs. Preserved but inactive for SSH and VNC; never joined to the SSH username.", true, "rdp"},
     {"ssh_auth", "SSH authentication", "Connection", "choice", "Choose whether to sign in with a password or a private key.", true, "ssh"},
     {"ssh_key_path", "SSH key file", "Connection", "text", "Enter the path to your private key file.", true, "ssh"},
-    {"protocol", "Protocol", "Protocol", "choice", "RDP connects through embedded FreeRDP; SSH uses an embedded terminal. VNC uses an embedded desktop with negotiated ZRLE/Tight/TRLE/CopyRect/Raw and aspect-fit scaling; the server controls its resolution. Classic VNC traffic is unencrypted; outside your local network use a VPN or SSH tunnel (a public address is flagged in Notifications). VNC uses the saved Password when the server requires one, asks otherwise, and connects without a password when the server allows it. TLS/vendor authentication, proxies, clipboard and advanced commands are unsupported.", true},
+    {"protocol", "Protocol", "Protocol", "choice", "RDP connects through embedded FreeRDP; SSH uses an embedded terminal. VNC uses an embedded LibVNCClient desktop that fills the panel when the server can resize. VNC security follows the server: VeNCrypt X509 types are encrypted and verify the server certificate like a website (system-trusted certificate authorities, ones imported under Settings → Remote Desktop, or a certificate you chose to always trust); the anonymous TLS types are encrypted but unverified; None, VncAuth and VeNCrypt Plain are unencrypted, so use a VPN or SSH tunnel outside your local network (a public address is flagged in Notifications). VNC uses the saved Password when the server asks for one, and the Username for the VeNCrypt Plain types; anything missing is asked for. Proxies, chat and file transfer are unsupported.", true},
     {"port", "Port", "Protocol", "port", "TCP port, 1–65535. Inherits the parent override or protocol default.", true},
     {"console_session", "Use console session", "Protocol", "bool", "Request the server's console/admin session. The server may ignore this preference.", true, "rdp"},
     {"security_protocol", "Security Protocol", "Protocol", "choice", "Choose the RDP security negotiation; Automatic lets the server choose and NLA requires Use CredSSP.", true, "rdp"},
@@ -46,7 +46,7 @@ const std::vector<Field> fields = {
     {"idle_minutes", "Minutes to Idle", "Protocol", "minutes", "Minutes without input before disconnecting, 0–240; 0 disables.", true, "rdp"},
     {"load_balance_info", "Load Balance Info", "Protocol", "text", "Routing token for RD Connection Broker or load balancers, sent verbatim.", true, "rdp"},
     {"sound", "Sounds", "Redirect", "choice", "Choose where remote audio plays.", true, "rdp"},
-    {"clipboard", "Clipboard", "Redirect", "bool", "Copy and paste text between this computer and the remote computer. Files and images are not shared.", true, "rdp"},
+    {"clipboard", "Clipboard", "Redirect", "bool", "Copy and paste text between this computer and the remote computer. Files and images are not shared. VNC shares Latin-1 text only.", true, "rdp,vnc"},
     {"gateway_usage", "Use RDP Gateway", "Gateway", "choice", "Choose when to use a Remote Desktop Gateway.", true, "rdp"},
     {"gateway_host", "Gateway Hostname", "Gateway", "text", "Remote Desktop Gateway host name or IP address.", true, "rdp"},
     {"gateway_port", "Gateway Port", "Gateway", "port", "Remote Desktop Gateway HTTPS port, 1–65535 (default 443).", true, "rdp"},
@@ -60,7 +60,7 @@ const std::vector<Field> fields = {
     {"wallpaper", "Display wallpaper", "Appearance", "bool", "Allow remote wallpaper. The server may ignore this preference.", true, "rdp"},
     {"themes", "Display themes", "Appearance", "bool", "Allow remote themes. The server may ignore this preference.", true, "rdp"},
     {"font_smoothing", "Font smoothing", "Appearance", "bool", "Request font smoothing. The server may ignore this preference.", true, "rdp"},
-    {"smart_size", "SmartSize Mode", "Appearance", "", "VNC scales the remote desktop to fit the panel while keeping its aspect ratio. The server controls the desktop resolution. Other SmartSize modes are not supported.", false, "vnc"},
+    {"smart_size", "SmartSize Mode", "Appearance", "choice", "On (the default) fills the panel: the server desktop is resized to the panel, like RDP automatic resize; servers that cannot resize, and view-only sessions, are scaled to fit with their aspect ratio. Off keeps the server's own resolution and shows it at actual size, scaled down only when it is larger than the panel. The tab menu's SmartSize toggles it for one session.", true, "vnc"},
     {"view_only", "View Only", "Appearance", "bool", "VNC only. Yes suppresses all remote keyboard and pointer input; No permits input. Inheritance follows the parent view-only setting. The default is No.", true, "vnc"}
 };
 QVariant choice(const QString& text, const QVariant& value) { return QVariantMap{{"text", text}, {"value", value}}; }
@@ -334,7 +334,6 @@ void ProfileEditor::render() {
             else if (passwordState_.present) value = QString(8, QChar(0x2022));
             else value = QString();
         }
-        else if (key == "smart_size") value = "Aspect";
         else if (!field.inherited) value = draft_.value(key).toString();
         else value = (local && !defaults_ ? overrides.value(key) : effective_.value(key)).toVariant();
         if (!inheritance_) {
@@ -349,6 +348,7 @@ void ProfileEditor::render() {
             if (key == "color_depth") options = {choice("16-bit", 16), choice("24-bit", 24), choice("32-bit", 32)};
             if (key == "security_protocol") options = {choice("Automatic", "auto"), choice("NLA / CredSSP", "nla"), choice("Extended NLA", "ext"), choice("TLS", "tls"), choice("Legacy RDP Security", "rdp")};
             if (key == "server_auth") options = {choice("Always connect, even if authentication fails", "always"), choice("Don't connect if authentication fails", "required"), choice("Accept unverified certificates for this session", "warn")};
+            if (key == "smart_size") options = {choice("On (fill the panel)", "aspect"), choice("Off (actual size)", "off")};
             if (key == "sound") options = {choice("Bring to this computer", "local"), choice("Leave at remote computer", "remote"), choice("Do not play", "none")};
             if (key == "gateway_usage") options = {choice("Never", "never"), choice("Always", "always"), choice("Detect", "detect")};
             if (key == "gateway_credentials") options = {choice("Use the same username and password", "same"), choice("Use a different username and password", "separate")};

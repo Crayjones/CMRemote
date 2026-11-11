@@ -86,7 +86,7 @@ void submitPassword(VncCredentialsDialog* dialog, const QString& password) {
     dialog->findChild<QLineEdit*>("passwordEdit")->setText(password);
     dialog->findChild<QDialogButtonBox*>("buttonBox")->button(QDialogButtonBox::Ok)->click();
 }
-// DES response for password "password" to challenge 0..15 (same vector as core/tests/vnc_transport.rs).
+// DES response for password "password" to challenge 0..15 (standard VncAuth test vector).
 const QByteArray PasswordResponse = QByteArray::fromHex("b866924125c8eebb9debc1db61c538e2");
 // Minimal owned RFB 3.8 server on loopback: offers VncAuth or None, then a
 // 64×48 ServerInit, and never sends framebuffer updates.
@@ -127,10 +127,11 @@ private:
     }
     QTcpServer server_; QPointer<QTcpSocket> socket_; QByteArray buffer_; int stage_ = 0; const bool password_;
 };
-bool savedPasswordFixture(const QString& path, quint16 port, const QByteArray& password) {
+bool savedPasswordFixture(const QString& path, quint16 port, const QByteArray& password, const QString& username = {}) {
     auto xml = ConnectionXml::create(); Secret master(QByteArray("mR3m"));
     SessionTarget target; target.protocol = "vnc"; target.host = "127.0.0.1"; target.port = port;
-    const QJsonObject profile{{"id", profileId}, {"name", "Owned VNC"}, {"kind", "connection"}, {"parent", QJsonValue()}, {"overrides", target.overrides()}};
+    auto overrides = target.overrides(); overrides["username"] = username;
+    const QJsonObject profile{{"id", profileId}, {"name", "Owned VNC"}, {"kind", "connection"}, {"parent", QJsonValue()}, {"overrides", overrides}};
     const auto projection = QJsonDocument(QJsonObject{{"schema_version", 2}, {"profiles", QJsonArray{profile}}}).toJson(QJsonDocument::Compact);
     if (!xml || !xml->unlock(master) || !xml->patch(master, projection) || !xml->setPassword(master, profileId, Secret(password))) return false;
     if (!xml->authorizePasswords(master, profileId, {{profileId, target}})) return false;
@@ -161,16 +162,21 @@ private slots:
                 QString("[localhost]:5900"), QString("vnc://localhost"), QString("user@localhost"), QString("bad host"), QString("localhost\n")})
             QVERIFY2(!parseVncTarget(input), qPrintable(input));
     }
-    void vncTargetEqualityIgnoresAccountsAndRdpOptionsButNotViewOnly() {
+    void vncTargetEqualityIgnoresDomainAndRdpOptionsButNotUsernameOrViewOnly() {
         auto first = *parseVncTarget("localhost:5900"); auto second = first;
-        second.username = "TEAM\\inactive"; second.domain = "inactive domain"; second.options.resolution = "1920x1080";
+        second.domain = "inactive domain"; second.options.resolution = "1920x1080";
         second.options.consoleSession = true; second.sshAuth = "private_key"; second.sshKeyPath = "/inactive/key";
         QVERIFY(first.sameAccount(second)); QVERIFY(first == second);
+        // VeNCrypt Plain sends the username, so it is part of the target; a saved password
+        // stays bound to host and port only.
+        second.username = "TEAM\\operator"; QVERIFY(first.sameAccount(second)); QVERIFY(!(first == second));
         auto normalized = normalizeVncTarget(second); QVERIFY(normalized);
-        QVERIFY(normalized->username.isEmpty()); QVERIFY(normalized->domain.isEmpty()); QVERIFY(*normalized == first);
+        QCOMPARE(normalized->username, QString("TEAM\\operator")); QVERIFY(normalized->domain.isEmpty()); QVERIFY(*normalized == second);
+        auto control = second; control.username = "bad\aname"; QVERIFY(!normalizeVncTarget(control));
         const auto overrides = second.overrides(); QCOMPARE(overrides.value("protocol").toString(), QString("vnc"));
-        QVERIFY(overrides.contains("view_only"));
-        for (const auto* field : {"username", "domain", "resolution", "console_session", "ssh_auth", "ssh_key_path"}) QVERIFY(!overrides.contains(field));
+        QVERIFY(overrides.contains("view_only")); QCOMPARE(overrides.value("username").toString(), QString("TEAM\\operator"));
+        for (const auto* field : {"domain", "resolution", "console_session", "ssh_auth", "ssh_key_path"}) QVERIFY(!overrides.contains(field));
+        second.username.clear();
         second.viewOnly = true; QVERIFY(first.sameAccount(second)); QVERIFY(!(first == second));
         second = first; second.port = 5901; QVERIFY(!(first == second));
         second = first; second.protocol = "ssh"; QVERIFY(!(first == second));
@@ -183,12 +189,12 @@ private slots:
         const auto before = qstr(core->stored_document());
         const auto saved = core->open_session(profileId.toStdString(), true); QCOMPARE(core->session_count(), size_t(1));
         QCOMPARE(qstr(saved.protocol), QString("vnc")); QCOMPARE(saved.port, quint16(5900)); QVERIFY(saved.graphical); QVERIFY(saved.view_only);
-        QVERIFY(saved.username.empty()); QVERIFY(saved.domain.empty()); QVERIFY(!saved.keyboard); QVERIFY(!saved.mouse); QVERIFY(!saved.clipboard); QVERIFY(!saved.resize);
+        QCOMPARE(qstr(saved.username), QString("TEAM\\inactive")); QVERIFY(saved.domain.empty()); QVERIFY(!saved.keyboard); QVERIFY(!saved.mouse); QVERIFY(!saved.clipboard); QVERIFY(!saved.resize);
         QVERIFY_THROWS_EXCEPTION(std::exception, core->mock_input(saved.id, "must not send view-only input"));
         const rm::VncTarget target{"::1", 5901, false};
         const auto temporary = core->open_temporary_vnc_session(target, true); QCOMPARE(core->session_count(), size_t(2));
         QCOMPARE(qstr(temporary.host), QString("::1")); QCOMPARE(temporary.port, quint16(5901)); QVERIFY(temporary.graphical);
-        QVERIFY(!temporary.view_only); QVERIFY(temporary.keyboard); QVERIFY(temporary.mouse); QVERIFY(!temporary.clipboard); QVERIFY(!temporary.resize);
+        QVERIFY(!temporary.view_only); QVERIFY(temporary.keyboard); QVERIFY(temporary.mouse); QVERIFY(!temporary.clipboard); QVERIFY(temporary.resize);
         QCOMPARE(qstr(core->stored_document()), before);
         core->close_session(saved.id); core->close_session(temporary.id); QCOMPARE(core->session_count(), size_t(0));
         QCOMPARE(qstr(core->stored_document()), before);
@@ -250,6 +256,37 @@ private slots:
         QVERIFY(!pane->target().viewOnly); window.reconnectCurrent(); pane = window.findChild<SessionPane*>(); QVERIFY(pane->target().viewOnly);
         QCOMPARE(nodeAttribute(contents(path), "InheritVNCViewOnly"), QByteArray("true"));
     }
+    // SmartSize is On (SmartSAspect) by default; SmartSNo turns it off, round-trips, and the
+    // tab menu toggles it for one session.
+    void nativeSmartSizeRoundTripsAndTheTabToggleFollowsIt() {
+        QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid());
+        const auto path = directory.filePath("connections.xml");
+        QVERIFY(writeFixture(path, nativeXml(nativeNode(closedLoopbackPort(), "VNCSmartSizeMode=\"SmartSNo\""))));
+        MainWindow window(path, true); window.show(); const auto document = window.connectionFiles().first();
+        QTRY_VERIFY(window.selectConnectionProfile({document, profileId}));
+        QVERIFY(!gridRow(window, "smart_size")->isHidden()); QCOMPARE(gridValue(window, "smart_size").toString(), QString("off"));
+        window.connectSelected(); QTRY_COMPARE(window.sessionCount(), size_t(1));
+        auto* pane = window.findChild<SessionPane*>(); QVERIFY(pane); QVERIFY(!pane->vncSmartSize());
+        auto* view = pane->findChild<VncDesktopView*>(); QVERIFY(view); QVERIFY(view->actualSize());
+        QSignalSpy toggled(pane, &SessionPane::vncSmartSizeChanged);
+        pane->setVncSmartSize(true); QVERIFY(pane->vncSmartSize()); QVERIFY(!view->actualSize()); QCOMPARE(toggled.size(), 1);
+        window.closeTab(0);
+        setGridChoice(window, "smart_size", "aspect"); QVERIFY(waitGridSaved(window));
+        QCOMPARE(nodeAttribute(contents(path), "VNCSmartSizeMode"), QByteArray("SmartSAspect"));
+        setGridChoice(window, "smart_size", "off"); QVERIFY(waitGridSaved(window));
+        QCOMPARE(nodeAttribute(contents(path), "VNCSmartSizeMode"), QByteArray("SmartSNo"));
+    }
+    void smartSizeIsOnByDefault() {
+        QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid());
+        const auto path = directory.filePath("connections.xml"); QVERIFY(writeFixture(path, nativeXml(nativeNode(closedLoopbackPort()))));
+        MainWindow window(path, true); window.show();
+        QTRY_VERIFY(window.selectConnectionProfile({window.connectionFiles().first(), profileId}));
+        QCOMPARE(gridValue(window, "smart_size").toString(), QString("aspect"));
+        window.connectSelected(); QTRY_COMPARE(window.sessionCount(), size_t(1));
+        auto* pane = window.findChild<SessionPane*>(); QVERIFY(pane->vncSmartSize()); QVERIFY(!pane->findChild<VncDesktopView*>()->actualSize());
+        QVERIFY(parseVncTarget("localhost:5900")->smartSize);
+        window.closeTab(0);
+    }
     void nativeIncompatibleSettingsPreventPromptsAndRegistration_data() {
         QTest::addColumn<QByteArray>("attributes"); QTest::addColumn<QString>("reason");
         QTest::newRow("mslogon") << QByteArray("VNCAuthMode=\"AuthMSLogon\"") << QString("authentication");
@@ -257,6 +294,7 @@ private slots:
         QTest::newRow("compression") << QByteArray("VNCCompression=\"CompLevel1\"") << QString("preferences");
         QTest::newRow("encoding") << QByteArray("VNCEncoding=\"EncRRE\"") << QString("preferences");
         QTest::newRow("colors") << QByteArray("VNCColors=\"Col8Bit\"") << QString("preferences");
+        QTest::newRow("smart-size-free") << QByteArray("VNCSmartSizeMode=\"SmartSFree\"") << QString("preferences");
         QTest::newRow("malformed-view-only") << QByteArray("VNCViewOnly=\"yes\"") << QString("preferences");
         QTest::newRow("external-provider") << QByteArray("ExternalCredentialProvider=\"Vault\"") << QString("provider");
         QTest::newRow("command") << QByteArray("PreExtApp=\"never execute this\"") << QString("command");
@@ -285,7 +323,7 @@ private slots:
         QCOMPARE(dialog->parentWidget(), pane); QCOMPARE(dialog->windowTitle(), QString("Password"));
         QCOMPARE(dialog->windowModality(), Qt::ApplicationModal); QVERIFY(dialog->isVisible()); QCOMPARE(server.selected, 2);
         QVERIFY(paneStatus(pane).contains("password required"));
-        submitPassword(dialog, "123456789"); QVERIFY(dialog->isVisible()); QVERIFY(!dialog->findChild<QLabel*>("errorLabel")->isHidden());
+        submitPassword(dialog, "tab\there"); QVERIFY(dialog->isVisible()); QVERIFY(!dialog->findChild<QLabel*>("errorLabel")->isHidden());
         QVERIFY(server.response.isEmpty());
         dialog->reject(); QTRY_VERIFY(!window.findChild<VncCredentialsDialog*>()); QTRY_COMPARE_WITH_TIMEOUT(VncWorker::activeWorkers(), 0, 3000);
         QCOMPARE(window.sessionCount(), size_t(1)); QVERIFY(paneStatus(pane).contains("Disconnected")); QVERIFY(server.response.isEmpty());
@@ -316,7 +354,7 @@ private slots:
         QVERIFY(account->username.isEmpty()); QCOMPARE(account->port, secured.port());
         MainWindow window(path, true); window.show(); const auto document = window.connectionFiles().first();
         QTRY_VERIFY(window.selectConnectionProfile({document, profileId})); QCOMPARE(gridValue(window, "password").toString(), QString(8, QChar(0x2022)));
-        QVERIFY(gridRow(window, "username")->isHidden()); QVERIFY(!gridRow(window, "smart_size")->isHidden()); QVERIFY(!gridRow(window, "view_only")->isHidden());
+        QVERIFY(!gridRow(window, "username")->isHidden()); QVERIFY(gridRow(window, "domain")->isHidden()); QVERIFY(!gridRow(window, "smart_size")->isHidden()); QVERIFY(!gridRow(window, "view_only")->isHidden());
         window.connectSelected(); QTRY_COMPARE(secured.response, PasswordResponse); QTRY_VERIFY(secured.initialized);
         auto* pane = window.findChild<SessionPane*>(); QTRY_VERIFY(paneStatus(pane).contains("VNC — connected"));
         QVERIFY(!window.findChild<VncCredentialsDialog*>()); window.closeTab(0);
@@ -326,6 +364,17 @@ private slots:
         const auto openDocument = window.openConnectionFile(openPath); QTRY_VERIFY(window.selectConnectionProfile({openDocument, profileId}));
         window.connectSelected(); QTRY_VERIFY(open.initialized); QCOMPARE(open.selected, 1); QVERIFY(open.response.isEmpty());
         QVERIFY(!window.findChild<VncCredentialsDialog*>()); window.closeTab(0); QCOMPARE(window.sessionCount(), size_t(0));
+    }
+    // A Username (VeNCrypt Plain) on the connection never stops the saved password from being used.
+    void savedPasswordIsSentWhenTheConnectionHasAUsername() {
+        QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid()); FakeRfb secured(true);
+        const auto path = directory.filePath("connections.xml"); QVERIFY(savedPasswordFixture(path, secured.port(), "password", "operator"));
+        MainWindow window(path, true); window.show(); const auto document = window.connectionFiles().first();
+        QTRY_VERIFY(window.selectConnectionProfile({document, profileId})); QCOMPARE(gridValue(window, "username").toString(), QString("operator"));
+        window.connectSelected(); QTRY_COMPARE(secured.response, PasswordResponse); QTRY_VERIFY(secured.initialized);
+        QVERIFY(!window.findChild<VncCredentialsDialog*>());
+        auto* pane = window.findChild<SessionPane*>(); QCOMPARE(pane->target().username, QString("operator"));
+        window.closeTab(0); QCOMPARE(window.sessionCount(), size_t(0));
     }
     void temporaryConnectsWithoutPromptWhenServerOffersNone() {
         QTemporaryDir directory(fixtureDirectory()); QVERIFY(directory.isValid()); FakeRfb server(false);
@@ -345,7 +394,7 @@ private slots:
         QTRY_VERIFY(window.selectConnectionProfile({idA, profileId})); window.connectSelected(); QTRY_COMPARE(window.sessionCount(), size_t(1));
         QTRY_VERIFY(window.selectConnectionProfile({idB, profileId})); setGridText(window, "name", "Different document revision"); QVERIFY(waitGridSaved(window));
         auto* pane = window.findChild<SessionPane*>(); QVERIFY(pane && !pane->mock()); QCOMPARE(pane->document(), idA);
-        QCOMPARE(pane->profile(), profileId); QCOMPARE(pane->target().port, port); QVERIFY(pane->target().username.isEmpty()); QVERIFY(pane->target().domain.isEmpty());
+        QCOMPARE(pane->profile(), profileId); QCOMPARE(pane->target().port, port); QCOMPARE(pane->target().username, QString("TEAM\\inactive")); QVERIFY(pane->target().domain.isEmpty());
         window.connectSelected(true); QCOMPARE(window.sessionCount(), size_t(2));
         const auto panes = window.findChildren<SessionPane*>(); QCOMPARE(panes[1]->document(), idB); QCOMPARE(panes[1]->target().port, quint16(5902));
     }

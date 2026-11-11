@@ -11,7 +11,7 @@ CMRemote is licensed **GPL-2.0-or-later**; see [`LICENSE`](../LICENSE). Packages
 | OpenSSL | 3.5.9 | FreeRDP TLS + connection XML PBKDF2/AES-256-GCM; Apache-2.0 |
 | zlib | 1.3.2 | Compression; zlib license |
 | cxx / cxx-build | 1.0.202 | FFI bridge; MIT OR Apache-2.0 |
-| vnc-rs | 0.6.0, vendored and locally patched | Embedded classic VNC/RFB; MIT OR Apache-2.0 |
+| LibVNCClient (LibVNCServer) | 0.9.15, built from source with small patches | Embedded VNC/RFB with VeNCrypt TLS; GPL-2.0-or-later |
 | Qt Advanced Docking System | 5.1.1, vendored with local patches | Dockable, tabbed and pinnable Connections/Config/Notifications panes; LGPL-2.1-or-later |
 | Qt Property Browser (qttools `src/shared/qtpropertybrowser`) | Qt 6.12.0, vendored unchanged | The Config pane's QtTreePropertyBrowser; LGPL-3.0-only / GPL-2.0-only / GPL-3.0-only / commercial, as Qt |
 | Rust | 1.99.0 | Compiler/toolchain; MIT OR Apache-2.0, with toolchain third-party notices |
@@ -24,7 +24,7 @@ CMRemote is licensed **GPL-2.0-or-later**; see [`LICENSE`](../LICENSE). Packages
 | py7zr | 1.0.0 | SDK archive extraction only; LGPL-2.1-or-later and separately licensed dependencies |
 | ICU | 73.2 in the Linux Qt archive | Qt Unicode runtime; Unicode/ICU license and notices |
 
-`Cargo.lock` pins the full Rust dependency graph and registry checksums; Cargo does not assign a registry checksum to local path crates. `dependencies.lock.json` records exact SDK/source URLs and SHA-256 values for both Linux architectures and macOS, plus the approved vnc-rs vendored path, original archive and attribution files. `scripts/bootstrap-requirements.txt` pins the Python extractor dependency closure. Python wheels are version-pinned, not hash-locked; apt repositories are not snapshot-pinned. This is not a fully hermetic supply-chain build.
+`Cargo.lock` pins the full Rust dependency graph and registry checksums; Cargo does not assign a registry checksum to local path crates. `dependencies.lock.json` records exact SDK/source URLs and SHA-256 values for both Linux architectures and macOS. `scripts/bootstrap-requirements.txt` pins the Python extractor dependency closure. Python wheels are version-pinned, not hash-locked; apt repositories are not snapshot-pinned. This is not a fully hermetic supply-chain build.
 
 The bootstrap verifies downloaded and cached SDK/source bytes before extraction. Rustup is contained using supported `CARGO_HOME`/`RUSTUP_HOME` variables and `--no-modify-path`; it verifies toolchain downloads through Rust distribution metadata. Cargo verifies locked registry downloads. Existing Apple compiler/SDK versions are host prerequisites, not project-installed artifacts.
 
@@ -118,30 +118,22 @@ Packaging stages the checked installed libvterm MIT notice and all 197 locked Ru
 
 Primary sources: [russh archive](https://static.crates.io/crates/russh/russh-0.64.1.crate), [Tokio archive](https://static.crates.io/crates/tokio/tokio-1.48.0.crate), [ring archive](https://static.crates.io/crates/ring/ring-0.17.14.crate), [official libvterm archive](https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz), the exact revision notice URLs in `dependencies.lock.json`, and each locked crate's manifest/build script.
 
-## Embedded VNC dependency — 2026-10-12
+## Embedded VNC dependency
 
-The approved implementation uses **vnc-rs 0.6.0**, declared `MIT OR Apache-2.0`, as an exact local path dependency at `vendor/vnc-rs`. The original published archive is retained at `vendor/vnc-rs-0.6.0.crate` and pinned in `dependencies.lock.json`:
+VNC uses **LibVNCClient 0.9.15**, the client library of LibVNCServer, licensed **GPL-2.0-or-later**, which is compatible with CMRemote's own GPL-2.0-or-later license. It replaced vnc-rs 0.6.0 on 2026-11-10.
 
-- Source: <https://static.crates.io/crates/vnc-rs/vnc-rs-0.6.0.crate>
-- SHA-256: `0b757c55558e81e08e60f1a3153ba5bcffe7196719bc885e7e620400b0d81a4d`
-- Attribution/license files: `vendor/vnc-rs/LICENSE-MIT` and `LICENSE-APACHE`, unchanged from that archive.
-- Local provenance and changes: `vendor/vnc-rs/SOURCE-PROVENANCE` and `PATCHES.md`, maintained with the vendored source and its local patch. The archive digest identifies the **upstream baseline**, not a byte-identical patched source tree.
+- Source: <https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.15.tar.gz>
+- SHA-256: `62352c7795e231dfce044beb96156065a05a05c974e5de9e023d688d8ff675d7`
 
-`scripts/rust_notices.py` previously skipped all Cargo packages with `source = null`. It now exempts only this project's Core and accepts the reviewed vnc-rs name/version/path/license contract explicitly; other unreviewed path packages fail closed. It checks the retained original archive digest, the local crate manifest and exact matching upstream license bytes, then retains both license texts and local provenance/patch notes. The ordinary dependency verifier also checks that vendored baseline and attribution without fetching or extracting over the patched tree. `cargo metadata --locked --offline` is still collected **without a target filter**, so build dependencies and Windows/other target-only registry packages remain in the checksum/license/notice audit. This is not a vulnerability/security audit or acceptance of a platform merely because it appears in Cargo metadata.
+`scripts/bootstrap.py` builds only the static `vncclient` target, with OpenSSL for TLS and zlib, and with GnuTLS, SASL, JPEG and every server/example target off. DES and SHA-1 for VncAuth use LibVNCClient's built-in code, so OpenSSL 3's legacy provider is not needed. Small source patches are applied by exact string replacement and covered by `LIBVNCCLIENT_PATCH` in the bootstrap contract:
 
-The existing package-stage caller uses the same notice collector: macOS artifacts retain VNC attribution under `Contents/Resources/third-party/rust/vnc-rs-0.6.0`; Linux uses `share/third-party/rust/vnc-rs-0.6.0`. Its generated `manifest.json` records the original archive checksum/source URL and hashes of staged notices, including the local patch/provenance information. No Windows packager/wrapper exists. A new staged artifact must rerun the complete updated locked-closure audit; the **197-package T48 results above are historical SSH evidence**, not the VNC closure or VNC-package evidence.
+- built-in crypto is always selected;
+- an ExtendedDesktopSize reply with screen id 0 is accepted, and SetDesktopSize sends the server's screen layout with zeroed padding;
+- a hidden (0×0) cursor shape is reported instead of dropped;
+- X509 verification matches an IP-literal host against the certificate's IP addresses;
+- an application hook (`rfbClientTlsVerify`) becomes OpenSSL's verify callback for the X509 types, so CMRemote can apply the platform trust store, imported authorities, pinned certificates and the user's review.
 
-The client uses direct, unencrypted classic RFB 3.3/3.7/3.8; None is selected whenever the server offers it; otherwise VncAuth uses the reviewed saved Password or a session-only prompt, limited to 1–8 printable ASCII. ZRLE/Tight/TRLE/CopyRect/Raw (no Tight JPEG), server resize/cursors, view-only and shared native QRhi presentation are implementation scope, not accepted runtime evidence. TLS/VeNCrypt/vendor authentication, clipboard, client resize and proxy/chat/file transfer are excluded. Native build/live-server/graphics/fullscreen/package acceptance remains pending on every target; Windows source portability is pending without native evidence. See [VNC use and exclusions](development.md#vnc-desktop--implementation-awaiting-acceptance) and [validation status](validation.md#vnc-client-integration--pending-acceptance-2026-10-12).
-
-Retaining MIT/Apache attribution does not by itself settle original-icon provenance, Qt LGPL obligations or OpenH264 patent coverage; those remain the publisher's responsibility for each release. LibVNCClient is not linked or substituted by this work.
-
-## Previously researched VNC alternative — not linked
-
-| Dependency | Researched version | Planned role / license |
-|---|---|---|
-| LibVNCClient (LibVNCServer) | 0.9.15 | VNC; **GPL-2.0-or-later** |
-
-LibVNCClient is not a permissively licensed drop-in. Linking it into a distributed application can impose GPL obligations on the combined work. Do not add it until the project's license/distribution plan is compatible or a different VNC approach is chosen.
+The bootstrap checks the generated `rfbconfig.h`, installs the headers, the static library, `COPYING` and a CMake package (`LibVNCClient::vncclient`), and records the installed files. `scripts/verify-dependencies.py` checks the pinned archive and the client API the app uses. Packages carry `LibVNCClient-COPYING.txt` and a source/version line in the third-party `README.txt`.
 
 ## Audit commands
 

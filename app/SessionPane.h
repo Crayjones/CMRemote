@@ -3,10 +3,9 @@
 #include <QWidget>
 #include <QPointer>
 #include "SshAuthentication.h"
-#include "VncAuthentication.h"
+#include "VncWorker.h"
 #include "SshHostKeyStore.h"
 class SshWorker;
-class VncWorker;
 class VncDesktopView;
 class SshHostKeyService;
 class QDialog;
@@ -25,7 +24,7 @@ class SessionPane final : public QWidget {
 public:
     SessionPane(const rm::SessionInfo& info, QString profile, QWidget* parent = nullptr, DocumentId document = {}, std::shared_ptr<ClipboardEndpoint> clipboard = {});
     bool clipboardSharingEnabled() const { return clipboard_->enabled(); }
-    bool clipboardSharingAvailable() const { return target_.protocol == "rdp" && !mock_ && active_ && connected_; }
+    bool clipboardSharingAvailable() const { return (target_.protocol == "rdp" || target_.protocol == "vnc") && !mock_ && active_ && connected_; }
     void setClipboardSharingEnabled(bool enabled);
     DocumentId document() const { return document_; }
     ProfileReference reference() const { return {document_, profile_}; }
@@ -43,7 +42,15 @@ public:
     void event(const QString& kind, const QString& text);
     void startRdp(RdpConfig config);
     SshWorker* startSsh(rust::Box<rm::ssh::Authentication> authentication, SshHostKeyService* trust);
-    VncWorker* startVnc(rust::Box<rm::vnc::Authentication> authentication);
+    // clipboard: share text from the start (the connection's Clipboard setting).
+    // options: trusted authorities and the pinned certificate for this host; the username
+    // defaults to the connection's (a username typed into the prompt wins for this tab).
+    // smartSize: fill the panel (resize the server desktop, else scale to fit); false keeps
+    // the server's resolution at actual size.
+    VncWorker* startVnc(VncAuthentication authentication, bool clipboard = false, VncWorker::Options options = {}, bool smartSize = true);
+    // The tab's SmartSize toggle (VNC); turning it off asks the server for its original size.
+    bool vncSmartSize() const { return vncSmartSize_; }
+    void setVncSmartSize(bool enabled);
     bool vncRetiring() const;
     void afterVncRetirement(std::function<void()> complete);
     bool sshRetiring() const;
@@ -58,8 +65,11 @@ signals:
     void resized(QString id, QSize size);
     void state(QString id, QString state);
     void clipboardSharingChanged(bool enabled);
+    void vncSmartSizeChanged(bool enabled);
     // Security or diagnostic message for the Notifications panel.
     void notice(QString text);
+    // The user chose Always trust for this VNC server certificate (DER).
+    void vncCertificateTrusted(QString host, quint16 port, QByteArray certificate);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
@@ -76,6 +86,11 @@ private:
     VncDesktopView* vncDesktop_ = nullptr;
     bool acceptingVncFrames_ = false;
     QString vncFailure_;
+    QPointer<class RdpDesktopFit> vncFit_;
+    bool vncSmartSize_ = true;
+    QSize vncNativeSize_; // the server's desktop size before any resize, per connection
+    // Username typed into the VeNCrypt Plain prompt, reused by Reconnect in this tab.
+    QString vncUsername_;
     QPointer<SshHostKeyService> sshTrust_;
     QPointer<QDialog> sshDialog_;
     QString sshHostRequest_, sshTrustRequest_;

@@ -175,7 +175,8 @@ impl ffi::RdpOptions {
             gateway_username: self.gateway_username.clone(), gateway_domain: self.gateway_domain.clone(),
             gateway_credentials: crate::model::GatewayCredentials::parse(&self.gateway_credentials)?,
             sound: crate::model::Sound::parse(&self.sound)?, clipboard: self.clipboard,
-            ssh_auth: crate::model::SshAuth::Password, ssh_key_path: String::new(), view_only: false, sources: std::collections::HashMap::new(), unsupported: Vec::new(),
+            ssh_auth: crate::model::SshAuth::Password, ssh_key_path: String::new(), view_only: false,
+            smart_size: crate::model::VncSmartSize::Aspect, sources: std::collections::HashMap::new(), unsupported: Vec::new(),
         })
     }
 }

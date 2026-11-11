@@ -11,7 +11,8 @@ std::optional<SessionTarget> passwordAccount(const QJsonObject& effective) {
     if (!effective["unsupported"].toArray().isEmpty()) return std::nullopt;
     const auto target = sessionTarget(effective);
     if (target.protocol == "ssh") return target.sshAuth == "password" ? normalizeSshTarget(target) : std::nullopt;
-    if (target.protocol == "vnc") { auto account = target; account.viewOnly = false; return normalizeVncTarget(account); }
+    // The VNC password account is host and port only, whatever the Username.
+    if (target.protocol == "vnc") { auto account = target; account.viewOnly = false; account.username.clear(); return normalizeVncTarget(account); }
     return normalizeRdpTarget(target);
 }
 QString accountLabel(const QString& name, const SessionTarget& target) {

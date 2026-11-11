@@ -139,7 +139,7 @@ class BrandingAssets(unittest.TestCase):
             self.assertTrue((notices / 'provenance.json').is_file())
             self.assertFalse(list(notices.rglob('*.png'))); self.assertFalse(list(notices.rglob('*.cs')))
             for name in ('Qt-LGPL-3.0.txt', 'Qt-GPL-3.0.txt', 'FreeRDP-LICENSE.txt', 'OpenSSL-LICENSE.txt',
-                         'zlib-LICENSE.txt', 'README.txt'):
+                         'zlib-LICENSE.txt', 'LibVNCClient-COPYING.txt', 'README.txt'):
                 self.assertTrue((destination / 'share/third-party' / name).is_file(), name)
             self.assertTrue((destination / 'share/LICENSE.txt').is_file())
 

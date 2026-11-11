@@ -44,10 +44,26 @@
       <item><widget class="QLabel" name="openh264Help"><property name="text"><string>H.264 makes video and animation smoother on slow connections. When it is off, remote desktops use other graphics formats.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
       <item><widget class="QLabel" name="clipboardTitle"><property name="text"><string>Clipboard</string></property></widget></item>
       <item><widget class="QCheckBox" name="clipboard"><property name="text"><string>Share clipboard text with remote desktops</string></property></widget></item>
-      <item><widget class="QLabel" name="clipboardHelp"><property name="text"><string>Applies to every RDP connection whose Clipboard is not set on the connection or one of its folders. Set Clipboard in Config to change one connection. Files and images are not shared.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="clipboardHelp"><property name="text"><string>Applies to Quick Connect and to every RDP or VNC connection whose Clipboard is not set on the connection or one of its folders. Set Clipboard in Config to change one connection. Files and images are not shared.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
       <item><widget class="QLabel" name="keyboardTitle"><property name="text"><string>Keyboard</string></property></widget></item>
       <item><widget class="QCheckBox" name="commandAsControl"><property name="text"><string>Command key sends Control (Control key sends Windows)</string></property></widget></item>
       <item><widget class="QLabel" name="commandAsControlHelp"><property name="text"><string>Applies to RDP and VNC desktops. When off, Control sends Control and Command sends the Windows/Super key.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="vncTitle"><property name="text"><string>VNC certificates</string></property></widget></item>
+      <item><widget class="QLabel" name="vncHelp"><property name="text"><string>Servers using a VeNCrypt X509 type are verified like websites: certificate authorities your system trusts (Keychain on macOS) are always accepted, and the certificate must name the host you connect to. Import a private certificate authority to trust every server it issued. Changes here are saved immediately.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+      <item><widget class="QLabel" name="vncAuthoritiesTitle"><property name="text"><string>Imported certificate authorities</string></property></widget></item>
+      <item><widget class="QListWidget" name="vncAuthorities"><property name="maximumSize"><size><width>16777215</width><height>88</height></size></property></widget></item>
+      <item><layout class="QHBoxLayout" name="vncAuthorityButtons">
+       <item><widget class="QPushButton" name="vncAuthorityImport"><property name="text"><string>Import…</string></property></widget></item>
+       <item><widget class="QPushButton" name="vncAuthorityRemove"><property name="text"><string>Remove</string></property></widget></item>
+       <item><spacer name="vncAuthoritySpace"><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer></item>
+      </layout></item>
+      <item><widget class="QLabel" name="vncServersTitle"><property name="text"><string>Server certificates you chose to always trust</string></property></widget></item>
+      <item><widget class="QListWidget" name="vncServers"><property name="maximumSize"><size><width>16777215</width><height>88</height></size></property></widget></item>
+      <item><layout class="QHBoxLayout" name="vncServerButtons">
+       <item><widget class="QPushButton" name="vncServerRemove"><property name="text"><string>Remove</string></property></widget></item>
+       <item><spacer name="vncServerSpace"><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer></item>
+      </layout></item>
+      <item><widget class="QLabel" name="vncTrustError"><property name="wordWrap"><bool>true</bool></property><property name="textFormat"><enum>Qt::PlainText</enum></property></widget></item>
       <item><spacer name="rdpSpace"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint"><size><width>20</width><height>40</height></size></property></spacer></item>
      </layout></widget>
      <widget class="QWidget" name="updatesPage"><layout class="QVBoxLayout" name="updatesLayout">

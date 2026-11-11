@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check locked registry/vendored archives and retain reviewed license notices."""
+"""Check locked registry archives and retain reviewed license notices."""
 import hashlib
 import json
 import os
@@ -62,61 +62,7 @@ def archive_notices(crate, name, version, expected):
     return notices
 
 
-def project_file(relative):
-    path = ROOT / relative
-    if (Path(relative).is_absolute() or '..' in Path(relative).parts
-            or path.is_symlink() or path.resolve() != ROOT.resolve() / relative
-            or not path.is_file()):
-        raise ValueError('Unsafe or missing vendored Rust file: ' + str(relative))
-    return path
-
-
-def vendored_record(package, artifacts, vendored):
-    name, version = package['name'], package['version']
-    contract = vendored.get(name)
-    if (name != 'vnc-rs' or version != '0.6.0' or not contract
-            or contract['version'] != version or contract['path'] != 'vendor/vnc-rs'
-            or package['license'] != contract['license']
-            or package['license'] not in REVIEWED_LICENSES):
-        raise ValueError('Unreviewed vendored Rust dependency or license: ' + name)
-    manifest = project_file(contract['path'] + '/Cargo.toml')
-    if Path(package['manifest_path']) != manifest:
-        raise ValueError('Unreviewed vendored Rust dependency path: ' + name)
-    section = re.search(r'(?ms)^\[package\]\s*\n(.*?)(?=^\[|\Z)', manifest.read_text())
-    fields = {key: json.loads(value) for key, value in re.findall(
-        r'^(name|version|license) = ("[^"\n]*")$', section.group(1) if section else '', re.M)}
-    if fields != {'name': name, 'version': version, 'license': package['license']}:
-        raise ValueError('Vendored Rust manifest differs from reviewed contract: ' + name)
-    artifact = artifacts[contract['artifact']]
-    crate = project_file(contract['archive'])
-    notices = archive_notices(crate, name, version, artifact['sha256'])
-    if not {'LICENSE-MIT', 'LICENSE-APACHE'}.issubset(notices):
-        raise ValueError('Missing vendored Rust license notices: ' + name)
-    for relative, data in notices.items():
-        if project_file(contract['path'] + '/' + relative).read_bytes() != data:
-            raise ValueError('Vendored Rust notice differs from pinned archive: ' + name)
-    for field in ('provenance', 'patch_notes'):
-        relative = contract[field]
-        data = project_file(contract['path'] + '/' + relative).read_bytes()
-        if not data.strip() or len(data) > 1024 * 1024:
-            raise ValueError('Invalid vendored Rust provenance: ' + name)
-        notices[relative] = data
-    return {'name': name, 'version': version, 'license': package['license'],
-            'checksum': artifact['sha256'], 'source': contract['path'],
-            'archive_url': artifact['url'], 'provenance': contract['provenance'],
-            'notices': notices}
-
-
-def audit_vendored(lock):
-    """Audit retained baseline/attribution without running Cargo or fetching bytes."""
-    return [vendored_record({'name': name, 'version': contract['version'],
-                            'license': contract['license'],
-                            'manifest_path': str(ROOT / contract['path'] / 'Cargo.toml')},
-                           lock['artifacts'], lock['vendored_rust'])
-            for name, contract in lock.get('vendored_rust', {}).items()]
-
-
-def collect(metadata, lock_bytes, cargo_home, artifacts, cache, vendored=None):
+def collect(metadata, lock_bytes, cargo_home, artifacts, cache):
     checksums = lock_checksums(lock_bytes)
     records = []
     for package in sorted(metadata['packages'], key=lambda p: (p['name'], p['version'])):
@@ -124,8 +70,7 @@ def collect(metadata, lock_bytes, cargo_home, artifacts, cache, vendored=None):
             if (package['name'] == 'remotemanager-core'
                     and Path(package['manifest_path']) == ROOT / 'core/Cargo.toml'):
                 continue
-            records.append(vendored_record(package, artifacts, vendored or {}))
-            continue
+            raise ValueError('Unreviewed path Rust dependency: ' + package['name'])
         name, version = package['name'], package['version']
         if package['source'] != 'registry+https://github.com/rust-lang/crates.io-index':
             raise ValueError('Unreviewed Rust dependency source')
@@ -163,7 +108,7 @@ def stage(destination, env):
         ['cargo', 'metadata', '--locked', '--offline', '--format-version', '1'], cwd=ROOT, env=env))
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
     records = collect(metadata, lock_bytes, Path(env['CARGO_HOME']), lock['artifacts'],
-                      ROOT / '.dev' / env['RM_PLATFORM'] / 'downloads', lock.get('vendored_rust', {}))
+                      ROOT / '.dev' / env['RM_PLATFORM'] / 'downloads')
     manifest = []
     for record in records:
         directory = destination / (record['name'] + '-' + record['version'])
@@ -177,11 +122,11 @@ def stage(destination, env):
         manifest.append({**{k: v for k, v in record.items() if k != 'notices'}, 'notices': hashes})
     (destination / 'manifest.json').write_text(json.dumps({
         'schema': 1, 'cargo_lock_sha256': hashlib.sha256(lock_bytes).hexdigest(), 'packages': manifest,
-        'scope': 'All locked registry and approved vendored packages, including build and non-native target dependencies; not a security audit. Vendored checksums identify the original archive, not patched source bytes.'
+        'scope': 'All locked registry packages, including build and non-native target dependencies; not a security audit.'
     }, indent=2) + '\n')
     return len(records)
 
 
 if __name__ == '__main__':
     destination = Path(os.environ['RM_BUILD_DIR']) / 'deps/rust-notices'
-    print('Retained notices for', stage(destination, os.environ), 'locked registry/vendored packages:', destination)
+    print('Retained notices for', stage(destination, os.environ), 'locked registry packages:', destination)

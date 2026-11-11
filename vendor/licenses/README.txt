@@ -10,6 +10,9 @@ OpenSSL 3.5.9        Apache-2.0; OpenSSL-LICENSE.txt
                      Source: https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
 zlib 1.3.2           zlib license; zlib-LICENSE.txt
                      Source: https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
+LibVNCClient 0.9.15  GPL-2.0-or-later; LibVNCClient-COPYING.txt
+                     Source: https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.15.tar.gz
+                     Linked statically, with small patches applied by scripts/bootstrap.py.
 
 OpenH264 is not included. CMRemote downloads Cisco's prebuilt binary at runtime;
 Cisco's binary license is OpenH264-Cisco-BINARY_LICENSE.txt.

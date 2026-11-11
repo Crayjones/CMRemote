@@ -94,7 +94,7 @@ def main():
             # Remove this project's tags without deleting another project's tag of the same image.
             tags = json.loads(inspected.stdout)[0].get('RepoTags') or []
             for tag in tags:
-                if tag.startswith(('remotemanager-dev:' + instance + '-', 'remotemanager-rdp-test:' + instance + '-',
+                if tag.startswith(('remotemanager-dev:' + instance + '-', 'remotemanager-rdp-test:' + instance + '-', 'remotemanager-vnc-test:' + instance + '-',
                                    'remotemanager-release:' + instance + '-', 'remotemanager-windows:' + instance + '-')):
                     run(docker + ['image', 'rm', tag])
         for builder in builders:

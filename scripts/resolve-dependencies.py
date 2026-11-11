@@ -26,7 +26,7 @@ lock = {'schema_version': 1, 'versions': {
     'rust': '1.99.0', 'cxx': '1.0.202', 'qt': '6.12.0', 'cmake': '4.4.4',
     'ninja': '1.13.2', 'freerdp': '3.32.1', 'openssl': '3.5.9', 'zlib': '1.3.2',
     'aqtinstall': '3.3.0', 'py7zr': '1.0.0',
-    'russh': '0.64.1', 'tokio': '1.48.0', 'ring': '0.17.14', 'libvterm': '0.3.3', 'libvncclient_planned': '0.9.15'},
+    'russh': '0.64.1', 'tokio': '1.48.0', 'ring': '0.17.14', 'libvterm': '0.3.3'},
     'artifacts': {}}
 a = lock['artifacts']
 # Reviewed notices omitted by upstream crate archives retain their exact revision pins.
@@ -41,6 +41,7 @@ a['openssl'] = fetch('https://github.com/openssl/openssl/releases/download/opens
 a['zlib'] = fetch('https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz', 'zlib.tar.gz')
 for key, version, url, filename in (
     ('libvterm', '0.3.3', 'https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.3.tar.gz', 'libvterm-0.3.3.tar.gz'),
+    ('libvncclient', '0.9.15', 'https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.15.tar.gz', 'libvncserver-0.9.15.tar.gz'),
     ('russh', '0.64.1', 'https://static.crates.io/crates/russh/russh-0.64.1.crate', 'russh-0.64.1.crate'),
     ('sdl3', '3.2.26', 'https://github.com/libsdl-org/SDL/releases/download/release-3.2.26/SDL3-3.2.26.tar.gz', 'SDL3-3.2.26.tar.gz'),
     ('sdl3_ttf', '3.2.2', 'https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2.tar.gz', 'SDL3_ttf-3.2.2.tar.gz'),

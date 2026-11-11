@@ -4,6 +4,7 @@
 #include "TerminalScreen.h"
 #include "SshWorker.h"
 #include "VncWorker.h"
+#include "VncCertificateDialog.h"
 #include "VncCredentialsDialog.h"
 #include "VncDesktopView.h"
 #include "SshHostKeyService.h"
@@ -222,13 +223,17 @@ void SessionPane::afterVncRetirement(std::function<void()> complete) {
     if (!vncWorker_) { QTimer::singleShot(0, this, std::move(complete)); return; }
     connect(vncWorker_, &VncWorker::finished, this, [complete = std::move(complete)](quint64) { complete(); }, Qt::SingleShotConnection);
 }
-VncWorker* SessionPane::startVnc(rust::Box<rm::vnc::Authentication> authentication) {
+VncWorker* SessionPane::startVnc(VncAuthentication authentication, bool clipboardConsent, VncWorker::Options options, bool smartSize) {
     if (!vncDesktop_ || mock_ || vncWorker_ || target_.protocol != "vnc") return nullptr;
     setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
     vncDesktop_->setInputEnabled(false); desktop_->resetRemoteCursor(); desktop_->setFrame({});
     active_ = true; ended_ = false; acceptingVncFrames_ = true; vncFailure_.clear();
     const auto generation = ++connectionGeneration_;
-    auto* worker = new VncWorker(target_, std::move(authentication), generation);
+    const bool savedPassword = authentication.password.has_value();
+    vncSmartSize_ = smartSize; vncNativeSize_ = {}; vncDesktop_->setActualSize(!smartSize); emit vncSmartSizeChanged(smartSize);
+    if (!vncUsername_.isEmpty()) options.username = vncUsername_;
+    else if (options.username.isEmpty()) options.username = target_.username;
+    auto* worker = new VncWorker(target_, std::move(authentication), generation, std::move(options));
     vncWorker_ = worker;
     connect(worker, &VncWorker::finished, worker, &QObject::deleteLater);
     connect(worker, &VncWorker::finished, this, [this, worker](quint64) { if (vncWorker_ == worker) vncWorker_.clear(); });
@@ -236,6 +241,7 @@ VncWorker* SessionPane::startVnc(rust::Box<rm::vnc::Authentication> authenticati
     const auto current = [this, worker, generation] { return active_ && vncWorker_ == worker && connectionGeneration_ == generation; };
     const auto failInput = [this, worker](const QString& error) {
         connected_ = false; acceptingVncFrames_ = false; vncDesktop_->setInputEnabled(false);
+        setClipboardSharingEnabled(false); clipboard_->reset();
         desktop_->resetRemoteCursor(); worker->stop();
         vncFailure_ = error.isEmpty() ? "VNC input could not be delivered; closing session" : error;
         status_->setText(vncFailure_); status_->show();
@@ -252,57 +258,108 @@ VncWorker* SessionPane::startVnc(rust::Box<rm::vnc::Authentication> authenticati
         if (!current() || !connected_ || target_.viewOnly) return;
         QString error; if (!worker->pointer(mask, x, y, generation, &error)) failInput(error);
     });
-    connect(worker, &VncWorker::frameAvailable, this, [this, worker, current, generation](quint64 deliveryGeneration) {
+    // Like RDP automatic resize: the server desktop follows the pane when it supports
+    // ExtendedDesktopSize; otherwise (or view-only) the desktop is scaled to fit.
+    auto* desktopFit = new RdpDesktopFit(worker); vncFit_ = desktopFit;
+    desktopFit->setViewport(desktop_->size());
+    connect(desktop_, &DesktopView::viewportChanged, desktopFit, &RdpDesktopFit::setViewport);
+    connect(desktopFit, &RdpDesktopFit::resizeRequested, worker, [worker, current](QSize size) { if (current()) worker->resizeDesktop(size); });
+    connect(worker, &VncWorker::resizeAvailable, desktopFit, [desktopFit, current](bool available) { if (current()) desktopFit->setAvailable(available); });
+    connect(worker, &VncWorker::frameAvailable, this, [this, worker, current, generation, desktopFit](quint64 deliveryGeneration) {
         if (deliveryGeneration != generation || !current() || !acceptingVncFrames_) return;
         const auto update = worker->takeUpdate();
         if (update.patches.empty()) return;
         if (!desktop_->applyUpdate(update)) {
             acceptingVncFrames_ = false; connected_ = false; vncDesktop_->setInputEnabled(false);
+            setClipboardSharingEnabled(false); clipboard_->reset();
             desktop_->resetRemoteCursor(); worker->stop();
             vncFailure_ = "VNC desktop update rejected; closing session";
-            status_->setText(vncFailure_); status_->show(); emit state(id_, "failed");
+            status_->setText(vncFailure_); status_->show(); emit state(id_, "failed"); return;
         }
+        if (!vncNativeSize_.isValid()) vncNativeSize_ = desktop_->frame().size();
+        desktopFit->setDesktop(desktop_->frame().size());
     });
     connect(worker, &VncWorker::cursorAvailable, this, [this, worker, current, generation](quint64 deliveryGeneration) {
         if (deliveryGeneration != generation || !current() || !acceptingVncFrames_) return;
         if (auto cursor = worker->takeCursor()) desktop_->setRemoteCursor(std::move(*cursor));
     });
-    connect(worker, &VncWorker::phaseChanged, this, [this, worker, current, generation](VncWorker::Phase phase, const QString& error, quint64 deliveryGeneration) {
+    // Text clipboard follows the connection's Clipboard setting and the tab action.
+    worker->configureClipboard({});
+    connect(clipboard_, &SessionClipboard::configure, worker, &VncWorker::configureClipboard);
+    connect(clipboard_, &SessionClipboard::localText, worker, &VncWorker::clipboardText);
+    connect(worker, &VncWorker::clipboardAvailable, this, [this, worker, current, generation](quint64 deliveryGeneration) {
+        if (deliveryGeneration != generation || !current()) return;
+        auto delivery = worker->takeClipboard();
+        if (connected_ && clipboard_->enabled() && delivery) clipboard_->receive(std::move(*delivery));
+    });
+    connect(worker, &VncWorker::phaseChanged, this, [this, worker, current, generation, desktopFit, clipboardConsent, savedPassword](VncWorker::Phase phase, const QString& error, quint64 deliveryGeneration) {
         if (deliveryGeneration != generation || !current()) return;
         if (phase == VncWorker::Phase::PasswordRequired) {
-            status_->setText("VNC — password required (UNENCRYPTED)"); status_->show(); emit state(id_, "connecting");
+            const bool username = worker->prompt() == VncWorker::Prompt::UsernamePassword;
+            status_->setText(username ? "VNC — username and password required" : "VNC — password required"); status_->show();
+            emit state(id_, "connecting");
             if (vncPassword_) return;
-            auto* dialog = new VncCredentialsDialog([this, worker, current, generation](std::optional<Secret> password) {
+            auto* dialog = new VncCredentialsDialog([this, worker, current, generation](std::optional<VncCredentials> credentials) {
                 if (!current() || !vncPassword_) return;
                 vncPassword_.clear();
                 // Cancel ends this connection attempt; the tab stays for Reconnect.
-                if (!password) { shutdown(); emit state(id_, "disconnected"); return; }
+                if (!credentials) { shutdown(); emit state(id_, "disconnected"); return; }
+                if (!credentials->username.isEmpty()) vncUsername_ = credentials->username;
                 QString failure;
-                if (!worker->password(std::move(*password), generation, &failure)) {
-                    status_->setText(failure.isEmpty() ? "VNC password could not be delivered" : failure); status_->show();
+                if (!worker->credentials(credentials->username, std::move(credentials->password), generation, &failure)) {
+                    status_->setText(failure.isEmpty() ? "VNC credentials could not be delivered" : failure); status_->show();
                 }
-            }, this);
+            }, this, {username, worker->promptUsername(), savedPassword});
             // show(), not open(): open() forces window modality, which is a title-less sheet on macOS.
             vncPassword_ = dialog; dialog->show(); dialog->raise(); dialog->activateWindow(); return;
         }
+        if (phase == VncWorker::Phase::CertificateReview) {
+            status_->setText("VNC — review the server certificate"); status_->show();
+            emit state(id_, "connecting");
+            if (vncPassword_) return;
+            const auto review = worker->certificateReview();
+            auto* dialog = new VncCertificateDialog(review, [this, worker, current, generation, review](VncWorker::CertificateTrust trust) {
+                if (!current() || !vncPassword_) return;
+                vncPassword_.clear();
+                if (trust == VncWorker::CertificateTrust::Always) emit vncCertificateTrusted(review.host, review.port, review.certificate.der);
+                worker->trustCertificate(trust, generation);
+            }, this);
+            vncPassword_ = dialog; dialog->show(); dialog->raise(); dialog->activateWindow(); return;
+        }
         closeVncPassword();
+        const bool wasConnected = connected_;
         connected_ = phase == VncWorker::Phase::Connected && vncFailure_.isEmpty();
+        desktopFit->setConnected(connected_ && !target_.viewOnly && vncSmartSize_);
         vncDesktop_->setInputEnabled(connected_ && !target_.viewOnly);
-        QString stateName = "connecting", detail = "VNC — connecting (UNENCRYPTED)";
-        if (connected_) { stateName = "connected"; detail = target_.viewOnly ? "VNC — connected, view-only (UNENCRYPTED)" : "VNC — connected (UNENCRYPTED)"; }
-        else if (phase == VncWorker::Phase::Resolving) detail = "VNC — resolving host (UNENCRYPTED)";
-        else if (phase == VncWorker::Phase::Handshaking) detail = "VNC — authenticating (UNENCRYPTED)";
+        QString stateName = "connecting", detail = "VNC — connecting";
+        if (connected_) {
+            stateName = "connected";
+            detail = "VNC — connected" + QString(target_.viewOnly ? ", view-only" : "") + " (" + worker->security() +
+                (worker->encrypted() ? ", encrypted" : ", UNENCRYPTED") + (worker->identity().isEmpty() ? QString() : ", " + worker->identity()) + ")";
+            if (!wasConnected) { refreshClipboardFocus(); setClipboardSharingEnabled(clipboardConsent); }
+        }
+        else if (phase == VncWorker::Phase::Resolving) detail = "VNC — resolving host";
+        else if (phase == VncWorker::Phase::Handshaking) detail = "VNC — authenticating";
         else if (phase == VncWorker::Phase::Failed || phase == VncWorker::Phase::Disconnected || phase == VncWorker::Phase::Cancelled) {
             acceptingVncFrames_ = false; desktop_->resetRemoteCursor();
+            setClipboardSharingEnabled(false); clipboard_->reset();
             stateName = phase == VncWorker::Phase::Failed ? "failed" : "disconnected";
             detail = error.isEmpty() ? "VNC — disconnected; use Reconnect or close this tab" : error;
         }
         if (!vncFailure_.isEmpty()) detail = vncFailure_;
-        // Like RDP, a connected desktop uses the whole pane; the unencrypted
-        // notice is shown in the credentials prompt before every connection.
+        // Like RDP, a connected desktop uses the whole pane.
         status_->setText(detail); status_->setVisible(!connected_); emit state(id_, stateName);
     });
     desktop_->setFocus(); return worker;
+}
+void SessionPane::setVncSmartSize(bool enabled) {
+    if (!vncDesktop_ || vncSmartSize_ == enabled) return;
+    vncSmartSize_ = enabled; vncDesktop_->setActualSize(!enabled);
+    if (vncFit_) vncFit_->setConnected(connected_ && !target_.viewOnly && enabled);
+    // Off restores the resolution the server started with, when it supports resizing.
+    if (!enabled && connected_ && !target_.viewOnly && vncWorker_ && vncNativeSize_.isValid() && desktop_->frame().size() != vncNativeSize_)
+        vncWorker_->resizeDesktop(vncNativeSize_);
+    emit vncSmartSizeChanged(enabled);
 }
 bool SessionPane::sshRetiring() const { return bool(sshWorker_); }
 void SessionPane::afterSshRetirement(std::function<void()> complete) {

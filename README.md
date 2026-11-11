@@ -11,7 +11,7 @@ CMRemote is an open-source, tabbed remote connection manager for macOS, Windows 
 
 - **RDP** — remote desktops with H.264/AVC support.
 - **SSH** — embedded terminal with password and private-key authentication.
-- **VNC** — classic VNC/RFB connections.
+- **VNC** — VNC/RFB connections, including VeNCrypt TLS and X509, clipboard text and resize-to-fit.
 - Organize connections in folders with inherited settings.
 - Open mRemoteNG connection XML files, with optional file-password protection.
 - Arrange sessions in tabs, panels and separate windows.
@@ -34,7 +34,7 @@ Builds are not yet signed with Apple or Microsoft certificates. See the release 
 2. Add a connection, choose RDP, SSH or VNC, and enter its host and account details.
 3. Connect to open a session tab, or use **Quick Connect** for a temporary session.
 
-H.264 uses Cisco OpenH264, downloaded separately on first launch. Control it under **Options → Remote Desktop**. Classic VNC traffic is unencrypted; use it only on trusted networks or through a secure tunnel.
+H.264 uses Cisco OpenH264, downloaded separately on first launch. Control it under **Options → Remote Desktop**. VncAuth and VeNCrypt Plain traffic is unencrypted; prefer the VeNCrypt TLS/X509 types or use a trusted network or secure tunnel.
 
 ## Build from source
 

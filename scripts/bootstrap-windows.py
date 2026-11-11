@@ -93,12 +93,16 @@ def main():
     common = ['-G', 'Ninja', '-DCMAKE_TOOLCHAIN_FILE=' + str(toolchain), '-DCMAKE_BUILD_TYPE=Release',
               '-DCMAKE_INSTALL_PREFIX=' + str(prefix), '-DCMAKE_INSTALL_LIBDIR=lib',
               '-DCMAKE_PREFIX_PATH=' + str(prefix)]
-    for key in ('openssl', 'zlib', 'openh264', 'freerdp', 'libvterm'):
+    for key in ('openssl', 'zlib', 'openh264', 'freerdp', 'libvterm', 'libvncclient'):
         version = versions[key]
-        src = source / (key + '-' + version)
+        src = bootstrap.libvncclient_source(source, version) if key == 'libvncclient' else source / (key + '-' + version)
         if not src.exists():
             bootstrap.unpack(artifact(key), source)
         contract = {'version': version, 'source': a[key]['sha256'], 'target': TRIPLE, 'toolchain': versions['llvm_mingw']}
+        if key == 'libvncclient':
+            contract.update(patch=bootstrap.LIBVNCCLIENT_PATCH, options=bootstrap.libvncclient_options(prefix, 'windows'))
+            bootstrap.install_libvncclient(src, builds / key, prefix, cmake, args.jobs, cross, contract, common)
+            continue
         if key == 'libvterm':
             files = bootstrap.LIBVTERM_FILES
             if not bootstrap.dependency_current(prefix, key, contract, files):

@@ -5,7 +5,6 @@ pub mod model;
 pub mod projection;
 pub mod session;
 pub mod ssh;
-pub mod vnc;
 
 use bridge::ffi::{PreparedDocument, PreparedProfile, ProfileChange, RdpTarget, SshTarget, VncTarget, SessionEvent, SessionInfo};
 use model::{Document, Kind, NewProfile, Profile, ProfileMove};

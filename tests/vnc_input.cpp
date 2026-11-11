@@ -1,5 +1,5 @@
 #include "VncDesktopView.h"
-#include "VncGraphics.h"
+#include "VncGraphicsDriver.h"
 #include <QApplication>
 #include <QFocusEvent>
 #include <QInputMethodEvent>
@@ -346,7 +346,7 @@ private slots:
     void sharedViewRejectsLateGeometryAndRevisionBatches() {
         VncDesktopView view(false); VncGraphics graphics;
         QVERIFY(graphics.geometry(256, 256)); QVERIFY(graphics.commit()); const auto first = graphics.takeUpdate(); QVERIFY(view.applyUpdate(first));
-        const uchar red[] = {0, 0, 255, 0}; QVERIFY(graphics.raw(1, 1, 1, 1, red, sizeof(red))); QVERIFY(graphics.commit());
+        const uchar red[] = {0, 0, 255, 0}; QVERIFY(raw(graphics, 1, 1, 1, 1, red, sizeof(red))); QVERIFY(graphics.commit());
         const auto partial = graphics.takeUpdate(); QVERIFY(view.applyUpdate(partial)); QVERIFY(!view.applyUpdate(first));
         QVERIFY(graphics.geometry(512, 256)); QVERIFY(graphics.commit()); const auto resized = graphics.takeUpdate(); QVERIFY(view.applyUpdate(resized));
         QVERIFY(!view.applyUpdate(partial)); QVERIFY(!view.applyUpdate(first)); QVERIFY(!view.applyUpdate(resized));

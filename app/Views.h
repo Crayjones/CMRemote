@@ -62,6 +62,11 @@ public:
     void setRemotePointerPosition(QPoint position);
     static QString captureChordText();
     static std::array<float, 16> letterboxVertices(QSize widgetSize, QSize frameSize);
+    static std::array<float, 16> letterboxVertices(QSize widgetSize, QRect target);
+    // Fit (the default) scales the desktop to the view keeping its aspect ratio. Actual size
+    // shows it 1:1, centered, and scales down only when it is larger than the view.
+    void setActualSize(bool actual);
+    bool actualSize() const { return actualSize_; }
 signals:
     void keyInput(quint32 scan, bool down, bool repeat);
     void textInput(QString text);
@@ -112,6 +117,7 @@ private:
     bool cursorInside_ = false, pointerDragActive_ = false;
     std::unique_ptr<PointerCapture> capture_;
     bool captureAllowed_ = false, relativeSupported_ = false, chordArmed_ = false, chordClean_ = false;
+    bool actualSize_ = false;
     QSet<int> chordDown_;
     double fractionX_ = 0, fractionY_ = 0;
     void refreshRemoteCursor(bool rebuild = false);
