@@ -159,7 +159,7 @@ private:
         quint64 token; bool replacing = false;
         std::optional<TransientCredentials> credentials;
         std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication;
-        std::optional<rust::Box<rm::vnc::Authentication>> vncAuthentication;
+        std::optional<VncAuthentication> vncAuthentication;
         std::optional<SessionTarget> authenticatedTarget;
         QString folder; // Folder-connect source for a missing username or password.
         bool console = false; // "Connect to console session" on a profile that does not request it.
@@ -206,7 +206,7 @@ private:
     void attachSession(const QString& profile, SessionTarget target, bool mock, Panel owner,
                        QPointer<SessionPane> replacement, std::optional<TransientCredentials> credentials, DocumentId document = {},
                        std::optional<rust::Box<rm::ssh::Authentication>> sshAuthentication = {},
-                       std::optional<rust::Box<rm::vnc::Authentication>> vncAuthentication = {});
+                       std::optional<VncAuthentication> vncAuthentication = {});
     void cancelCredentials();
     void disconnectPane(SessionPane* pane);
     bool subtreeHasTab(const QString& id) const;
@@ -299,6 +299,8 @@ private:
     void applyClipboardDefault();
     bool preferencesReady_ = false;
     ApplicationPreferences* preferences_ = nullptr;
+    // Imported VNC certificate authorities and always-trusted server certificates.
+    std::unique_ptr<class VncTrustStore> vncTrust_;
     OpenFileList* openFiles_ = nullptr;
     void restoreOpenFiles(const QStringList& paths);
     void rememberOpenFiles();

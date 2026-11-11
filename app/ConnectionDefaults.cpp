@@ -10,7 +10,7 @@ QJsonObject baseline() {
         {"cache_bitmaps", false}, {"wallpaper", true}, {"themes", true}, {"font_smoothing", true},
         {"security_protocol", "auto"}, {"server_auth", "warn"}, {"use_credssp", true}, {"idle_minutes", 0}, {"load_balance_info", ""},
         {"gateway_usage", "never"}, {"gateway_host", ""}, {"gateway_port", 443}, {"gateway_username", ""}, {"gateway_domain", ""}, {"gateway_credentials", "same"}, {"sound", "local"}, {"clipboard", true},
-        {"ssh_auth", "password"}, {"ssh_key_path", ""}, {"view_only", false}};
+        {"ssh_auth", "password"}, {"ssh_key_path", ""}, {"view_only", false}, {"smart_size", "aspect"}};
 }
 }
 QJsonObject ConnectionDefaults::effective() const {
@@ -51,7 +51,8 @@ std::optional<ConnectionDefaults> ConnectionDefaults::parse(const QJsonObject& o
         !QStringList{"always", "required", "warn"}.contains(e.value("server_auth").toString()) ||
         !QStringList{"never", "always", "detect"}.contains(e.value("gateway_usage").toString()) ||
         !QStringList{"same", "separate"}.contains(e.value("gateway_credentials").toString()) ||
-        !QStringList{"local", "remote", "none"}.contains(e.value("sound").toString())) return {};
+        !QStringList{"local", "remote", "none"}.contains(e.value("sound").toString()) ||
+        !QStringList{"aspect", "off"}.contains(e.value("smart_size").toString())) return {};
     const auto username = e.value("username").toString(), domain = e.value("domain").toString();
     if (protocol == "rdp") {
         if (!domain.isEmpty() && (username.contains('\\') || username.contains('@'))) return {};

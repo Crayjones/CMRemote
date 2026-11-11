@@ -54,3 +54,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssh-server 
 COPY tests/ssh-fixture/ /fixture/
 EXPOSE 22 8022
 CMD ["python3", "/fixture/start.py"]
+
+# TigerVNC Xvnc offers every VeNCrypt subtype; one display/port per security type, each
+# running its own XFCE desktop.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 AS vnc-fixture
+LABEL org.remotemanager.project="remotemanager"
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends tigervnc-standalone-server tigervnc-tools xterm openssl python3 \
+        xfce4-session xfwm4 xfce4-panel xfdesktop4 xfce4-settings xfce4-terminal thunar dbus-x11 at-spi2-core \
+        adwaita-icon-theme-full fonts-dejavu-core xfonts-base && \
+    dpkg-query -W > /fixture-packages.txt && rm -rf /var/lib/apt/lists/* && \
+    useradd --create-home --shell /bin/bash vncfixture
+COPY tests/vnc-fixture/ /fixture/
+EXPOSE 5900-5906
+CMD ["python3", "/fixture/start.py"]

@@ -15,8 +15,7 @@
     "tokio": "1.48.0",
     "ring": "0.17.14",
     "libvterm": "0.3.3",
-    "vnc-rs": "0.6.0",
-    "libvncclient_planned": "0.9.15",
+    "libvncclient": "0.9.15",
     "sdl3": "3.2.26",
     "sdl3_ttf": "3.2.2",
     "freetype_comparator": "2.13.3",
@@ -78,10 +77,10 @@
       "file": "libvterm-0.3.3.tar.gz",
       "sha256": "09156f43dd2128bd347cbeebe50d9a571d32c64e0cf18d211197946aff7226e0"
     },
-    "vnc-rs": {
-      "url": "https://static.crates.io/crates/vnc-rs/vnc-rs-0.6.0.crate",
-      "file": "vnc-rs-0.6.0.crate",
-      "sha256": "0b757c55558e81e08e60f1a3153ba5bcffe7196719bc885e7e620400b0d81a4d"
+    "libvncclient": {
+      "url": "https://github.com/LibVNC/libvncserver/archive/refs/tags/LibVNCServer-0.9.15.tar.gz",
+      "file": "libvncserver-0.9.15.tar.gz",
+      "sha256": "62352c7795e231dfce044beb96156065a05a05c974e5de9e023d688d8ff675d7"
     },
     "russh": {
       "url": "https://static.crates.io/crates/russh/russh-0.64.1.crate",
@@ -272,17 +271,6 @@
       "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz",
       "file": "llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz",
       "sha256": "9d191203f9768ead60662d3ae53cdf28e0a28b1e6d44b7f329b9202cb2add337"
-    }
-  },
-  "vendored_rust": {
-    "vnc-rs": {
-      "version": "0.6.0",
-      "license": "MIT OR Apache-2.0",
-      "path": "vendor/vnc-rs",
-      "artifact": "vnc-rs",
-      "archive": "vendor/vnc-rs-0.6.0.crate",
-      "provenance": "SOURCE-PROVENANCE",
-      "patch_notes": "PATCHES.md"
     }
   }
 }

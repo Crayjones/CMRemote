@@ -95,6 +95,14 @@ bool fixture(const QString& path, bool viewOnly = false) {
     const auto bytes = xml->serialize(master); if (!bytes) return false;
     QFile output(path); return output.open(QIODevice::WriteOnly) && output.write(*bytes) == bytes->size();
 }
+// Settings with clipboard sharing on or off; sharing sends host text to the server on connect.
+QString preferences(const QTemporaryDir& directory, bool clipboard) {
+    const auto path = directory.filePath("preferences.json");
+    const QJsonObject object{{"version", 1}, {"categorized", true}, {"property_help", true}, {"quick_connect", true}, {"lock_toolbars", false},
+        {"connection_defaults", QJsonObject{{"values", QJsonObject{{"clipboard", clipboard}}}, {"inheritance", QJsonObject{}}}}};
+    QFile file(path); if (file.open(QIODevice::WriteOnly)) file.write(QJsonDocument(object).toJson(QJsonDocument::Compact));
+    return path;
+}
 bool activate(MainWindow& window, bool initial = false) {
     if (initial) window.resize(1100, 850);
     window.show();
@@ -320,11 +328,11 @@ private slots:
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path)); const auto original = contents(path);
         auto clipboard = std::make_shared<TestClipboardEndpoint>();
-        MainWindow window(path, true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, true));
         QVERIFY(activate(window, true)); auto* pane = launch(window); QVERIFY(pane); QVERIFY(ready(pane));
         QCOMPARE(pane->profile(), profileId); QVERIFY(pane->document().valid()); QCOMPARE(window.sessionCount(), size_t(1));
         auto* view = pane->findChild<VncDesktopView*>(); const int client = newestClient(); QVERIFY(client > 0);
-        QTRY_COMPARE(view->geometry(), pane->contentsRect()); QVERIFY(!pane->clipboardSharingAvailable());
+        QTRY_COMPARE(view->geometry(), pane->contentsRect()); QVERIFY(pane->clipboardSharingAvailable());
         QVERIFY(presentation(window, pane, client));
         QVERIFY(control(client, "copy"));
         QTRY_COMPARE_WITH_TIMEOUT(view->frame().pixelColor(496, 264), cyan, 8000);
@@ -359,13 +367,15 @@ private slots:
         QCOMPARE(clientState(client).value("resize_updates").toInt(), 1);
         QCOMPARE(clientState(client).value("max_outstanding").toInt(), 1);
         QCOMPARE(pane->id(), session); QVERIFY(pane->target() == target); QCOMPARE(contents(path), original);
-        QCOMPARE(clipboard->reads, 0); QCOMPARE(clipboard->writes, 0); QCOMPARE(clipboard->watches, 0);
+        // Clipboard sharing (on in Settings) sent the host text to the server as RFB cut text.
+        QTRY_VERIFY_WITH_TIMEOUT(clientState(client).value("cut_texts").toArray().contains(QString("synthetic existing host text")), 5000);
+        QVERIFY(clipboard->reads > 0); QCOMPARE(clipboard->writes, 0);
         window.close(); QTRY_VERIFY_WITH_TIMEOUT(!window.isVisible(), 8000);
     }
     void vncZrleTileBurstThroughShell() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path));
-        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); auto* pane = launch(window); QVERIFY(pane); QVERIFY(ready(pane));
         const int client = newestClient(); QVERIFY(client > 0);
         // Two updates exercise continued zlib history and removal of stale colors.
@@ -383,7 +393,7 @@ private slots:
     void temporaryVncInputThroughShell() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         auto clipboard = std::make_shared<TestClipboardEndpoint>();
-        MainWindow window(directory.filePath("connections.xml"), true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(directory.filePath("connections.xml"), true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); auto* pane = launch(window, true); QVERIFY(pane); QVERIFY(ready(pane));
         QVERIFY(pane->profile().isEmpty()); QVERIFY(!pane->document().valid());
         auto* view = pane->findChild<VncDesktopView*>(); const int client = newestClient();
@@ -448,7 +458,7 @@ private slots:
     void vncFullscreenGeometryThroughShell() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path)); const auto original = contents(path);
-        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); auto* pane = launch(window); QVERIFY(pane); QVERIFY(ready(pane));
         auto* view = pane->findChild<VncDesktopView*>(); const int client = newestClient(); QVERIFY(presentation(window, pane, client));
         auto* connections = window.findChild<ads::CDockWidget*>("connectionsDock"); auto* config = window.findChild<ads::CDockWidget*>("configDock");
@@ -485,7 +495,7 @@ private slots:
     void vncDisconnectReconnectThroughShell() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path)); const auto original = contents(path);
-        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); QPointer<SessionPane> saved = launch(window); QVERIFY(saved); QVERIFY(ready(saved));
         const auto target = saved->target(); const auto originalSession = saved->id(); int client = newestClient();
         QVERIFY(presentation(window, saved, client)); auto* view = saved->findChild<VncDesktopView*>();
@@ -512,7 +522,7 @@ private slots:
     void vncPasswordPromptThroughShell() {
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path));
-        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, std::make_shared<TestClipboardEndpoint>(), directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); QVERIFY(fixtureRequiresPassword(true));
         QVERIFY(QTest::qWaitFor([&] { return window.documentState() == MainWindow::DocumentState::Open &&
             window.selectConnectionProfile({window.connectionFiles().first(), profileId}); }, 8000));
@@ -543,7 +553,7 @@ private slots:
         QTemporaryDir directory(temporaryPath()); QVERIFY(directory.isValid());
         const auto path = directory.filePath("connections.xml"); QVERIFY(fixture(path));
         auto clipboard = std::make_shared<TestClipboardEndpoint>();
-        MainWindow window(path, true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), directory.filePath("preferences.json"));
+        MainWindow window(path, true, nullptr, clipboard, directory.filePath("trust.json"), directory.filePath("appearance.json"), preferences(directory, false));
         QVERIFY(activate(window, true)); auto* first = launch(window); QVERIFY(first); QVERIFY(ready(first)); const int firstClient = newestClient();
         QVERIFY(presentation(window, first, firstClient));
         auto* second = launch(window, true); QVERIFY(second); QVERIFY(ready(second)); const int secondClient = newestClient();

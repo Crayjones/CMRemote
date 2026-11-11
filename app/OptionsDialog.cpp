@@ -3,10 +3,15 @@
 #include "OpenH264.h"
 #include "TerminalAppearancePage.h"
 #include "TerminalAppearanceService.h"
+#include "VncCertificates.h"
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
 #include <QPointer>
 #include <QPushButton>
-OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* store, QWidget* parent, OpenH264Codec* codec, TerminalAppearanceService* terminal)
-    : QDialog(parent), ui_(std::make_unique<Ui::OptionsDialog>()), store_(store), codec_(codec), values_(values) {
+OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* store, QWidget* parent, OpenH264Codec* codec, TerminalAppearanceService* terminal,
+                             VncTrustStore* vncTrust)
+    : QDialog(parent), ui_(std::make_unique<Ui::OptionsDialog>()), store_(store), codec_(codec), vncTrust_(vncTrust), values_(values) {
     ui_->setupUi(this); setObjectName("optionsDialog"); setAttribute(Qt::WA_DeleteOnClose); setWindowModality(Qt::WindowModal);
     ui_->theme->addItem("Match System", "system"); ui_->theme->addItem("Light", "light"); ui_->theme->addItem("Dark", "dark");
     ui_->theme->setCurrentIndex(std::max(0, ui_->theme->findData(values.theme)));
@@ -17,6 +22,34 @@ OptionsDialog::OptionsDialog(PreferenceValues values, ApplicationPreferences* st
     ui_->autoUpdate->setChecked(values.autoUpdate);
     ui_->commandAsControl->setChecked(values.commandAsControl);
     ui_->clipboard->setChecked(values.defaults.effective().value("clipboard").toBool());
+    if (vncTrust_) {
+        connect(ui_->vncAuthorityImport, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getOpenFileName(this, "Import certificate authority", {}, "Certificates (*.pem *.crt *.cer *.der);;All files (*)");
+            if (path.isEmpty()) return;
+            QFile file(path);
+            if (!file.open(QIODevice::ReadOnly) || file.size() > 1 << 20) { showVncTrust("The certificate file could not be read."); return; }
+            int added = 0; const auto result = vncTrust_->importAuthorities(file.readAll(), &added);
+            showVncTrust(!result.ok ? result.error : !result.warning.isEmpty() ? result.warning : added ? QString() : "That certificate authority is already imported.");
+        });
+        connect(ui_->vncAuthorityRemove, &QPushButton::clicked, this, [this] {
+            const auto* item = ui_->vncAuthorities->currentItem(); if (!item) return;
+            const auto result = vncTrust_->removeAuthority(item->data(Qt::UserRole).toByteArray());
+            showVncTrust(result.ok ? result.warning : result.error);
+        });
+        connect(ui_->vncServerRemove, &QPushButton::clicked, this, [this] {
+            const auto* item = ui_->vncServers->currentItem(); if (!item) return;
+            const auto result = vncTrust_->unpin(item->data(Qt::UserRole).toString(), quint16(item->data(Qt::UserRole + 1).toUInt()));
+            showVncTrust(result.ok ? result.warning : result.error);
+        });
+        connect(ui_->vncAuthorities, &QListWidget::currentRowChanged, this, [this](int row) { ui_->vncAuthorityRemove->setEnabled(row >= 0); });
+        connect(ui_->vncServers, &QListWidget::currentRowChanged, this, [this](int row) { ui_->vncServerRemove->setEnabled(row >= 0); });
+        const auto loaded = vncTrust_->load();
+        showVncTrust(loaded.ok ? QString() : loaded.error);
+    } else {
+        for (auto* widget : std::initializer_list<QWidget*>{ui_->vncTitle, ui_->vncHelp, ui_->vncAuthoritiesTitle, ui_->vncAuthorities, ui_->vncAuthorityImport,
+                                                         ui_->vncAuthorityRemove, ui_->vncServersTitle, ui_->vncServers, ui_->vncServerRemove, ui_->vncTrustError})
+            widget->hide();
+    }
 #ifndef Q_OS_MACOS
     ui_->keyboardTitle->hide(); ui_->commandAsControl->hide(); ui_->commandAsControlHelp->hide();
 #endif
@@ -56,6 +89,23 @@ PreferenceValues OptionsDialog::read() const {
     // Stored with the connection defaults; connections that never set Clipboard follow it.
     if (ui_->clipboard->isChecked() != values_.defaults.effective().value("clipboard").toBool()) draft.defaults.values["clipboard"] = ui_->clipboard->isChecked();
     return draft;
+}
+void OptionsDialog::showVncTrust(const QString& error) {
+    const auto date = [](const QDateTime& value) { return value.isValid() ? value.toString("yyyy-MM-dd") : QString("unknown"); };
+    ui_->vncAuthorities->clear(); ui_->vncServers->clear();
+    for (const auto& authority : vncTrust_->authorities()) {
+        auto* item = new QListWidgetItem(authority.name() + " — expires " + date(authority.notAfter), ui_->vncAuthorities);
+        item->setData(Qt::UserRole, authority.sha256);
+        item->setToolTip(authority.subject + "\nSHA-256: " + authority.fingerprint());
+    }
+    for (const auto& server : vncTrust_->servers()) {
+        const auto endpoint = (server.host.contains(':') ? '[' + server.host + ']' : server.host) + ':' + QString::number(server.port);
+        auto* item = new QListWidgetItem(endpoint + " — " + server.certificate.name(), ui_->vncServers);
+        item->setData(Qt::UserRole, server.host); item->setData(Qt::UserRole + 1, server.port);
+        item->setToolTip(server.certificate.subject + "\nSHA-256: " + server.certificate.fingerprint());
+    }
+    ui_->vncAuthorityRemove->setEnabled(false); ui_->vncServerRemove->setEnabled(false);
+    ui_->vncTrustError->setText(error); ui_->vncTrustError->setVisible(!error.isEmpty());
 }
 void OptionsDialog::updateBusy() {
     const bool busy = saving_ || (terminal_ && terminal_->busy());

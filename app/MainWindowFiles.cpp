@@ -647,7 +647,7 @@ void MainWindow::lookupFileCredentials(Attempt attempt) {
                 // The reviewed saved password is sent only if the server requires one.
                 try { attempt->vncAuthentication = vncPasswordAuthentication(std::move(password)); }
                 catch (const std::exception&) {
-                    fail("The saved VNC password is not 1–8 printable ASCII characters; you will be asked if the server requires a password.");
+                    fail("The saved VNC password is empty, longer than 4096 bytes or contains NUL; you will be asked if the server requires a password.");
                     promptCredentials(attempt); return;
                 }
                 finishCredentials(attempt); return;

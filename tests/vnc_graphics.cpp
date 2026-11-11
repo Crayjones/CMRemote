@@ -1,4 +1,4 @@
-#include "VncGraphics.h"
+#include "VncGraphicsDriver.h"
 #include <QtTest>
 #include <array>
 #include <atomic>
@@ -44,7 +44,7 @@ private slots:
         auto bytes = wireImage(3, 2);
         bytes[0] = char(0x12); bytes[1] = char(0x34); bytes[2] = char(0x56); bytes[3] = '\0';
         bytes[7] = char(0x80); bytes[11] = char(0xff);
-        QVERIFY(graphics.raw(0, 0, 3, 2, data(bytes), size_t(bytes.size())));
+        QVERIFY(raw(graphics, 0, 0, 3, 2, data(bytes), size_t(bytes.size())));
         const auto update = committed(graphics);
         QVERIFY(update.stamp.revision > initial.stamp.revision);
         QCOMPARE(update.stamp.geometry, initial.stamp.geometry);
@@ -69,57 +69,57 @@ private slots:
     void copyOverlap() {
         QFETCH(QRect, source); QFETCH(QPoint, destination);
         VncGraphics graphics; QVERIFY(graphics.geometry(8, 8));
-        const auto bytes = wireImage(8, 8); QVERIFY(graphics.raw(0, 0, 8, 8, data(bytes), size_t(bytes.size())));
+        const auto bytes = wireImage(8, 8); QVERIFY(raw(graphics, 0, 0, 8, 8, data(bytes), size_t(bytes.size())));
         QImage desktop; QVERIFY(applyDesktopUpdate(desktop, committed(graphics)));
         auto expected = desktop; referenceCopy(expected, source, destination);
-        QVERIFY(graphics.copy(quint16(destination.x()), quint16(destination.y()), quint16(source.width()),
+        QVERIFY(copy(graphics, quint16(destination.x()), quint16(destination.y()), quint16(source.width()),
             quint16(source.height()), quint16(source.x()), quint16(source.y())));
         QVERIFY(applyDesktopUpdate(desktop, committed(graphics))); QCOMPARE(desktop, expected);
     }
     void prevalidationLeavesCanonicalPixelsAndPendingBatchUntouched() {
         VncGraphics graphics;
         const auto bytes = wireImage(4, 4);
-        QVERIFY(!graphics.raw(0, 0, 4, 4, data(bytes), size_t(bytes.size())));
-        QVERIFY(!graphics.copy(0, 0, 1, 1, 0, 0)); QVERIFY(!graphics.hasUpdate());
+        QVERIFY(!raw(graphics, 0, 0, 4, 4, data(bytes), size_t(bytes.size())));
+        QVERIFY(!copy(graphics, 0, 0, 1, 1, 0, 0)); QVERIFY(!graphics.hasUpdate());
         QVERIFY(graphics.geometry(4, 4));
-        QVERIFY(graphics.raw(0, 0, 4, 4, data(bytes), size_t(bytes.size())));
+        QVERIFY(raw(graphics, 0, 0, 4, 4, data(bytes), size_t(bytes.size())));
         const auto accepted = committed(graphics);
         QImage desktop; QVERIFY(applyDesktopUpdate(desktop, accepted)); const auto expected = desktop;
         QVERIFY(!graphics.geometry(0, 4)); QVERIFY(!graphics.geometry(8193, 1));
         QVERIFY(!graphics.geometry(8192, 1013));
-        QVERIFY(!graphics.raw(0, 0, 4, 4, nullptr, size_t(bytes.size())));
-        QVERIFY(!graphics.raw(0, 0, 4, 4, data(bytes), size_t(bytes.size() - 1)));
-        QVERIFY(!graphics.raw(0, 0, 4, 4, data(bytes), size_t(bytes.size() + 1)));
-        QVERIFY(!graphics.raw(3, 0, 2, 1, data(bytes), 8));
-        QVERIFY(!graphics.raw(65535, 0, 2, 1, data(bytes), 8));
-        QVERIFY(!graphics.raw(0, 0, 0, 1, data(bytes), 0));
-        QVERIFY(!graphics.copy(0, 0, 2, 2, 3, 3));
-        QVERIFY(!graphics.copy(3, 3, 2, 2, 0, 0));
-        QVERIFY(!graphics.copy(65535, 0, 2, 1, 0, 0));
-        QVERIFY(!graphics.copy(0, 0, 0, 1, 0, 0));
+        QVERIFY(!raw(graphics, 0, 0, 4, 4, nullptr, size_t(bytes.size())));
+        QVERIFY(!raw(graphics, 0, 0, 4, 4, data(bytes), size_t(bytes.size() - 1)));
+        QVERIFY(!raw(graphics, 0, 0, 4, 4, data(bytes), size_t(bytes.size() + 1)));
+        QVERIFY(!raw(graphics, 3, 0, 2, 1, data(bytes), 8));
+        QVERIFY(!raw(graphics, 65535, 0, 2, 1, data(bytes), 8));
+        QVERIFY(!raw(graphics, 0, 0, 0, 1, data(bytes), 0));
+        QVERIFY(!copy(graphics, 0, 0, 2, 2, 3, 3));
+        QVERIFY(!copy(graphics, 3, 3, 2, 2, 0, 0));
+        QVERIFY(!copy(graphics, 65535, 0, 2, 1, 0, 0));
+        QVERIFY(!copy(graphics, 0, 0, 0, 1, 0, 0));
         QVERIFY(!graphics.hasUpdate()); QVERIFY(committed(graphics).patches.empty());
         // Capture canonical pixels again, proving invalid calls changed no pixels.
-        QVERIFY(graphics.copy(0, 0, 4, 4, 0, 0));
+        QVERIFY(copy(graphics, 0, 0, 4, 4, 0, 0));
         const auto after = committed(graphics);
         QCOMPARE(after.stamp.geometry, accepted.stamp.geometry);
         QCOMPARE(after.stamp.revision, accepted.stamp.revision + 1);
         QVERIFY(applyDesktopUpdate(desktop, after)); QCOMPARE(desktop, expected);
         // Invalid primitives must not discard a valid batch already waiting.
-        QVERIFY(graphics.raw(0, 0, 1, 1, data(bytes), 4));
-        QVERIFY(!graphics.raw(4, 0, 1, 1, data(bytes), 4)); QVERIFY(!graphics.hasUpdate()); QVERIFY(graphics.commit()); QVERIFY(graphics.hasUpdate());
+        QVERIFY(raw(graphics, 0, 0, 1, 1, data(bytes), 4));
+        QVERIFY(!raw(graphics, 4, 0, 1, 1, data(bytes), 4)); QVERIFY(!graphics.hasUpdate()); QVERIFY(graphics.commit()); QVERIFY(graphics.hasUpdate());
         QVERIFY(applyDesktopUpdate(desktop, committed(graphics))); QCOMPARE(desktop, expected);
     }
     void actualResizeFullSnapshotSameSizePreservesAndLateBatchesOwnPixels() {
         VncGraphics graphics; QVERIFY(graphics.geometry(512, 512));
-        const auto bytes = wireImage(512, 512); QVERIFY(graphics.raw(0, 0, 512, 512, data(bytes), size_t(bytes.size())));
+        const auto bytes = wireImage(512, 512); QVERIFY(raw(graphics, 0, 0, 512, 512, data(bytes), size_t(bytes.size())));
         const auto old = committed(graphics); QImage desktop; QVERIFY(applyDesktopUpdate(desktop, old));
         const auto original = desktop;
         QVERIFY(graphics.geometry(512, 512)); QVERIFY(!graphics.hasUpdate());
-        QVERIFY(graphics.copy(0, 0, 1, 1, 511, 511));
+        QVERIFY(copy(graphics, 0, 0, 1, 1, 511, 511));
         const auto partial = committed(graphics); QVERIFY(!partial.full);
         QCOMPARE(partial.stamp.geometry, old.stamp.geometry);
         QVERIFY(graphics.geometry(513, 512));
-        QVERIFY(graphics.raw(512, 511, 1, 1, data(bytes), 4));
+        QVERIFY(raw(graphics, 512, 511, 1, 1, data(bytes), 4));
         const auto resized = committed(graphics); QVERIFY(resized.full);
         QVERIFY(resized.stamp.geometry > old.stamp.geometry); QVERIFY(resized.stamp.revision > partial.stamp.revision);
         QVERIFY(applyDesktopUpdate(desktop, resized)); QCOMPARE(desktop.size(), QSize(513, 512));
@@ -128,7 +128,7 @@ private slots:
         QVERIFY(graphics.geometry(512, 512)); const auto back = committed(graphics); QVERIFY(back.full);
         QVERIFY(back.stamp.geometry > resized.stamp.geometry);
         graphics.reset(); QVERIFY(!graphics.hasUpdate()); QVERIFY(!graphics.hasCursor());
-        QVERIFY(!graphics.copy(0, 0, 1, 1, 0, 0)); QVERIFY(graphics.geometry(512, 512));
+        QVERIFY(!copy(graphics, 0, 0, 1, 1, 0, 0)); QVERIFY(graphics.geometry(512, 512));
         const auto restarted = committed(graphics); QVERIFY(restarted.full);
         QVERIFY(restarted.stamp.geometry > back.stamp.geometry); QVERIFY(restarted.stamp.revision > back.stamp.revision);
     }
@@ -148,11 +148,11 @@ private slots:
             const int tile = i % 1024, x = (tile % 32) * 64, y = (tile / 32) * 64;
             const std::array<uchar, 4> pixel{uchar(i % 255), 25, 90, 0};
             // One FramebufferUpdate per pixel while the GUI never takes a batch.
-            QVERIFY(graphics.raw(quint16(x), quint16(y), 1, 1, pixel.data(), pixel.size())); QVERIFY(graphics.commit());
+            QVERIFY(raw(graphics, quint16(x), quint16(y), 1, 1, pixel.data(), pixel.size())); QVERIFY(graphics.commit());
             expected.setPixel(x, y, qRgb(90, 25, int(i % 255)));
         }
         // Copy uses the latest canonical source, not the GUI's older image.
-        QVERIFY(graphics.copy(1, 1, 1, 1, 0, 0)); expected.setPixel(1, 1, expected.pixel(0, 0));
+        QVERIFY(copy(graphics, 1, 1, 1, 1, 0, 0)); expected.setPixel(1, 1, expected.pixel(0, 0));
         const auto update = committed(graphics); QVERIFY(update.full);
         QVERIFY(update.patches.size() <= DesktopUpdateAccumulator::MaxPatches);
         quint64 ownedBytes = 0;
@@ -165,9 +165,9 @@ private slots:
         VncGraphics graphics; QVERIFY(graphics.geometry(1024, 768));
         QImage desktop; QVERIFY(applyDesktopUpdate(desktop, committed(graphics)));
         const std::array<uchar, 4> red{0, 0, 255, 0}, blue{255, 0, 0, 0};
-        QVERIFY(graphics.raw(8, 8, 1, 1, red.data(), red.size()));
-        QVERIFY(graphics.raw(9, 9, 1, 1, blue.data(), blue.size()));
-        QVERIFY(graphics.raw(904, 650, 1, 1, blue.data(), blue.size()));
+        QVERIFY(raw(graphics, 8, 8, 1, 1, red.data(), red.size()));
+        QVERIFY(raw(graphics, 9, 9, 1, 1, blue.data(), blue.size()));
+        QVERIFY(raw(graphics, 904, 650, 1, 1, blue.data(), blue.size()));
         const auto batch = committed(graphics); QVERIFY(!batch.full); QCOMPARE(batch.patches.size(), size_t(2));
         QVERIFY(applyDesktopUpdate(desktop, batch)); QCOMPARE(desktop.pixel(8, 8), qRgb(255, 0, 0));
         QCOMPARE(desktop.pixel(9, 9), qRgb(0, 0, 255)); QCOMPARE(desktop.pixel(904, 650), qRgb(0, 0, 255));
@@ -202,9 +202,9 @@ private slots:
         QImage desktop; QVERIFY(applyDesktopUpdate(desktop, graphics.takeUpdate()));
         const auto left = wireImage(64, 64);
         // First half of a window move: the GUI must not observe it on its own.
-        QVERIFY(graphics.raw(0, 0, 64, 64, data(left), size_t(left.size())));
+        QVERIFY(raw(graphics, 0, 0, 64, 64, data(left), size_t(left.size())));
         QVERIFY(!graphics.hasUpdate()); QVERIFY(graphics.takeUpdate().patches.empty());
-        QVERIFY(graphics.copy(64, 0, 64, 64, 0, 0));
+        QVERIFY(copy(graphics, 64, 0, 64, 64, 0, 0));
         QVERIFY(!graphics.hasUpdate());
         QVERIFY(graphics.commit()); QVERIFY(graphics.hasUpdate());
         const auto update = graphics.takeUpdate(); QVERIFY(!update.patches.empty());
@@ -213,7 +213,7 @@ private slots:
         // Empty FramebufferUpdates commit nothing and do not wake the GUI.
         QVERIFY(graphics.commit()); QVERIFY(!graphics.hasUpdate());
         // Geometry changes publish one full snapshot including the same update's pixels.
-        QVERIFY(graphics.geometry(64, 64)); QVERIFY(graphics.raw(0, 0, 64, 64, data(left), size_t(left.size())));
+        QVERIFY(graphics.geometry(64, 64)); QVERIFY(raw(graphics, 0, 0, 64, 64, data(left), size_t(left.size())));
         QVERIFY(!graphics.hasUpdate()); QVERIFY(graphics.commit());
         const auto resized = graphics.takeUpdate(); QVERIFY(resized.full); QVERIFY(resized.stamp.geometry > update.stamp.geometry);
         QImage fresh; QVERIFY(applyDesktopUpdate(fresh, resized)); QCOMPARE(fresh.pixel(5, 5), wirePixel(left, 5 * 64 + 5));
@@ -225,7 +225,7 @@ private slots:
         std::thread worker([&] {
             for (int i = 0; i < 1000; ++i) {
                 const std::array<uchar, 4> pixel{uchar(i & 255), 30, 40, 0};
-                if (!graphics.raw(quint16(i % 256), quint16(i / 256), 1, 1, pixel.data(), pixel.size()) || !graphics.commit()) valid = false;
+                if (!raw(graphics, quint16(i % 256), quint16(i / 256), 1, 1, pixel.data(), pixel.size()) || !graphics.commit()) valid = false;
                 if (!graphics.cursor(0, 0, 1, 1, pixel.data(), pixel.size())) valid = false;
             }
             complete = true;

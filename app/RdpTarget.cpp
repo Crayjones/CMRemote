@@ -22,10 +22,11 @@ QJsonObject RdpOptions::json() const {
         {"gateway_username", gatewayUsername}, {"gateway_domain", gatewayDomain}, {"gateway_credentials", gatewayCredentials}, {"sound", sound}, {"clipboard", clipboard}};
 }
 QJsonObject SessionTarget::overrides() const {
-    auto result = protocol == "vnc" ? QJsonObject{{"view_only", viewOnly}} :
+    auto result = protocol == "vnc" ? QJsonObject{{"view_only", viewOnly}, {"smart_size", smartSize ? "aspect" : "off"}} :
         protocol == "ssh" ? QJsonObject{{"ssh_auth", sshAuth}, {"ssh_key_path", sshKeyPath}} : options.json();
     result.insert("protocol", protocol); result.insert("host", host); result.insert("port", int(port));
-    if (protocol != "vnc") { result.insert("username", username); result.insert("domain", protocol == "ssh" ? QString() : domain); }
+    result.insert("username", username);
+    if (protocol != "vnc") result.insert("domain", protocol == "ssh" ? QString() : domain);
     return result;
 }
 rm::RdpOptions bridgeOptions(const RdpOptions& o) {
@@ -59,7 +60,8 @@ SessionTarget sessionTarget(const QJsonObject& e) {
          quint16(qBound(0, e.value("idle_minutes").toInt(0), 240)), e.value("load_balance_info").toString(), e.value("gateway_usage").toString("never"),
          e.value("gateway_host").toString(), quint16(e.value("gateway_port").toInt(443)), e.value("gateway_username").toString(),
          e.value("gateway_domain").toString(), e.value("gateway_credentials").toString("same"), e.value("sound").toString("local"), e.value("clipboard").toBool()},
-         e.value("protocol").toString("rdp"), e.value("ssh_auth").toString("password"), e.value("ssh_key_path").toString(), e.value("view_only").toBool()};
+         e.value("protocol").toString("rdp"), e.value("ssh_auth").toString("password"), e.value("ssh_key_path").toString(), e.value("view_only").toBool(),
+         e.value("smart_size").toString("aspect") != "off"};
 }
 std::optional<SessionTarget> normalizeSshTarget(const SessionTarget& target) {
     if (target.protocol != "ssh") return std::nullopt;
@@ -79,7 +81,10 @@ std::optional<SessionTarget> normalizeVncTarget(const SessionTarget& target) {
     if (target.protocol != "vnc") return std::nullopt;
     try {
         const auto result = rm::normalize_vnc_target(bridgeVncTarget(target));
-        auto normalized = target; normalized.host = qstr(result.host); normalized.username.clear(); normalized.domain.clear();
+        // VeNCrypt Plain sends the username literally; there is no VNC domain.
+        for (const auto ch : target.username) if (ch.category() == QChar::Other_Control) return std::nullopt;
+        if (target.username.toUtf8().size() > 4096) return std::nullopt;
+        auto normalized = target; normalized.host = qstr(result.host); normalized.domain.clear();
         return normalized;
     } catch (const rust::Error&) { return std::nullopt; }
 }

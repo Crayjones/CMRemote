@@ -31,14 +31,15 @@ impl Session {
         let id = Uuid::new_v4().to_string();
         let info = SessionInfo { id: id.clone(), title: title.to_owned(), protocol: e.protocol.name().into(),
             host: e.host, port: e.port,
-            username: if e.protocol == Protocol::Vnc { String::new() } else { e.username },
+            username: e.username,
             domain: if e.protocol == Protocol::Vnc { String::new() } else { e.domain }, options,
             ssh_auth: e.ssh_auth.name().into(), ssh_key_path: e.ssh_key_path, view_only: e.protocol == Protocol::Vnc && e.view_only,
             mock, graphical: matches!(e.protocol, Protocol::Rdp | Protocol::Vnc),
             keyboard: e.protocol != Protocol::Vnc || !e.view_only,
             mouse: e.protocol != Protocol::Ssh && (e.protocol != Protocol::Vnc || !e.view_only),
-            clipboard: !mock && e.protocol == Protocol::Rdp,
-            resize: e.protocol != Protocol::Vnc };
+            clipboard: !mock && matches!(e.protocol, Protocol::Rdp | Protocol::Vnc),
+            // VNC follows the pane through ExtendedDesktopSize unless view-only.
+            resize: e.protocol != Protocol::Vnc || !e.view_only };
         let mut s = Self { id: id.clone(), profile: profile.map(str::to_owned), state: "connecting".into(), mock, view_only: info.view_only,
             commands: None, stop: None, events: None, worker: None };
         if mock {

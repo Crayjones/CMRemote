@@ -180,7 +180,8 @@ void DesktopView::refreshRemoteCursor(bool rebuild) {
 }
 QRect DesktopView::presentationRect() const {
     if (frame_.isNull()) return rect();
-    QSize size = frame_.size(); size.scale(this->size(), Qt::KeepAspectRatio);
+    QSize size = frame_.size();
+    if (!actualSize_ || size.width() > width() || size.height() > height()) size.scale(this->size(), Qt::KeepAspectRatio);
     return QRect(QPoint((width() - size.width()) / 2, (height() - size.height()) / 2), size);
 }
 bool DesktopView::mapPointer(QPointF position, QPoint& remote, bool clamp) const {
@@ -198,12 +199,15 @@ void DesktopView::trackPointer(QPointF position) {
 void DesktopView::setPointerDragActive(bool active) { pointerDragActive_ = active; refreshRemoteCursor(); }
 void DesktopView::setDesktopLabel(QString label) { desktopLabel_ = std::move(label); refreshPlaceholder(); }
 std::array<float, 16> DesktopView::letterboxVertices(QSize widgetSize, QSize frameSize) {
-    // TriangleStrip order: top-left, bottom-left, top-right, bottom-right. pos.xy then uv.xy.
     QSize scaled = frameSize; scaled.scale(widgetSize, Qt::KeepAspectRatio);
-    const float left = float((widgetSize.width() - scaled.width()) / 2) / qMax(1, widgetSize.width());
-    const float top = float((widgetSize.height() - scaled.height()) / 2) / qMax(1, widgetSize.height());
-    const float right = left + float(scaled.width()) / qMax(1, widgetSize.width());
-    const float bottom = top + float(scaled.height()) / qMax(1, widgetSize.height());
+    return letterboxVertices(widgetSize, QRect(QPoint((widgetSize.width() - scaled.width()) / 2, (widgetSize.height() - scaled.height()) / 2), scaled));
+}
+std::array<float, 16> DesktopView::letterboxVertices(QSize widgetSize, QRect target) {
+    // TriangleStrip order: top-left, bottom-left, top-right, bottom-right. pos.xy then uv.xy.
+    const float left = float(target.x()) / qMax(1, widgetSize.width());
+    const float top = float(target.y()) / qMax(1, widgetSize.height());
+    const float right = left + float(target.width()) / qMax(1, widgetSize.width());
+    const float bottom = top + float(target.height()) / qMax(1, widgetSize.height());
     const float x0 = 2 * left - 1, x1 = 2 * right - 1, y0 = 1 - 2 * top, y1 = 1 - 2 * bottom;
     return {x0, y0, 0, 0, x0, y1, 0, 1, x1, y0, 1, 0, x1, y1, 1, 1};
 }
@@ -271,7 +275,7 @@ void DesktopView::render(QRhiCommandBuffer* cb) {
     const bool drawable = ready && !frame_.isNull();
     QRhiResourceUpdateBatch* batch = nullptr;
     if (drawable && (uploadPending_ || geometryDirty_)) {
-        auto vertices = letterboxVertices(size(), frame_.size());
+        auto vertices = letterboxVertices(size(), presentationRect());
         const QMatrix4x4 corr = rhi()->clipSpaceCorrMatrix();
         for (int i = 0; i < 4; ++i) {
             const QVector4D p = corr * QVector4D(vertices[i * 4], vertices[i * 4 + 1], 0.0f, 1.0f);
@@ -340,6 +344,10 @@ void DesktopView::releaseResources() {
     clearResources(false);
     uploadPending_ = fullUpload_ = !frame_.isNull(); gpuDamage_ = {}; geometryDirty_ = true;
     submissionPending_ = false; submittedSize_ = {}; presentedRevision_ = 0;
+}
+void DesktopView::setActualSize(bool actual) {
+    if (actualSize_ == actual) return;
+    actualSize_ = actual; geometryDirty_ = true; refreshRemoteCursor(true); update();
 }
 void DesktopView::resizeEvent(QResizeEvent* e) {
     QRhiWidget::resizeEvent(e); placeholder_->setGeometry(rect()); geometryDirty_ = true;

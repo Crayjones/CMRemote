@@ -20,8 +20,11 @@ fn view_only_inherits_and_explicit_false_overrides_without_account_requirements(
     assert_eq!(snapshot["profiles"][1]["effective"]["port"], 5900);
     let view = core.open_session(CHILD, false).unwrap();
     assert!(view.view_only); assert!(view.graphical); assert!(!view.keyboard); assert!(!view.mouse);
-    assert!(!view.clipboard); assert!(!view.resize); assert!(view.username.is_empty()); assert!(view.domain.is_empty());
+    // VeNCrypt Plain sends the username literally (no RDP qualification rules); Domain stays passive.
+    assert!(view.clipboard); assert!(!view.resize); assert_eq!(view.username, "TEAM\\user@example.test"); assert!(view.domain.is_empty());
     core.close_session(&view.id);
+    let control_character = profile(CHILD, "connection", Value::Null, json!({"protocol":"vnc", "host":"localhost", "username":"bad\u{7}name"}));
+    assert!(Core::detached().load_document(&document(vec![control_character])).is_err());
     child["overrides"]["view_only"] = json!(false);
     core.load_document(&document(vec![folder, child])).unwrap();
     let snapshot: Value = serde_json::from_str(&core.snapshot().unwrap()).unwrap();
@@ -42,7 +45,7 @@ fn temporary_vnc_is_secret_free_normalized_and_never_persists() {
         let normalized = normalize_vnc_target(&target).unwrap();
         let session = core.open_temporary_vnc_session(&target, false).unwrap();
         assert_eq!(session.host, normalized.host); assert_eq!(session.port, 5901); assert_eq!(session.protocol, "vnc");
-        assert!(session.username.is_empty()); assert!(session.domain.is_empty()); assert!(!session.clipboard); assert!(!session.resize);
+        assert!(session.username.is_empty()); assert!(session.domain.is_empty()); assert!(session.clipboard); assert!(session.resize);
         assert!(session.graphical && session.keyboard && session.mouse); assert!(!session.view_only);
         assert_eq!(core.stored_document().unwrap(), before);
         core.session_state(&session.id, "disconnected").unwrap(); core.close_session(&session.id);

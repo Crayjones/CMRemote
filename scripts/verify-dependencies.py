@@ -82,6 +82,23 @@ SSH_API = {
 }
 
 
+VNC_API = {
+    'COPYING': ['GNU GENERAL PUBLIC LICENSE', 'Version 2, June 1991'],
+    'include/rfb/rfbclient.h': ['GetCredentialProc', 'rfbCredentialTypeX509', 'rfbCredentialTypeUser',
+        'MallocFrameBufferProc', 'GotFrameBufferUpdateProc', 'FinishedFrameBufferUpdateProc', 'GotCursorShapeProc',
+        'GotXCutTextProc', 'InitialiseRFBConnection', 'SetFormatAndEncodings', 'HandleRFBServerMessage',
+        'SendKeyEvent', 'SendPointerEvent', 'SendClientCutText', 'SendExtDesktopSize', 'rfbClientCleanup'],
+    'src/libvncclient/tls_openssl.c': ['HandleVeNCryptAuth', 'X509_VERIFY_PARAM_set1_host', 'SSL_CTX_load_verify_locations'],
+}
+
+
+def verify_vnc_api(files):
+    for path, symbols in VNC_API.items():
+        text = files.get(path)
+        if text is None or any(symbol not in text for symbol in symbols):
+            raise ValueError('libvncclient: missing VNC API or license contract in ' + path)
+
+
 def verify_ssh_api(sources):
     for key, files in SSH_API.items():
         for path, symbols in files.items():
@@ -175,8 +192,9 @@ def audit(cache, lock):
             prefix = key + '-' + lock['versions'][key] + '/'
             sources[key] = {path: archive.extractfile(prefix + path).read().decode() for path in files}
     verify_ssh_api(sources)
-    from rust_notices import audit_vendored
-    audit_vendored(lock)
+    with tarfile.open(cache / lock['artifacts']['libvncclient']['file']) as archive:
+        prefix = 'libvncserver-LibVNCServer-' + lock['versions']['libvncclient'] + '/'
+        verify_vnc_api({path: archive.extractfile(prefix + path).read().decode() for path in VNC_API})
 
 
 def main():
@@ -189,7 +207,7 @@ def main():
     cache = cache_dir(args.platform)
     cache.mkdir(parents=True, exist_ok=True)
     lock = json.loads((ROOT / 'dependencies.lock.json').read_text())
-    required = ['freerdp', 'cxx', 'cxx-build', 'rust-manifest'] + list(PERFORMANCE_API) + list(SSH_API)
+    required = ['freerdp', 'libvncclient', 'cxx', 'cxx-build', 'rust-manifest'] + list(PERFORMANCE_API) + list(SSH_API)
     required += [key for key in lock['artifacts'] if key.startswith('rust-notice-')]
     required += ['qt-metadata-' + p for p in ('macos', 'linux-arm64', 'linux-amd64')]
     for key in required:
@@ -200,7 +218,7 @@ def main():
             verify_bytes((cache / a['file']).read_bytes(), a['sha256'])
     audit(cache, lock)
     assert before == dict(os.environ)
-    print('PASS: pinned source checksums, FreeRDP/russh/libvterm APIs, vendored vnc-rs baseline/notices, license artifacts, minimal Qt packages, cxx toolchain, containment')
+    print('PASS: pinned source checksums, FreeRDP/russh/libvterm/LibVNCClient APIs, license artifacts, minimal Qt packages, cxx toolchain, containment')
 
 
 if __name__ == '__main__':

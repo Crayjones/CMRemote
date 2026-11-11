@@ -353,7 +353,7 @@ void MainWindow::notification(const QString& text, Notice level) {
 QString MainWindow::describeSession(const SessionPane* pane) const {
     if (!pane) return {};
     const auto target = pane->target();
-    QString text = target.protocol.toUpper() + " " + (target.username.isEmpty() || target.protocol == "vnc" ? QString() : target.username + "@") + target.endpoint();
+    QString text = target.protocol.toUpper() + " " + (target.username.isEmpty() ? QString() : target.username + "@") + target.endpoint();
     QString name;
     if (const auto doc = context(pane->document()); doc && !pane->profile().isEmpty()) name = doc->profiles().value(pane->profile()).value("name").toString();
     if (!name.isEmpty()) text += " (" + name + ")"; else if (pane->profile().isEmpty()) text += " (Quick Connect)";
@@ -523,6 +523,13 @@ QMenu* MainWindow::sessionMenu(SessionPane* pane) {
     connect(pane, &SessionPane::state, clipboard, [target, clipboard] {
         clipboard->setEnabled(target && target->clipboardSharingAvailable());
     });
+    if (pane->target().protocol == "vnc" && !pane->mock()) {
+        auto* smart = menu->addAction("SmartSize"); smart->setObjectName("actionTabSmartSize"); smart->setCheckable(true);
+        smart->setChecked(pane->vncSmartSize());
+        smart->setToolTip("On fills the panel (the remote desktop is resized, or scaled when it cannot be). Off shows the server's own resolution at actual size.");
+        connect(smart, &QAction::triggered, this, [this, target](bool enabled) { if (target && isOpenPane(target)) target->setVncSmartSize(enabled); });
+        connect(pane, &SessionPane::vncSmartSizeChanged, smart, &QAction::setChecked);
+    }
     auto* capture = menu->addAction(QString("Capture mouse (%1 to release)").arg(DesktopView::captureChordText()));
     capture->setObjectName("actionSessionCaptureMouse"); capture->setEnabled(pane->pointerCaptureAvailable());
     capture->setToolTip("Lock the pointer to this desktop and send raw mouse movement, for games and 3D applications.");

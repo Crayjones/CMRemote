@@ -34,7 +34,7 @@ from env import ROOT, environment
 CASES = ('savedVncRenderingThroughShell', 'temporaryVncInputThroughShell',
          'vncFullscreenGeometryThroughShell', 'vncDisconnectReconnectThroughShell',
          'vncResponsiveCloseThroughShell', 'vncZrleTileBurstThroughShell', 'vncPasswordPromptThroughShell')
-# DES response for password "password" to challenge bytes 0..15 (core/tests/vnc_transport.rs).
+# DES response for password "password" to challenge bytes 0..15 (standard VncAuth test vector).
 PASSWORD_RESPONSE = bytes.fromhex('b866924125c8eebb9debc1db61c538e2')
 BGRA = bytes((32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0))
 COLORS = ((224, 48, 80), (32, 192, 112), (48, 96, 224), (224, 192, 48))
@@ -98,6 +98,7 @@ class Client:
         self.pixel_format = []
         self.commands = deque()
         self.keys, self.pointers, self.request_sizes = deque(maxlen=512), deque(maxlen=512), deque(maxlen=64)
+        self.cut_texts = deque(maxlen=16)
         self.pending = False
         self.hold = False
         self.changed = False
@@ -117,7 +118,7 @@ class Client:
                  'resize_updates', 'key_count', 'pointer_count', 'max_outstanding', 'hold', 'zrle_updates',
                  'password_requested', 'password_accepted')} | {
                     'zrle_latencies_ms': list(self.zrle_latencies_ms),
-                    'keys': list(self.keys), 'pointers': list(self.pointers),
+                    'keys': list(self.keys), 'pointers': list(self.pointers), 'cut_texts': list(self.cut_texts),
                     'request_sizes': list(self.request_sizes), 'encodings': self.encodings,
                     'pixel_format': self.pixel_format}
 
@@ -333,8 +334,10 @@ class OwnedRfb:
                     padding, length = exact(stream, 3), struct.unpack('!I', exact(stream, 4))[0]
                     if padding != b'\0' * 3 or length > 4096:
                         raise ValueError('unbounded fixture clipboard message')
-                    exact(stream, length)
-                    raise ValueError('VNC unexpectedly sent clipboard data')
+                    # Shared host text (Latin-1 RFB cut text) is recorded for the shell test.
+                    text = exact(stream, length).decode('latin-1')
+                    with self.lock:
+                        client.cut_texts.append(text)
                 else:
                     raise ValueError('unexpected VNC client message type')
         except (EOFError, ConnectionResetError, BrokenPipeError):
