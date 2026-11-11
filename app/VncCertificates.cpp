@@ -8,16 +8,18 @@
 #include <QTimeZone>
 #include <algorithm>
 #include <memory>
+#ifdef Q_OS_WIN
+// Before OpenSSL: wincrypt.h defines X509_NAME and friends as macros, which OpenSSL's
+// headers undefine when they come after it.
+#include <windows.h>
+#include <wincrypt.h>
+#endif
 #include <openssl/asn1.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #ifdef Q_OS_MACOS
 #include <Security/Security.h>
-#endif
-#ifdef Q_OS_WIN
-#include <windows.h>
-#include <wincrypt.h>
 #endif
 
 namespace {
