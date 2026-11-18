@@ -26,6 +26,16 @@ def run():
         root.clipboard_append(text)
         root.update_idletasks()
 
+    def copy_files():
+        # Deterministic files the client copies off the remote clipboard (several RDP chunks).
+        folder = Path('/tmp/rm-remote-files'); folder.mkdir(exist_ok=True)
+        (folder / 'report.txt').write_text('remote-file-fixture\n')
+        (folder / 'blocks.bin').write_bytes(bytes(i % 251 for i in range(1500000)))
+        root.selection_clear(selection='CLIPBOARD')
+        root.clipboard_clear()
+        root.clipboard_append('file:///tmp/rm-remote-files/report.txt\r\nfile:///tmp/rm-remote-files/blocks.bin\r\n', type='text/uri-list')
+        root.update_idletasks()
+
     def paste(event):
         try:
             text = root.clipboard_get().replace('\r\n', '\n').replace('\r', '\n')
@@ -48,6 +58,7 @@ def run():
     root.bind('<F6>', lambda event: copy('server-session-clipboard\nemoji: 😀'))
     root.bind('<F7>', lambda event: copy('server-session-disabled'))
     root.bind('<F8>', paste)
+    root.bind('<F9>', lambda event: copy_files())
     root.focus_force()
     step = 0
 

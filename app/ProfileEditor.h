@@ -51,6 +51,7 @@ public:
     void adopt(const QJsonObject& profile, const QHash<QString, QJsonObject>& profiles);
     void useInherited();
     void setSshKeyPath(const QString& path);
+    void setSharedFolder(const QString& path);
     void setIcon(const QString& name);
     QString icon() const { return effective_.value("icon").toString(); }
     bool canInherit() const;

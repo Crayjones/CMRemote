@@ -34,7 +34,7 @@ def llvm_mingw_dir(dev, lock, arch):
 
 
 def freerdp_options(prefix):
-    # Same feature contract as macOS/Linux: client library only, no device redirection or audio.
+    # Same feature contract as Linux: client library, shared-folder drive redirection, silent rdpsnd.
     options = [option for option in bootstrap.freerdp_options(prefix, 'linux')
                if not option.startswith(('-DOPENH264_LIBRARY=', '-DWITH_UNICODE_BUILTIN='))]
     return options + ['-DOPENH264_LIBRARY=' + str(prefix / 'lib/libopenh264.dll.a'),

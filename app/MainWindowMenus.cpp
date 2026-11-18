@@ -512,10 +512,11 @@ QMenu* MainWindow::sessionMenu(SessionPane* pane) {
         menuAction(menu, "actionSaveAsConnection", !transitionPending_, [this, target] {
             if (target && target->profile().isEmpty()) guard([this, target] { saveTemporaryToFile(target); });
         });
-    auto* clipboard = menu->addAction("Share text clipboard for this session");
+    const bool rdp = pane->target().protocol == "rdp";
+    auto* clipboard = menu->addAction(rdp ? "Share clipboard for this session" : "Share text clipboard for this session");
     clipboard->setObjectName("actionSessionClipboard"); clipboard->setCheckable(true);
     clipboard->setChecked(pane->clipboardSharingEnabled()); clipboard->setEnabled(pane->clipboardSharingAvailable());
-    clipboard->setToolTip("Share Unicode text only. Off for every new connection; files and images are not shared.");
+    clipboard->setToolTip(rdp ? "Share text and files with the remote computer. Images are not shared." : "Share text only. Files and images are not shared.");
     connect(clipboard, &QAction::triggered, this, [this, target](bool enabled) {
         if (target && isOpenPane(target)) target->setClipboardSharingEnabled(enabled);
     });
@@ -627,6 +628,33 @@ QMenu* MainWindow::configMenu() {
                             fail("The owning file changed or was locked. No SSH key path was saved."); return;
                         }
                         if (selectConnectionProfile(reference)) editor_->setSshKeyPath(path);
+                    });
+                });
+                connect(picker, &QDialog::finished, this, [this, reference] { fileDialogs_.remove(reference.document); });
+                picker->open();
+            });
+        });
+    }
+    if (current == "shared_folder") {
+        auto* choose = menu->addAction("Choose shared folder…"); choose->setObjectName("actionChooseSharedFolder");
+        choose->setEnabled(reference.valid() && editor_->rowEditable(current) && !transitionPending_);
+        connect(choose, &QAction::triggered, this, [this, reference] {
+            guard([this, reference] {
+                const auto doc = context(reference.document);
+                if (!doc || !doc->canWrite() || closeApproved_ || !selectConnectionProfile(reference)) return;
+                if (fileDialogs_.value(reference.document)) { fileDialogs_.value(reference.document)->raise(); return; }
+                const auto generation = doc->status().generation; const auto revision = doc->status().revision;
+                auto* picker = new QFileDialog(this, "Choose a folder to share with the remote computer"); picker->setObjectName("sharedFolderPicker");
+                picker->setFileMode(QFileDialog::Directory); picker->setOption(QFileDialog::ShowDirsOnly);
+                if (testMode_) picker->setOption(QFileDialog::DontUseNativeDialog);
+                picker->setAttribute(Qt::WA_DeleteOnClose); fileDialogs_.insert(reference.document, picker);
+                connect(picker, &QFileDialog::fileSelected, this, [this, reference, generation, revision](const QString& path) {
+                    guard([this, reference, generation, revision, path] {
+                        const auto doc = context(reference.document);
+                        if (!doc || !doc->canWrite() || closeApproved_ || doc->status().generation != generation || doc->status().revision != revision) {
+                            fail("The owning file changed or was locked. No shared folder was saved."); return;
+                        }
+                        if (selectConnectionProfile(reference)) editor_->setSharedFolder(path);
                     });
                 });
                 connect(picker, &QDialog::finished, this, [this, reference] { fileDialogs_.remove(reference.document); });

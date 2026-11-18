@@ -18,7 +18,8 @@ struct RdpOptions {
     quint16 gatewayPort = 443;
     QString gatewayUsername, gatewayDomain, gatewayCredentials = "same";
     QString sound = "local"; // local | remote | none
-    bool clipboard = false; // share text with the remote computer from the start
+    bool clipboard = false; // share the clipboard with the remote computer from the start
+    QString sharedFolder; // host folder redirected as a drive; empty shares nothing
     bool gatewayEnabled() const { return gatewayUsage != "never"; }
     // mRemoteNG SmartSize scales a screen-sized desktop and never resizes the session.
     bool dynamicResize() const { return automaticResize && resolution != "smart_size"; }

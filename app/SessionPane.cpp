@@ -15,8 +15,12 @@
 #include "RdpDesktopFit.h"
 #include "Credentials.h"
 #include "IdleTimeout.h"
+#include <QDir>
 #include <QGuiApplication>
 #include <QLabel>
+#include <QLocale>
+#include <QProgressDialog>
+#include <QTemporaryDir>
 #include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -75,6 +79,38 @@ void SessionPane::setClipboardSharingEnabled(bool enabled) {
     refreshClipboardFocus(); clipboard_->setEnabled(enabled);
     if (previous != clipboard_->enabled()) emit clipboardSharingChanged(clipboard_->enabled());
 }
+namespace {
+// Files copied on the remote computer stay pasteable after their tab closes; the newest few
+// folders are kept (older ones can no longer be on the clipboard) and removed at exit.
+void keepUntilExit(std::unique_ptr<QTemporaryDir> folder) {
+    static std::vector<std::unique_ptr<QTemporaryDir>> kept;
+    kept.push_back(std::move(folder));
+    while (kept.size() > 4) kept.erase(kept.begin());
+}
+}
+void SessionPane::finishFileTransfer() {
+    if (fileTransfer_) { fileTransfer_->hide(); fileTransfer_->deleteLater(); fileTransfer_.clear(); }
+    staging_.reset();
+}
+void SessionPane::stageRemoteFiles() {
+#ifdef RM_WITH_RDP
+    if (staging_ || !worker_ || !connected_ || !clipboard_->enabled() || !remoteFiles_) return;
+    auto folder = std::make_unique<QTemporaryDir>(QDir::temp().filePath("CMRemote-clipboard-XXXXXX"));
+    if (!folder->isValid()) {
+        emit fileTransferNotice("Could not create a temporary folder for files copied on the remote computer: " + folder->errorString(), false);
+        return;
+    }
+    staging_ = std::move(folder); stagingList_ = remoteFileList_; stagingStamp_ = remoteFilesStamp_;
+    // Small copies finish silently; anything slower shows progress and Cancel.
+    auto* progress = new QProgressDialog("Copying files from the remote computer…", "Cancel", 0, 1000, this);
+    progress->setObjectName("remoteFilesProgress"); progress->setWindowTitle("Copy Remote Files");
+    progress->setAutoClose(false); progress->setAutoReset(false); progress->setMinimumDuration(1000); progress->setValue(0);
+    QPointer<RdpWorker> worker = worker_;
+    connect(progress, &QProgressDialog::canceled, worker, [worker] { if (worker) worker->cancelDownload(); });
+    fileTransfer_ = progress;
+    worker_->downloadFiles(staging_->path(), stagingList_);
+#endif
+}
 QString SessionPane::statusDetail() const { return status_ ? status_->text() : QString(); }
 void SessionPane::event(const QString& kind, const QString& text) {
     if (!active_) return;
@@ -88,6 +124,7 @@ void SessionPane::shutdown() {
     // Release while this worker/generation is still current, then disable input.
     if (vncDesktop_) { vncDesktop_->releaseInput(); vncDesktop_->setInputEnabled(false); }
     setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
+    finishFileTransfer(); remoteFiles_ = 0;
     active_ = false; ++connectionGeneration_;
     acceptingVncFrames_ = false;
     closeVncPassword();
@@ -157,6 +194,7 @@ void SessionPane::startRdp(RdpConfig config) {
         if (s == "disconnected" || s == "failed") {
             desktop_->setPointerCaptured(false);
             acceptingFrames_ = false; desktop_->resetRemoteCursor(); setClipboardSharingEnabled(false); clipboard_->reset(); connected_ = false;
+            finishFileTransfer(); remoteFiles_ = 0;
         } else if (s == "connected") { connected_ = true; refreshClipboardFocus(); setClipboardSharingEnabled(clipboardConsent); }
         status_->setText(detail); status_->setVisible(s != "connected"); emit state(id_, s);
     }, Qt::QueuedConnection);
@@ -207,6 +245,32 @@ void SessionPane::startRdp(RdpConfig config) {
     worker_->configureClipboard({});
     connect(clipboard_, &SessionClipboard::configure, worker_, &RdpWorker::configureClipboard);
     connect(clipboard_, &SessionClipboard::localText, worker_, &RdpWorker::clipboardText);
+    connect(clipboard_, &SessionClipboard::localFiles, worker_, &RdpWorker::clipboardFiles);
+    connect(worker_, &RdpWorker::clipboardNotice, this, [this, current](const QString& text) { if (current()) emit notice(text); }, Qt::QueuedConnection);
+    // A remote file copy is saved to a temporary folder, then those files go on the host clipboard.
+    connect(worker_, &RdpWorker::remoteFilesChanged, this, [this, current](quint64 list, int files, quint64, ClipboardStamp stamp) {
+        if (!current()) return;
+        remoteFileList_ = list; remoteFiles_ = files; remoteFilesStamp_ = stamp;
+        stageRemoteFiles(); // a copy in progress for an older list is stopped by the worker and restarts below
+    }, Qt::QueuedConnection);
+    connect(worker_, &RdpWorker::fileTransferProgress, this, [this, current](quint64 done, quint64 total) {
+        if (!current() || !fileTransfer_) return;
+        const QLocale locale;
+        fileTransfer_->setValue(total ? int(qMin<quint64>(1000, done / qMax<quint64>(1, total / 1000))) : 0);
+        fileTransfer_->setLabelText(QString("Copying files from the remote computer… %1 of %2")
+            .arg(locale.formattedDataSize(qint64(done)), locale.formattedDataSize(qint64(total))));
+    }, Qt::QueuedConnection);
+    connect(worker_, &RdpWorker::fileTransferFinished, this, [this, current](bool success, const QString& message) {
+        if (!current() || !staging_) return;
+        auto folder = std::move(staging_); finishFileTransfer();
+        if (stagingList_ != remoteFileList_) { stageRemoteFiles(); return; } // superseded by a newer remote copy
+        if (!success) { emit fileTransferNotice(message, false); return; }
+        QStringList paths;
+        for (const auto& entry : QDir(folder->path()).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::Name))
+            paths << entry.absoluteFilePath();
+        clipboard_->receiveFiles(paths, stagingStamp_);
+        keepUntilExit(std::move(folder));
+    }, Qt::QueuedConnection);
     connect(worker_, &RdpWorker::clipboardAvailable, this, [this, worker, current] {
         if (!current()) return;
         auto delivery = worker->takeClipboard();

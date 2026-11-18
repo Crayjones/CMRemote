@@ -103,6 +103,14 @@ class DependencyContract(unittest.TestCase):
         self.assertIn('-DOPENH264_LIBRARY=' + str(ROOT / '.dev/linux/prefix/lib/libopenh264.so'), linux)
         self.assertIn('-DWITH_UNICODE_BUILTIN=ON', linux)
         self.assertNotIn('-DWITH_OPENH264_LOADING=OFF', options)
+        # Shared folders: rdpdr + drive everywhere, plus the rdpsnd FreeRDP loads beside rdpdr.
+        # Only macOS gets an audio backend; no other device class is redirected.
+        for flags in (options, linux):
+            for flag in ('CHANNEL_RDPDR=ON', 'CHANNEL_DRIVE=ON', 'CHANNEL_RDPSND=ON', 'CHANNEL_PRINTER=OFF',
+                         'CHANNEL_SMARTCARD=OFF', 'CHANNEL_SERIAL=OFF', 'CHANNEL_PARALLEL=OFF', 'WITH_FUSE=OFF', 'WITH_WINMM=OFF'):
+                self.assertIn('-D' + flag, flags)
+        self.assertIn('-DWITH_MACAUDIO=ON', options)
+        self.assertIn('-DWITH_MACAUDIO=OFF', linux)
 
     def test_freerdp_loads_only_the_app_supplied_openh264(self):
         import tempfile

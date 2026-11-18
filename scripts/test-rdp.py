@@ -78,6 +78,9 @@ def session_features_check(case):
         return ("from pathlib import Path; assert Path('/tmp/rm-session-paste').read_text() == 'host-session-clipboard\\nemoji: 😀'; "
                 "events=Path('/tmp/rm-input').read_text(); assert 'F6' in events and 'F7' in events and 'F8' in events; "
                 "print('Server verified Unicode paste and copy/disabled-copy input')")
+    if case == 'remoteFilesLandOnHostClipboardThroughShell':
+        return ("from pathlib import Path; events=Path('/tmp/rm-input').read_text(); assert 'F9' in events; "
+                "print('Server copied owned files to its clipboard')")
     if case == 'savedClipboardSettingStartsSharingThroughShell':
         return ("from pathlib import Path; assert Path('/tmp/rm-session-paste').read_text() == 'host-session-clipboard\\nemoji: 😀'; "
                 "print('Server verified paste from the saved Clipboard setting')")

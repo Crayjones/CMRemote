@@ -27,6 +27,7 @@ pub mod ffi {
         gateway_credentials: String,
         sound: String,
         clipboard: bool,
+        shared_folder: String,
     }
     struct RdpTarget { host: String, port: u16, username: String, domain: String, options: RdpOptions }
     struct SshTarget { host: String, port: u16, username: String, auth: String, key_path: String }
@@ -138,7 +139,8 @@ impl Default for ffi::RdpOptions {
             console_session: false, cache_bitmaps: false, wallpaper: true, themes: true, font_smoothing: true,
             security_protocol: "auto".into(), server_auth: "warn".into(), use_credssp: true, idle_minutes: 0, load_balance_info: String::new(),
             gateway_usage: "never".into(), gateway_host: String::new(), gateway_port: 443, gateway_username: String::new(),
-            gateway_domain: String::new(), gateway_credentials: "same".into(), sound: "local".into(), clipboard: false }
+            gateway_domain: String::new(), gateway_credentials: "same".into(), sound: "local".into(), clipboard: false,
+            shared_folder: String::new() }
     }
 }
 impl ffi::RdpOptions {
@@ -154,7 +156,7 @@ impl ffi::RdpOptions {
             gateway_usage: Some(GatewayUsage::parse(&self.gateway_usage)?), gateway_host: Some(self.gateway_host.clone()),
             gateway_port: Some(self.gateway_port), gateway_username: Some(self.gateway_username.clone()),
             gateway_domain: Some(self.gateway_domain.clone()), gateway_credentials: Some(GatewayCredentials::parse(&self.gateway_credentials)?),
-            sound: Some(Sound::parse(&self.sound)?), clipboard: Some(self.clipboard),
+            sound: Some(Sound::parse(&self.sound)?), clipboard: Some(self.clipboard), shared_folder: Some(self.shared_folder.clone()),
             ..Default::default()
         })
     }
@@ -174,7 +176,7 @@ impl ffi::RdpOptions {
             gateway_usage: crate::model::GatewayUsage::parse(&self.gateway_usage)?, gateway_host: self.gateway_host.clone(), gateway_port: self.gateway_port,
             gateway_username: self.gateway_username.clone(), gateway_domain: self.gateway_domain.clone(),
             gateway_credentials: crate::model::GatewayCredentials::parse(&self.gateway_credentials)?,
-            sound: crate::model::Sound::parse(&self.sound)?, clipboard: self.clipboard,
+            sound: crate::model::Sound::parse(&self.sound)?, clipboard: self.clipboard, shared_folder: self.shared_folder.clone(),
             ssh_auth: crate::model::SshAuth::Password, ssh_key_path: String::new(), view_only: false,
             smart_size: crate::model::VncSmartSize::Aspect, sources: std::collections::HashMap::new(), unsupported: Vec::new(),
         })
@@ -187,6 +189,7 @@ impl From<&crate::model::Effective> for ffi::RdpOptions {
             security_protocol: e.security_protocol.name().into(), server_auth: e.server_auth.name().into(), use_credssp: e.use_credssp,
             idle_minutes: e.idle_minutes, load_balance_info: e.load_balance_info.clone(), gateway_usage: e.gateway_usage.name().into(),
             gateway_host: e.gateway_host.clone(), gateway_port: e.gateway_port, gateway_username: e.gateway_username.clone(),
-            gateway_domain: e.gateway_domain.clone(), gateway_credentials: e.gateway_credentials.name().into(), sound: e.sound.name().into(), clipboard: e.clipboard }
+            gateway_domain: e.gateway_domain.clone(), gateway_credentials: e.gateway_credentials.name().into(), sound: e.sound.name().into(), clipboard: e.clipboard,
+            shared_folder: e.shared_folder.clone() }
     }
 }

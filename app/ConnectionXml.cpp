@@ -282,7 +282,7 @@ bool rekeyable(const Node& node, bool root, const ConnectionXml::Canceled& cance
         for (const auto& name : names) result.insert("Inherit" + name);
         result.insert("InheritDescription"); result.insert("InheritUseConsoleSession");
         for (const auto& name : {"RmHostInherited", "RmResolution", "RmResolutionInherited", "RmSshAuth", "RmSshKeyPath", "RmSshAuthInherited", "RmSshKeyPathInherited",
-                                 "RmRdpSecurity", "RmRdpSecurityInherited", "RmGatewayPort", "RmGatewayPortInherited"}) result.insert(name);
+                                 "RmRdpSecurity", "RmRdpSecurityInherited", "RmGatewayPort", "RmGatewayPortInherited", "RmSharedFolder", "RmSharedFolderInherited"}) result.insert(name);
         return result;
     }();
     for (const auto& a : node.attributes) {
@@ -326,7 +326,9 @@ const Field Fields[] = {
     {"gateway_domain", "RDGatewayDomain", "InheritRDGatewayDomain", Field::String},
     {"gateway_credentials", "RDGatewayUseConnectionCredentials", "InheritRDGatewayUseConnectionCredentials", Field::GatewayCredentials},
     {"sound", "RedirectSound", "InheritRedirectSound", Field::Sound},
-    {"clipboard", "RedirectClipboard", "InheritRedirectClipboard", Field::Boolean}
+    {"clipboard", "RedirectClipboard", "InheritRedirectClipboard", Field::Boolean},
+    // One host folder; mRemoteNG's RedirectDiskDrives(Custom) names Windows drive letters and stays passive.
+    {"shared_folder", "RmSharedFolder", "RmSharedFolderInherited", Field::KeyPath}
 };
 // Native enum names and numeric aliases → model names; empty = mRemoteNG default.
 struct NativeChoice { const char* model; QStringList native; };
@@ -493,7 +495,7 @@ bool inactiveSshAttribute(QString name) {
         "LoadBalanceInfo", "RdpVersion", "RedirectPrinters", "RedirectPorts", "RedirectSmartCards", "RedirectAudioCapture", "RedirectKeys",
         "RedirectDiskDrives", "RedirectDiskDrivesCustom", "RedirectSound", "SoundQuality", "RedirectClipboard", "EnableDesktopComposition",
         "DisableFullWindowDrag", "DisableMenuAnimations", "DisableCursorShadow", "DisableCursorBlinking", "RDPMinutesToIdleTimeout", "RDPAlertIdleTimeout",
-        "RmRdpSecurity", "RmRdpSecurityInherited", "RmGatewayPort", "RmGatewayPortInherited"
+        "RmRdpSecurity", "RmRdpSecurityInherited", "RmGatewayPort", "RmGatewayPortInherited", "RmSharedFolder", "RmSharedFolderInherited"
     };
     return names.contains(name);
 }

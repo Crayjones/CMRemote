@@ -44,14 +44,35 @@ RdpInputQueue::Result RdpInputQueue::clipboardControl(ClipboardControl control) 
     std::lock_guard<std::mutex> lock(mutex_);
     if (state() != Result::Queued) return state();
     clipboardControl_ = control;
-    if (!control.enabled) { clipboard_.clear(); clipboardDirty_ = false; }
+    if (!control.enabled) { clipboard_.clear(); clipboardDirty_ = false; clipboardFiles_.clear(); clipboardFilesDirty_ = false; }
     return signal();
 }
-RdpInputQueue::Batch RdpInputQueue::takeClipboard() {
-    std::lock_guard<std::mutex> lock(mutex_); Batch batch;
+RdpInputQueue::Result RdpInputQueue::clipboardFiles(QStringList paths, ClipboardStamp stamp) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state() != Result::Queued) return state();
+    if (paths.size() > MaxClipboardFiles) paths.clear();
+    clipboardFiles_ = std::move(paths); clipboardFilesStamp_ = stamp; clipboardFilesDirty_ = true; return signal();
+}
+RdpInputQueue::Result RdpInputQueue::download(QString directory, quint64 list) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state() != Result::Queued) return state();
+    download_ = std::make_pair(std::move(directory), list); cancelDownload_ = false; return signal();
+}
+RdpInputQueue::Result RdpInputQueue::cancelDownload() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state() != Result::Queued) return state();
+    download_.reset(); cancelDownload_ = true; return signal();
+}
+void RdpInputQueue::moveClipboard(Batch& batch) {
     batch.clipboard.swap(clipboard_); batch.clipboardStamp = clipboardStamp_;
     batch.clipboardDirty = clipboardDirty_; clipboardDirty_ = false;
     batch.clipboardControl = clipboardControl_; clipboardControl_.reset();
+    batch.clipboardFiles.swap(clipboardFiles_); batch.clipboardFilesStamp = clipboardFilesStamp_;
+    batch.clipboardFilesDirty = clipboardFilesDirty_; clipboardFilesDirty_ = false;
+}
+RdpInputQueue::Batch RdpInputQueue::takeClipboard() {
+    std::lock_guard<std::mutex> lock(mutex_); Batch batch;
+    moveClipboard(batch);
     return batch;
 }
 void RdpInputQueue::stop() {
@@ -66,9 +87,9 @@ RdpInputQueue::Batch RdpInputQueue::take() {
         batch.commands.push_back(std::move(commands_.front())); commands_.pop_front();
     }
     batch.size = size_; size_ = {};
-    batch.clipboard.swap(clipboard_); batch.clipboardStamp = clipboardStamp_;
-    batch.clipboardControl = clipboardControl_; clipboardControl_.reset();
-    batch.clipboardDirty = clipboardDirty_; clipboardDirty_ = false;
+    moveClipboard(batch);
+    batch.download = std::move(download_); download_.reset();
+    batch.cancelDownload = cancelDownload_; cancelDownload_ = false;
     // Enqueue and reset share this lock. A later enqueue always sets the event again.
     if (commands_.empty() && !stopping_ && !failed_ && !operations_.reset(event_)) failed_ = true;
     batch.stopping = stopping_; batch.eventFailed = failed_;
