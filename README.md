@@ -9,7 +9,7 @@ CMRemote is an open-source, tabbed remote connection manager for macOS, Windows 
 
 ## Features
 
-- **RDP** — remote desktops with H.264/AVC support.
+- **RDP** — remote desktops with H.264/AVC support, shared folders, and text and file copy/paste.
 - **SSH** — embedded terminal with password and private-key authentication.
 - **VNC** — VNC/RFB connections, including VeNCrypt TLS and X509, clipboard text and resize-to-fit.
 - Organize connections in folders with inherited settings.

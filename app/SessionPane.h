@@ -2,6 +2,7 @@
 #include "remotemanager-core/src/bridge.rs.h"
 #include <QWidget>
 #include <QPointer>
+#include <memory>
 #include "SshAuthentication.h"
 #include "VncWorker.h"
 #include "SshHostKeyStore.h"
@@ -9,6 +10,8 @@ class SshWorker;
 class VncDesktopView;
 class SshHostKeyService;
 class QDialog;
+class QProgressDialog;
+class QTemporaryDir;
 #include "RdpTarget.h"
 #include "DocumentIdentity.h"
 #include "SessionClipboard.h"
@@ -68,12 +71,16 @@ signals:
     void vncSmartSizeChanged(bool enabled);
     // Security or diagnostic message for the Notifications panel.
     void notice(QString text);
+    // Outcome of a remote → host file copy for the Notifications panel.
+    void fileTransferNotice(QString text, bool success);
     // The user chose Always trust for this VNC server certificate (DER).
     void vncCertificateTrusted(QString host, quint16 port, QByteArray certificate);
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 private:
     void refreshClipboardFocus();
+    void finishFileTransfer();
+    void stageRemoteFiles();
     void cancelSshTrust();
     void inspectSshHost(const QString& request, SshHostKey key, quint64 generation);
     void sshTrustReply(const QString& request, SshHostKey key, quint64 generation, SshHostKeyReply reply);
@@ -98,6 +105,13 @@ private:
     quint64 connectionGeneration_ = 0;
     SessionClipboard* clipboard_ = nullptr;
     bool connected_ = false;
+    // RDP remote → host files: the newest server list, the copy in progress, and the folder
+    // whose files are on the host clipboard (kept until replaced or the app exits).
+    quint64 remoteFileList_ = 0, stagingList_ = 0;
+    int remoteFiles_ = 0;
+    ClipboardStamp remoteFilesStamp_, stagingStamp_;
+    std::unique_ptr<QTemporaryDir> staging_;
+    QPointer<QProgressDialog> fileTransfer_;
     QString id_, profile_;
     const DocumentId document_;
     const SessionTarget target_;

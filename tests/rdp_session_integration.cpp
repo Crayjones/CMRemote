@@ -10,7 +10,10 @@
 #include <QAction>
 #include <QContextMenuEvent>
 #include <QDialog>
+#include <QDir>
 #include <QFile>
+#include <QFileDialog>
+#include <QProgressDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -168,6 +171,33 @@ private slots:
         QTest::qWait(500); QTest::keyClick(view, Qt::Key_F8);
         QTRY_VERIFY_WITH_TIMEOUT(host->text == std::optional<QString>("paste-verified"), 15000);
         window.closeTab(0); QCOMPARE(window.sessionCount(), size_t(0)); window.close();
+    }
+    void remoteFilesLandOnHostClipboardThroughShell() {
+        // Files copied on the remote computer are saved to a temporary folder and put on the host clipboard.
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const auto path = dir.filePath("confCons.xml"); QVERIFY(createConnection(path));
+        auto host = std::make_shared<TestClipboardEndpoint>();
+        MainWindow window(path, false, nullptr, host); QVERIFY(show(window)); auto* pane = connectSaved(window); QVERIFY(pane);
+        QVERIFY(sharing(window, pane, true)); auto* view = pane->findChild<DesktopView*>();
+        QTest::mouseClick(view, Qt::LeftButton, Qt::NoModifier, position(view, {400, 400})); QTest::qWait(500);
+        QSignalSpy notices(pane, &SessionPane::fileTransferNotice);
+        QTest::keyClick(view, Qt::Key_F9);
+        QVERIFY(QTest::qWaitFor([&] { return host->fileWrites > 0 || !notices.isEmpty(); }, 60000));
+        QVERIFY2(notices.isEmpty(), notices.isEmpty() ? "" : qPrintable(notices.last()[0].toString()));
+        QCOMPARE(host->fileWrites, 1); QCOMPARE(host->files.size(), 2);
+        const auto read = [](const QString& file) { QFile f(file); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray("<missing>"); };
+        QByteArray blocks(1500000, '\0'); for (int i = 0; i < blocks.size(); ++i) blocks[i] = char(i % 251);
+        const QDir staged = QFileInfo(host->files[0]).dir();
+        QCOMPARE(host->files, QStringList({staged.filePath("blocks.bin"), staged.filePath("report.txt")}));
+        QCOMPARE(read(staged.filePath("report.txt")), QByteArray("remote-file-fixture\n"));
+        QVERIFY(read(staged.filePath("blocks.bin")) == blocks);
+        QCOMPARE(staged.entryList(QDir::Files | QDir::Hidden).size(), 2); // no partial files left behind
+        QVERIFY(!pane->findChild<QProgressDialog*>("remoteFilesProgress"));
+        // The saved files are this session's own copy: never offered back to the remote computer.
+        QTest::qWait(1000); QCOMPARE(host->fileWrites, 1);
+        window.closeTab(0); QCOMPARE(window.sessionCount(), size_t(0));
+        QVERIFY(QFileInfo::exists(staged.filePath("report.txt"))); // still pasteable after the tab closes
+        window.close();
     }
 };
 QTEST_MAIN(SessionIntegration)

@@ -3,6 +3,8 @@
 #include <freerdp/freerdp.h>
 #include <freerdp/settings.h>
 #include <freerdp/config.h>
+#include <QDir>
+#include <QFileInfo>
 #include <winpr/crypto.h>
 #include <winpr/ssl.h>
 #include <cstring>
@@ -55,7 +57,8 @@ bool applyRdpSecurity(rdpSettings* s, const RdpOptions& o) {
     return ok;
 }
 bool rdpAudioPlaybackAvailable() {
-#if defined(CHANNEL_RDPSND_CLIENT) && defined(CHANNEL_RDPDR_CLIENT)
+    // rdpsnd is built everywhere for rdpdr; only a native backend actually plays sound.
+#if defined(CHANNEL_RDPSND_CLIENT) && defined(CHANNEL_RDPDR_CLIENT) && defined(WITH_MACAUDIO)
     return true;
 #else
     return false;
@@ -67,6 +70,37 @@ bool applyRdpAudio(rdpSettings* s, const QString& sound) {
     const bool local = sound == "local" && rdpAudioPlaybackAvailable();
     return freerdp_settings_set_bool(s, FreeRDP_AudioPlayback, local) &&
         freerdp_settings_set_bool(s, FreeRDP_RemoteConsoleAudio, sound == "remote");
+}
+QString rdpSharedFolderProblem(const QString& folder) {
+    if (folder.isEmpty()) return {};
+#if defined(CHANNEL_DRIVE_CLIENT) && defined(CHANNEL_RDPDR_CLIENT)
+    const QFileInfo info(folder);
+    if (!info.isAbsolute()) return "Shared folder must be a full path: " + folder;
+    if (!info.isDir()) return "Shared folder does not exist or is not a folder: " + folder;
+    if (!info.isReadable()) return "Shared folder cannot be read: " + folder;
+    return {};
+#else
+    return "This build of CMRemote cannot share folders.";
+#endif
+}
+QString rdpSharedFolderName(const QString& folder) {
+    auto name = QFileInfo(QDir::cleanPath(folder)).fileName();
+    // Drive names cannot carry path separators; a root folder has no name of its own.
+    for (auto& c : name) if (c == '/' || c == '\\' || c == ':' || c.unicode() < 0x20) c = '_';
+    return name.isEmpty() ? QStringLiteral("CMRemote") : name.left(64);
+}
+bool applyRdpSharedFolder(rdpSettings* s, const QString& folder) {
+    if (!s) return false;
+    if (folder.isEmpty()) return freerdp_settings_set_bool(s, FreeRDP_DeviceRedirection, FALSE);
+    if (!rdpSharedFolderProblem(folder).isEmpty()) return false;
+    const auto name = rdpSharedFolderName(folder).toUtf8();
+    const auto path = QDir::toNativeSeparators(QFileInfo(folder).absoluteFilePath()).toUtf8();
+    const char* const args[] = {name.constData(), path.constData()};
+    auto* device = freerdp_device_new(RDPDR_DTYP_FILESYSTEM, 2, args);
+    if (!device) return false;
+    if (!freerdp_device_collection_add(s, device)) { freerdp_device_free(device); return false; }
+    // Not RedirectDrives: FreeRDP would add every mounted volume.
+    return freerdp_settings_set_bool(s, FreeRDP_DeviceRedirection, TRUE);
 }
 bool requestRdpMessageChannel(rdpSettings* s) {
     // KRdp sends continuous RTT requests once active; FreeRDP fails the session

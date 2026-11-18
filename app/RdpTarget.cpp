@@ -19,7 +19,8 @@ QJsonObject RdpOptions::json() const {
         {"console_session", consoleSession}, {"cache_bitmaps", cacheBitmaps}, {"wallpaper", wallpaper}, {"themes", themes}, {"font_smoothing", fontSmoothing},
         {"security_protocol", securityProtocol}, {"server_auth", serverAuth}, {"use_credssp", useCredSsp}, {"idle_minutes", int(idleMinutes)},
         {"load_balance_info", loadBalanceInfo}, {"gateway_usage", gatewayUsage}, {"gateway_host", gatewayHost}, {"gateway_port", int(gatewayPort)},
-        {"gateway_username", gatewayUsername}, {"gateway_domain", gatewayDomain}, {"gateway_credentials", gatewayCredentials}, {"sound", sound}, {"clipboard", clipboard}};
+        {"gateway_username", gatewayUsername}, {"gateway_domain", gatewayDomain}, {"gateway_credentials", gatewayCredentials}, {"sound", sound}, {"clipboard", clipboard},
+        {"shared_folder", sharedFolder}};
 }
 QJsonObject SessionTarget::overrides() const {
     auto result = protocol == "vnc" ? QJsonObject{{"view_only", viewOnly}, {"smart_size", smartSize ? "aspect" : "off"}} :
@@ -33,7 +34,8 @@ rm::RdpOptions bridgeOptions(const RdpOptions& o) {
     const auto utf8 = [](const QString& text) { return text.toUtf8().toStdString(); };
     return {o.resolution.toStdString(), o.automaticResize, o.colorDepth, o.consoleSession, o.cacheBitmaps, o.wallpaper, o.themes, o.fontSmoothing,
         utf8(o.securityProtocol), utf8(o.serverAuth), o.useCredSsp, o.idleMinutes, utf8(o.loadBalanceInfo), utf8(o.gatewayUsage),
-        utf8(o.gatewayHost), o.gatewayPort, utf8(o.gatewayUsername), utf8(o.gatewayDomain), utf8(o.gatewayCredentials), utf8(o.sound), o.clipboard};
+        utf8(o.gatewayHost), o.gatewayPort, utf8(o.gatewayUsername), utf8(o.gatewayDomain), utf8(o.gatewayCredentials), utf8(o.sound), o.clipboard,
+        utf8(o.sharedFolder)};
 }
 rm::RdpTarget bridgeTarget(const SessionTarget& target) {
     return {target.host.toUtf8().toStdString(), target.port, target.username.toUtf8().toStdString(), target.domain.toUtf8().toStdString(), bridgeOptions(target.options)};
@@ -49,7 +51,8 @@ SessionTarget sessionTarget(const rm::SessionInfo& info) {
     return {qstr(info.host), info.port, qstr(info.username), qstr(info.domain),
         {qstr(o.resolution), o.automatic_resize, o.color_depth, o.console_session, o.cache_bitmaps, o.wallpaper, o.themes, o.font_smoothing,
          qstr(o.security_protocol), qstr(o.server_auth), o.use_credssp, o.idle_minutes, qstr(o.load_balance_info), qstr(o.gateway_usage),
-         qstr(o.gateway_host), o.gateway_port, qstr(o.gateway_username), qstr(o.gateway_domain), qstr(o.gateway_credentials), qstr(o.sound), o.clipboard},
+         qstr(o.gateway_host), o.gateway_port, qstr(o.gateway_username), qstr(o.gateway_domain), qstr(o.gateway_credentials), qstr(o.sound), o.clipboard,
+         qstr(o.shared_folder)},
         qstr(info.protocol), qstr(info.ssh_auth), qstr(info.ssh_key_path), info.view_only};
 }
 SessionTarget sessionTarget(const QJsonObject& e) {
@@ -59,7 +62,8 @@ SessionTarget sessionTarget(const QJsonObject& e) {
          e.value("security_protocol").toString("auto"), e.value("server_auth").toString("warn"), e.value("use_credssp").toBool(true),
          quint16(qBound(0, e.value("idle_minutes").toInt(0), 240)), e.value("load_balance_info").toString(), e.value("gateway_usage").toString("never"),
          e.value("gateway_host").toString(), quint16(e.value("gateway_port").toInt(443)), e.value("gateway_username").toString(),
-         e.value("gateway_domain").toString(), e.value("gateway_credentials").toString("same"), e.value("sound").toString("local"), e.value("clipboard").toBool()},
+         e.value("gateway_domain").toString(), e.value("gateway_credentials").toString("same"), e.value("sound").toString("local"), e.value("clipboard").toBool(),
+         e.value("shared_folder").toString()},
          e.value("protocol").toString("rdp"), e.value("ssh_auth").toString("password"), e.value("ssh_key_path").toString(), e.value("view_only").toBool(),
          e.value("smart_size").toString("aspect") != "off"};
 }

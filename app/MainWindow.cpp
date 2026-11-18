@@ -866,6 +866,9 @@ void MainWindow::attachSession(const QString& profile, SessionTarget target, boo
         });
         QPointer<SessionPane> guarded = pane;
         connect(pane, &SessionPane::notice, this, [this](const QString& text) { notification(text, Notice::Warning); });
+        connect(pane, &SessionPane::fileTransferNotice, this, [this](const QString& text, bool success) {
+            notification(text, success ? Notice::Info : Notice::Warning);
+        });
         connect(pane, &SessionPane::state, this, [this, guarded, document](const QString& session, const QString& state) {
             if (!guarded || guarded->id() != session || !guarded->active()) return;
             if (state == "failed" || state == "disconnected") exitFullscreenFor(guarded);

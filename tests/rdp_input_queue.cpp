@@ -76,6 +76,22 @@ private slots:
         QCOMPARE(WaitForSingleObject(queue.event(), 0), DWORD(WAIT_TIMEOUT));
         queue.stop(); QCOMPARE(queue.clipboardControl({}), RdpInputQueue::Result::Stopped);
     }
+    void clipboardFilesAndDownloadsWakeWorker() {
+        RdpInputQueue queue; const ClipboardStamp stamp{1, 2, 3};
+        QCOMPARE(queue.clipboardFiles({"/owned/a.txt"}, stamp), RdpInputQueue::Result::Queued);
+        QCOMPARE(WaitForSingleObject(queue.event(), 0), DWORD(WAIT_OBJECT_0));
+        auto clip = queue.takeClipboard(); QVERIFY(clip.clipboardFilesDirty);
+        QCOMPARE(clip.clipboardFiles, QStringList({"/owned/a.txt"})); QCOMPARE(clip.clipboardFilesStamp, stamp);
+        QVERIFY(!queue.takeClipboard().clipboardFilesDirty);
+        QCOMPARE(queue.download("/owned/target", 4), RdpInputQueue::Result::Queued);
+        auto batch = queue.take(); QVERIFY(batch.download); QCOMPARE(batch.download->first, QString("/owned/target"));
+        QCOMPARE(batch.download->second, quint64(4)); QVERIFY(!batch.cancelDownload); QVERIFY(!queue.take().download);
+        queue.download("/owned/target", 5); QCOMPARE(queue.cancelDownload(), RdpInputQueue::Result::Queued);
+        batch = queue.take(); QVERIFY(!batch.download); QVERIFY(batch.cancelDownload);
+        queue.clipboardFiles({"/owned/b"}, stamp); queue.clipboardControl({false, false, {2, 2, 3}});
+        clip = queue.takeClipboard(); QVERIFY(!clip.clipboardFilesDirty); QVERIFY(clip.clipboardFiles.isEmpty());
+        queue.stop(); QCOMPARE(queue.download("/owned/target", 6), RdpInputQueue::Result::Stopped);
+    }
     void inputWakeCannotBeLost() {
         resetting = attempting = false;
         RdpInputQueue queue({createEvent, setEvent, gatedReset, closeEvent});

@@ -46,6 +46,11 @@ public:
     void localClipboard(QString text);
     void clipboardText(QString text, ClipboardStamp stamp);
     void configureClipboard(ClipboardControl control);
+    // Host files on the clipboard (empty: none), offered to the server with the text's stamp.
+    void clipboardFiles(QStringList paths, ClipboardStamp stamp);
+    // Copies remote file list `list` into an existing folder; progress and the outcome arrive as signals.
+    void downloadFiles(QString directory, quint64 list);
+    void cancelDownload();
     // Answer to credentialsRequired; nullopt cancels the connection.
     void provideCredentials(std::optional<TransientCredentials> credentials);
     DesktopUpdate takeUpdate();
@@ -61,6 +66,11 @@ signals:
     void stateChanged(QString state, QString detail);
     void remoteClipboard(QString text);
     void clipboardAvailable();
+    // files == 0: the remote clipboard holds no files. List ids never repeat within a worker.
+    void remoteFilesChanged(quint64 list, int files, quint64 bytes, ClipboardStamp stamp);
+    void fileTransferProgress(quint64 done, quint64 total);
+    void fileTransferFinished(bool success, QString message);
+    void clipboardNotice(QString text);
     // FreeRDP asked for credentials during connection setup (gateway or server).
     void credentialsRequired(bool gateway, QString endpoint, QString username, QString domain);
     void resizeAvailable(bool available);

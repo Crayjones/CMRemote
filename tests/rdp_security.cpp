@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
+#include <QDir>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QXmlStreamReader>
@@ -157,6 +158,44 @@ private slots:
         auto w = fresh(); QVERIFY(RdpWorker::applyProfileSettings(w.get(), target, {720, 480}));
         QCOMPARE(flag(w, FreeRDP_AudioPlayback), rdpAudioPlaybackAvailable());
         target.options.sound = "bogus"; QVERIFY(!normalizeRdpTarget(target));
+    }
+    void sharedFolderRedirectsOneDrive() {
+        QTemporaryDir root; QVERIFY(root.isValid()); QVERIFY(QDir(root.path()).mkpath("Project Files"));
+        const auto folder = QDir(root.path()).filePath("Project Files");
+        auto none = fresh(); QVERIFY(freerdp_settings_set_bool(none.get(), FreeRDP_DeviceRedirection, TRUE));
+        QVERIFY(applyRdpSharedFolder(none.get(), {})); QVERIFY(!flag(none, FreeRDP_DeviceRedirection));
+        QCOMPARE(freerdp_settings_get_uint32(none.get(), FreeRDP_DeviceCount), 0u);
+        auto s = fresh(); QVERIFY(rdpSharedFolderProblem(folder).isEmpty()); QVERIFY(applyRdpSharedFolder(s.get(), folder));
+        QVERIFY(flag(s, FreeRDP_DeviceRedirection));
+        QVERIFY(!flag(s, FreeRDP_RedirectDrives)); QVERIFY(!flag(s, FreeRDP_RedirectHomeDrive)); // never every volume
+        QCOMPARE(freerdp_settings_get_uint32(s.get(), FreeRDP_DeviceCount), 1u);
+        const auto* device = reinterpret_cast<const RDPDR_DRIVE*>(freerdp_device_collection_find_type(s.get(), RDPDR_DTYP_FILESYSTEM));
+        QVERIFY(device); QCOMPARE(QString::fromUtf8(device->device.Name), QString("Project Files"));
+        QCOMPARE(QString::fromUtf8(device->Path), QDir::toNativeSeparators(folder));
+        QCOMPARE(rdpSharedFolderName("/"), QString("CMRemote"));
+        QVERIFY(rdpSharedFolderProblem("relative/folder").contains("full path"));
+        QVERIFY(rdpSharedFolderProblem(QDir(root.path()).filePath("missing")).contains("does not exist"));
+        auto missing = fresh(); QVERIFY(!applyRdpSharedFolder(missing.get(), QDir(root.path()).filePath("missing")));
+        QCOMPARE(freerdp_settings_get_uint32(missing.get(), FreeRDP_DeviceCount), 0u);
+        SessionTarget target{"host.example", 3389, "alice"}; target.options.sharedFolder = folder; QVERIFY(normalizeRdpTarget(target));
+        target.options.sharedFolder = "bad\nfolder"; QVERIFY(!normalizeRdpTarget(target));
+    }
+    void sharedFolderRoundTripsXml() {
+        const Secret master(QByteArray("Password"));
+        auto parsed = ConnectionXml::read(xml("RmSharedFolder=\"/Users/alice/Shared\" RmSharedFolderInherited=\"false\""), &master); QVERIFY(parsed);
+        const auto projection = parsed->projection(); QVERIFY(projection);
+        QCOMPARE(profile(*projection).value("overrides").toObject().value("shared_folder").toString(), QString("/Users/alice/Shared"));
+        const auto e = effective(*projection); QVERIFY(e.value("unsupported").toArray().isEmpty());
+        QCOMPARE(sessionTarget(e).options.sharedFolder, QString("/Users/alice/Shared"));
+        auto document = QJsonDocument::fromJson(*projection).object(); auto profiles = document.value("profiles").toArray();
+        auto edited = profiles[0].toObject(); auto o = edited.value("overrides").toObject();
+        o["shared_folder"] = "/Volumes/Data/Exchange"; edited["overrides"] = o; profiles[0] = edited; document["profiles"] = profiles;
+        QVERIFY(parsed->patch(master, QJsonDocument(document).toJson(QJsonDocument::Compact)));
+        const auto saved = parsed->serialize(master); QVERIFY(saved);
+        QCOMPARE(attribute(*saved, "RmSharedFolder"), QByteArray("/Volumes/Data/Exchange"));
+        // mRemoteNG drive-letter redirection is still refused rather than reinterpreted.
+        auto letters = ConnectionXml::read(xml("RedirectDiskDrives=\"Custom\" RedirectDiskDrivesCustom=\"D\""), &master); QVERIFY(letters);
+        QVERIFY(effective(*letters->projection()).value("unsupported").toArray().contains("redirection"));
     }
     void messageChannelAndAutodetectWithoutRdpdr() {
         // B38: KRdp sends message-channel auto-detect PDUs during connect and

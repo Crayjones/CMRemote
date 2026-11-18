@@ -56,7 +56,7 @@ add_library(rm_frontend STATIC
     app/TerminalScreen.cpp app/TerminalScreen.h app/TerminalView.cpp
     app/TerminalAppearance.cpp app/TerminalAppearance.h app/TerminalAppearanceService.cpp app/TerminalAppearanceService.h
     app/TerminalAppearancePage.cpp app/TerminalAppearancePage.h app/ui/TerminalAppearancePage.ui
-    app/SessionClipboard.cpp app/SessionClipboard.h app/ClipboardTransfer.cpp app/ClipboardTransfer.h app/RemoteCursor.h
+    app/SessionClipboard.cpp app/SessionClipboard.h app/ClipboardTransfer.cpp app/ClipboardTransfer.h app/ClipboardFiles.cpp app/ClipboardFiles.h app/RemoteCursor.h
     app/PerformanceTrace.cpp app/PerformanceTrace.h app/DesktopUpdate.cpp app/DesktopUpdate.h
     app/SessionFullscreenController.cpp app/SessionFullscreenController.h app/FullscreenWindow.cpp app/FullscreenWindow.h
     app/Credentials.cpp app/Credentials.h app/ui/CredentialsDialog.ui

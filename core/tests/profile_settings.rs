@@ -78,3 +78,20 @@ fn invalidSettingsPreserveProjection() {
     let mut detached = Core::detached(); assert!(detached.load_document(&wrong_schema.to_string()).is_err());
     wrong_schema["schema_version"] = json!(3); assert!(detached.load_document(&wrong_schema.to_string()).is_err());
 }
+#[test]
+fn sharedFolderInheritsAndRejectsControlCharacters() {
+    const FOLDER: &str = "a9a0c2f4-31c7-4d3c-9a43-5f2a1d0e7b11";
+    let mut doc = document();
+    doc["profiles"][0]["parent"] = json!(FOLDER);
+    doc["profiles"].as_array_mut().unwrap().insert(0, json!({"id":FOLDER,"name":"Folder","kind":"folder","parent":null,
+        "overrides":{"shared_folder":"/owned/Exchange"}}));
+    let mut core = Core::detached(); core.load_document(&doc.to_string()).unwrap();
+    let e = effective(&core, ID); assert_eq!(e["shared_folder"], "/owned/Exchange"); assert_eq!(e["sources"]["shared_folder"], FOLDER);
+    let mut edit = profile(&core, ID); edit["overrides"]["shared_folder"] = json!("");
+    let candidate = core.prepare_profile(ProfileChange::Update, &edit.to_string()).unwrap(); core.finish_profile(&candidate.token, true).unwrap();
+    assert_eq!(effective(&core, ID)["shared_folder"], ""); assert_eq!(effective(&core, ID)["sources"]["shared_folder"], ID);
+    edit["overrides"]["shared_folder"] = json!("/owned/bad\nname");
+    assert!(core.prepare_profile(ProfileChange::Update, &edit.to_string()).is_err());
+    edit["overrides"]["shared_folder"] = json!("x".repeat(4097));
+    assert!(core.prepare_profile(ProfileChange::Update, &edit.to_string()).is_err());
+}

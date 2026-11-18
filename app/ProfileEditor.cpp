@@ -46,7 +46,8 @@ const std::vector<Field> fields = {
     {"idle_minutes", "Minutes to Idle", "Protocol", "minutes", "Minutes without input before disconnecting, 0–240; 0 disables.", true, "rdp"},
     {"load_balance_info", "Load Balance Info", "Protocol", "text", "Routing token for RD Connection Broker or load balancers, sent verbatim.", true, "rdp"},
     {"sound", "Sounds", "Redirect", "choice", "Choose where remote audio plays.", true, "rdp"},
-    {"clipboard", "Clipboard", "Redirect", "bool", "Copy and paste text between this computer and the remote computer. Files and images are not shared. VNC shares Latin-1 text only.", true, "rdp,vnc"},
+    {"clipboard", "Clipboard", "Redirect", "bool", "Copy and paste between this computer and the remote computer. RDP shares text and files: files copied on either computer paste on the other. Images are not shared. VNC shares Latin-1 text only.", true, "rdp,vnc"},
+    {"shared_folder", "Shared folder", "Redirect", "text", "A folder on this computer the remote computer can open and change, shown there as a drive named after the folder. Empty shares nothing. Right-click to choose a folder.", true, "rdp"},
     {"gateway_usage", "Use RDP Gateway", "Gateway", "choice", "Choose when to use a Remote Desktop Gateway.", true, "rdp"},
     {"gateway_host", "Gateway Hostname", "Gateway", "text", "Remote Desktop Gateway host name or IP address.", true, "rdp"},
     {"gateway_port", "Gateway Port", "Gateway", "port", "Remote Desktop Gateway HTTPS port, 1–65535 (default 443).", true, "rdp"},
@@ -501,6 +502,10 @@ void ProfileEditor::setIcon(const QString& name) {
 void ProfileEditor::setSshKeyPath(const QString& path) {
     if (documentRoot_ || id().isEmpty() || (draft_.value("kind") != "folder" && effective_.value("protocol") != "ssh")) return;
     setInheritance(false); edited("ssh_key_path", path);
+}
+void ProfileEditor::setSharedFolder(const QString& path) {
+    if (documentRoot_ || id().isEmpty() || (draft_.value("kind") != "folder" && effective_.value("protocol") != "rdp")) return;
+    setInheritance(false); edited("shared_folder", path);
 }
 void ProfileEditor::setPasswordHandler(std::function<void(PasswordEdit)> handler) {
     cancelEdit(); passwordHandler_ = std::move(handler); render();

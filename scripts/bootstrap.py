@@ -130,9 +130,10 @@ def shared_library(prefix, name, host):
 
 
 def freerdp_options(prefix, host):
-    # Remote audio playback (rdpsnd) needs rdpdr registered plus a native backend.
-    # macOS uses CoreAudio; Linux keeps audio off until a PulseAudio runtime is packaged.
-    # rdpdr carries no devices: drive/printer/serial/parallel/smartcard stay off.
+    # rdpdr and its drive device serve shared folders on every platform; printer/serial/parallel/
+    # smartcard stay off. FreeRDP loads rdpsnd whenever rdpdr is registered, so it is built
+    # everywhere; only macOS has a playback backend (CoreAudio). Elsewhere rdpsnd has just its
+    # silent "fake" subsystem until a PulseAudio/WinMM runtime is packaged and tested.
     audio = host == 'macos'
     # Pinned tarballs carry no git history; always use their hardcoded version, never the enclosing checkout.
     off = ['USE_VERSION_FROM_GIT_TAG', 'USE_GIT_FOR_REVISION',
@@ -142,16 +143,15 @@ def freerdp_options(prefix, host):
         # FreeRDP turns Opus on whenever pkg-config finds one, which bypasses CMAKE_IGNORE_PREFIX_PATH
         # and links an unpinned host libopus (Homebrew's breaks the <opus/opus.h> include) into the SDK.
         'WITH_OPUS',
-        'WITH_CUPS', 'WITH_PULSE', 'WITH_ALSA', 'WITH_OSS', 'WITH_SNDIO',
+        'WITH_CUPS', 'WITH_PULSE', 'WITH_ALSA', 'WITH_OSS', 'WITH_SNDIO', 'WITH_WINMM',
         'WITH_PCSC', 'WITH_PKCS11', 'WITH_FUSE', 'WITH_KRB5', 'WITH_GSSAPI', 'WITH_WINPR_JSON',
         'WITH_AAD', 'WITH_MANPAGES', 'WITH_CCACHE', 'WITH_LIBUSB', 'WITH_WEBVIEW',
         'WITH_SMARTCARD_EMULATE', 'CHANNEL_URBDRC', 'CHANNEL_SMARTCARD',
-        'CHANNEL_AUDIN', 'CHANNEL_DRIVE', 'CHANNEL_PRINTER', 'CHANNEL_SERIAL', 'CHANNEL_PARALLEL',
+        'CHANNEL_AUDIN', 'CHANNEL_PRINTER', 'CHANNEL_SERIAL', 'CHANNEL_PARALLEL',
         'WITH_ABSOLUTE_PLUGIN_LOAD_PATHS']
-    audio_options = ['WITH_MACAUDIO', 'CHANNEL_RDPDR', 'CHANNEL_RDPSND']
-    if not audio: off += audio_options
+    if not audio: off.append('WITH_MACAUDIO')
     options = ['-D' + option + '=OFF' for option in off]
-    if audio: options += ['-D' + option + '=ON' for option in audio_options]
+    options += ['-D' + option + '=ON' for option in ['CHANNEL_RDPDR', 'CHANNEL_DRIVE', 'CHANNEL_RDPSND'] + (['WITH_MACAUDIO'] if audio else [])]
     # NTLM/NLA needs MD4 and legacy RDP encryption needs RC4. OpenSSL 3 keeps both in its legacy
     # provider, which libcrypto looks for at the build machine's path; compile them into WinPR instead.
     options += ['-DWITH_INTERNAL_MD4=ON', '-DWITH_INTERNAL_RC4=ON']

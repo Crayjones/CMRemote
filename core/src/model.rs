@@ -144,6 +144,9 @@ pub struct Overrides {
     // Text clipboard sharing; mRemoteNG RedirectClipboard. Unset everywhere in the chain: the Settings value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clipboard: Option<bool>,
+    // RDP drive redirection of one host folder; empty shares nothing. App attribute RmSharedFolder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_folder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_auth: Option<SshAuth>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -235,6 +238,9 @@ pub fn validate_rdp_security_overrides(o: &Overrides) -> Result<(), String> {
         if info.len() > 4096 || info.chars().any(char::is_control) { return Err("Load Balance Info must be at most 4096 bytes without control characters".into()); }
     }
     if o.gateway_port == Some(0) { return Err("Gateway port must be 1–65535".into()); }
+    if let Some(folder) = &o.shared_folder {
+        if folder.len() > 4096 || folder.chars().any(char::is_control) { return Err("Shared folder must be at most 4096 bytes without control characters".into()); }
+    }
     if let Some(host) = &o.gateway_host {
         if !host.is_empty() { validate_gateway_host(host)?; }
     }
@@ -326,6 +332,7 @@ pub struct Effective {
     pub gateway_credentials: GatewayCredentials,
     pub sound: Sound,
     pub clipboard: bool,
+    pub shared_folder: String,
     pub ssh_auth: SshAuth,
     pub ssh_key_path: String,
     pub view_only: bool,
@@ -408,11 +415,11 @@ impl Document {
             apply!(console_session); apply!(resolution); apply!(automatic_resize); apply!(color_depth);
             apply!(cache_bitmaps); apply!(wallpaper); apply!(themes); apply!(font_smoothing);
             apply!(security_protocol); apply!(server_auth); apply!(use_credssp); apply!(idle_minutes); apply!(load_balance_info);
-            apply!(gateway_usage); apply!(gateway_host); apply!(gateway_port); apply!(gateway_username); apply!(gateway_domain); apply!(gateway_credentials); apply!(sound); apply!(clipboard);
+            apply!(gateway_usage); apply!(gateway_host); apply!(gateway_port); apply!(gateway_username); apply!(gateway_domain); apply!(gateway_credentials); apply!(sound); apply!(clipboard); apply!(shared_folder);
             apply!(ssh_auth); apply!(ssh_key_path); apply!(view_only); apply!(smart_size);
         }
         let protocol = overrides.protocol.unwrap_or(Protocol::Rdp);
-        for field in ["protocol", "host", "port", "username", "description", "icon", "domain", "console_session", "resolution", "automatic_resize", "color_depth", "cache_bitmaps", "wallpaper", "themes", "font_smoothing", "security_protocol", "server_auth", "use_credssp", "idle_minutes", "load_balance_info", "gateway_usage", "gateway_host", "gateway_port", "gateway_username", "gateway_domain", "gateway_credentials", "sound", "clipboard", "ssh_auth", "ssh_key_path", "view_only", "smart_size"] {
+        for field in ["protocol", "host", "port", "username", "description", "icon", "domain", "console_session", "resolution", "automatic_resize", "color_depth", "cache_bitmaps", "wallpaper", "themes", "font_smoothing", "security_protocol", "server_auth", "use_credssp", "idle_minutes", "load_balance_info", "gateway_usage", "gateway_host", "gateway_port", "gateway_username", "gateway_domain", "gateway_credentials", "sound", "clipboard", "shared_folder", "ssh_auth", "ssh_key_path", "view_only", "smart_size"] {
             sources.entry(field.into()).or_insert("default".into());
         }
         Ok(Effective {
@@ -427,7 +434,7 @@ impl Document {
             gateway_host: overrides.gateway_host.unwrap_or_default(), gateway_port: overrides.gateway_port.unwrap_or(443),
             gateway_username: overrides.gateway_username.unwrap_or_default(), gateway_domain: overrides.gateway_domain.unwrap_or_default(),
             gateway_credentials: overrides.gateway_credentials.unwrap_or_default(), sound: overrides.sound.unwrap_or_default(), clipboard: overrides.clipboard.unwrap_or(clipboard_default),
-            ssh_auth: overrides.ssh_auth.unwrap_or_default(), ssh_key_path: overrides.ssh_key_path.unwrap_or_default(), view_only: overrides.view_only.unwrap_or(false),
+            shared_folder: overrides.shared_folder.unwrap_or_default(), ssh_auth: overrides.ssh_auth.unwrap_or_default(), ssh_key_path: overrides.ssh_key_path.unwrap_or_default(), view_only: overrides.view_only.unwrap_or(false),
             smart_size: overrides.smart_size.unwrap_or_default(), sources, unsupported,
         })
     }

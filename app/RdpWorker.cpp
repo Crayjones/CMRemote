@@ -3,6 +3,7 @@
 #include "RdpCursor.h"
 #include "RdpSecurity.h"
 #include <QDir>
+#include <QElapsedTimer>
 #include <QtEndian>
 #include <freerdp/freerdp.h>
 #include <freerdp/client.h>
@@ -30,7 +31,15 @@ struct ChannelState {
     DispClientContext* display = nullptr;
     bool displayReady = false;
     quint64 maxArea = 0;
+    // cliprdr callbacks run on FreeRDP's channel thread, beside the worker loop: everything
+    // below is touched only under this lock. Never take `mutex` while holding it.
+    std::recursive_mutex clipboardLock;
     ClipboardProtocol clipboardProtocol;
+    QString filesNotice;
+    std::unique_ptr<RemoteFileDownload> download;
+    quint64 downloadList = 0;
+    std::optional<quint32> downloadLock;
+    QElapsedTimer downloadProgress;
 };
 
 struct RdpWorker::Context {
@@ -125,46 +134,137 @@ struct RdpWorker::Context {
         auto& protocol = self->channels->clipboardProtocol;
         if (batch.clipboardControl) protocol.control(*batch.clipboardControl);
         if (batch.clipboardDirty) protocol.local(batch.clipboard, batch.clipboardStamp);
+        if (batch.clipboardFilesDirty && protocol.acceptsLocal(batch.clipboardFilesStamp)) {
+            QString error; auto files = buildLocalFileList(batch.clipboardFiles, &error);
+            // One notice per distinct problem, not one per focus change.
+            if (error != self->channels->filesNotice && !error.isEmpty() && !self->worker->stopping_) emit self->worker->clipboardNotice(error);
+            self->channels->filesNotice = error;
+            protocol.localFiles(std::move(files), batch.clipboardFilesStamp);
+        }
+        if (!protocol.enabled()) cancelDownload(self, "Clipboard sharing was turned off, so the file copy stopped.");
     }
     static void refreshClipboard(Context* self) { clipboardBatch(self, self->worker->input_.takeClipboard()); }
+    static void finishDownload(Context* self) {
+        auto download = std::move(self->channels->download);
+        if (download) { self->channels->clipboardProtocol.unpin(); self->channels->downloadLock.reset(); }
+        if (download && !self->worker->stopping_) {
+            emit self->worker->fileTransferProgress(download->done(), download->total());
+            emit self->worker->fileTransferFinished(!download->failed(), download->summary());
+        }
+    }
+    static void cancelDownload(Context* self, const QString& reason) {
+        if (!self->channels->download) return;
+        self->channels->download->cancel(reason); finishDownload(self);
+    }
+    static void startDownload(Context* self, const QString& directory, quint64 list) {
+        auto* worker = self->worker;
+        if (self->channels->download) { emit worker->fileTransferFinished(false, "A file copy is already running for this session."); return; }
+        const auto files = self->channels->clipboard ? self->channels->clipboardProtocol.remoteFiles(list) : nullptr;
+        if (!files) { emit worker->fileTransferFinished(false, "The remote clipboard no longer holds those files. Copy them again on the remote computer."); return; }
+        self->channels->download = std::make_unique<RemoteFileDownload>(*files, directory);
+        self->channels->downloadList = list; self->channels->downloadProgress.start();
+        self->channels->downloadLock = self->channels->clipboardProtocol.remoteFilesLock(list);
+        self->channels->clipboardProtocol.pin(self->channels->downloadLock);
+        if (!self->channels->download->start()) { finishDownload(self); return; }
+        emit worker->fileTransferProgress(0, self->channels->download->total());
+    }
+    static UINT pumpDownload(Context* self) {
+        auto& download = self->channels->download; auto* c = self->channels->clipboard;
+        if (!download) return CHANNEL_RC_OK;
+        if (!c) { cancelDownload(self, "The clipboard channel closed, so the file copy stopped."); return CHANNEL_RC_OK; }
+        if (const auto request = download->next()) {
+            CLIPRDR_FILE_CONTENTS_REQUEST message{}; message.common.msgType = CB_FILECONTENTS_REQUEST;
+            message.streamId = request->stream; message.listIndex = request->index; message.dwFlags = request->flags;
+            message.nPositionLow = quint32(request->position); message.nPositionHigh = quint32(request->position >> 32);
+            message.cbRequested = request->size;
+            message.haveClipDataId = self->channels->downloadLock.has_value(); message.clipDataId = self->channels->downloadLock.value_or(0);
+            return c->ClientFileContentsRequest(c, &message);
+        }
+        if (download->finished() || download->failed()) finishDownload(self);
+        return CHANNEL_RC_OK;
+    }
+    static void publishRemoteFiles(Context* self) {
+        auto update = self->channels->clipboardProtocol.takeRemoteFiles();
+        if (!update) return;
+        int files = 0; if (update->files) for (const auto& file : update->files->files) files += !file.directory;
+        // Announce the new list before stopping the old copy so its outcome reads as superseded.
+        if (!self->worker->stopping_)
+            emit self->worker->remoteFilesChanged(update->id, update->files ? qMax(files, 1) : 0, update->files ? update->files->bytes : 0, update->stamp);
+        if (self->channels->download && self->channels->downloadList != update->id)
+            cancelDownload(self, "The remote clipboard changed, so the file copy stopped.");
+    }
+    static UINT unlockFiles(Context* self, CliprdrClientContext* c) {
+        for (const auto id : self->channels->clipboardProtocol.takeUnlocks()) {
+            CLIPRDR_UNLOCK_CLIPBOARD_DATA unlock{}; unlock.common.msgType = CB_UNLOCK_CLIPDATA; unlock.clipDataId = id;
+            if (const UINT status = c->ClientUnlockClipboardData(c, &unlock); status != CHANNEL_RC_OK) return status;
+        }
+        return CHANNEL_RC_OK;
+    }
     static UINT pumpClipboard(Context* self) {
         refreshClipboard(self);
         auto* c = self->channels->clipboard;
         if (!c || self->worker->stopping_) return CHANNEL_RC_OK;
         auto& protocol = self->channels->clipboardProtocol;
+        if (const UINT status = unlockFiles(self, c); status != CHANNEL_RC_OK) return status;
         if (auto advertised = protocol.advertisement()) {
-            CLIPRDR_FORMAT format{}; format.formatId = CF_UNICODETEXT;
+            CLIPRDR_FORMAT formats[2]{}; UINT32 count = 0;
+            if (advertised->text) formats[count++].formatId = CF_UNICODETEXT;
+            if (advertised->files) {
+                formats[count].formatId = ClipboardFileListFormatId;
+                formats[count++].formatName = const_cast<char*>(ClipboardFileListName);
+            }
             CLIPRDR_FORMAT_LIST list{}; list.common.msgType = CB_FORMAT_LIST;
-            list.numFormats = *advertised ? 1 : 0; list.formats = *advertised ? &format : nullptr;
+            list.numFormats = count; list.formats = count ? formats : nullptr;
             const UINT status = c->ClientFormatList(c, &list); if (status != CHANNEL_RC_OK) return status;
         }
-        if (protocol.request()) {
-            CLIPRDR_FORMAT_DATA_REQUEST request{}; request.common.msgType = CB_FORMAT_DATA_REQUEST; request.requestedFormatId = CF_UNICODETEXT;
-            return c->ClientFormatDataRequest(c, &request);
+        if (const auto lock = protocol.takeLock()) {
+            CLIPRDR_LOCK_CLIPBOARD_DATA message{}; message.common.msgType = CB_LOCK_CLIPDATA; message.clipDataId = *lock;
+            if (const UINT status = c->ClientLockClipboardData(c, &message); status != CHANNEL_RC_OK) return status;
         }
-        return CHANNEL_RC_OK;
+        if (const auto request = protocol.request()) {
+            CLIPRDR_FORMAT_DATA_REQUEST message{}; message.common.msgType = CB_FORMAT_DATA_REQUEST; message.requestedFormatId = request->format;
+            const UINT status = c->ClientFormatDataRequest(c, &message); if (status != CHANNEL_RC_OK) return status;
+        }
+        publishRemoteFiles(self);
+        if (const UINT status = pumpDownload(self); status != CHANNEL_RC_OK) return status;
+        return unlockFiles(self, c);
     }
     static UINT monitorReady(CliprdrClientContext* c, const CLIPRDR_MONITOR_READY*) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
         CLIPRDR_GENERAL_CAPABILITY_SET general{};
         general.capabilitySetType = CB_CAPSTYPE_GENERAL; general.capabilitySetLength = CB_CAPSTYPE_GENERAL_LEN;
-        general.version = CB_CAPS_VERSION_2; general.generalFlags = CB_USE_LONG_FORMAT_NAMES;
+        // The channel drops any flag the server did not also advertise.
+        general.version = CB_CAPS_VERSION_2; general.generalFlags = CB_USE_LONG_FORMAT_NAMES | CB_STREAM_FILECLIP_ENABLED |
+            CB_FILECLIP_NO_FILE_PATHS | CB_CAN_LOCK_CLIPDATA | CB_HUGE_FILE_SUPPORT_ENABLED;
         CLIPRDR_CAPABILITIES caps{}; caps.common.msgType = CB_CLIP_CAPS; caps.cCapabilitiesSets = 1;
         caps.capabilitySets = reinterpret_cast<CLIPRDR_CAPABILITY_SET*>(&general);
         const UINT status = c->ClientCapabilities(c, &caps);
         if (status != CHANNEL_RC_OK) return status;
         refreshClipboard(clip(c)); clip(c)->channels->clipboardProtocol.ready(); return pumpClipboard(clip(c));
     }
-    static UINT serverCapabilities(CliprdrClientContext*, const CLIPRDR_CAPABILITIES*) { return CHANNEL_RC_OK; }
+    static UINT serverCapabilities(CliprdrClientContext* c, const CLIPRDR_CAPABILITIES* caps) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
+        // The channel hands over exactly the server's general capability set.
+        const auto* general = caps->cCapabilitiesSets ? reinterpret_cast<const CLIPRDR_GENERAL_CAPABILITY_SET*>(caps->capabilitySets) : nullptr;
+        if (general && general->capabilitySetType == CB_CAPSTYPE_GENERAL) clip(c)->channels->clipboardProtocol.serverCapabilities(general->generalFlags);
+        return CHANNEL_RC_OK;
+    }
     static UINT formatResponse(CliprdrClientContext*, const CLIPRDR_FORMAT_LIST_RESPONSE*) { return CHANNEL_RC_OK; }
     static UINT formats(CliprdrClientContext* c, const CLIPRDR_FORMAT_LIST* list) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
         CLIPRDR_FORMAT_LIST_RESPONSE response{}; response.common.msgType = CB_FORMAT_LIST_RESPONSE; response.common.msgFlags = CB_RESPONSE_OK;
         const UINT status = c->ClientFormatListResponse(c, &response);
         if (status != CHANNEL_RC_OK) return status;
-        refreshClipboard(clip(c)); bool unicode = false;
-        if (list->formats) for (UINT32 i = 0; i < list->numFormats; ++i) unicode |= list->formats[i].formatId == CF_UNICODETEXT;
-        clip(c)->channels->clipboardProtocol.offer(unicode); return pumpClipboard(clip(c));
+        refreshClipboard(clip(c)); bool unicode = false; std::optional<quint32> files;
+        if (list->formats) for (UINT32 i = 0; i < list->numFormats; ++i) {
+            const auto& format = list->formats[i];
+            unicode |= format.formatId == CF_UNICODETEXT;
+            if (format.formatName && !strcmp(format.formatName, ClipboardFileListName)) files = format.formatId;
+        }
+        clip(c)->channels->clipboardProtocol.offer(unicode, files); return pumpClipboard(clip(c));
     }
     static UINT dataResponse(CliprdrClientContext* c, const CLIPRDR_FORMAT_DATA_RESPONSE* response) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
         auto* self = clip(c); refreshClipboard(self);
         auto delivery = self->channels->clipboardProtocol.response(response->requestedFormatData, response->common.dataLen,
             response->common.msgFlags & CB_RESPONSE_OK);
@@ -183,15 +283,52 @@ struct RdpWorker::Context {
         return pumpClipboard(self);
     }
     static UINT dataRequest(CliprdrClientContext* c, const CLIPRDR_FORMAT_DATA_REQUEST* request) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
         auto* self = clip(c); refreshClipboard(self);
         CLIPRDR_FORMAT_DATA_RESPONSE response{}; response.common.msgType = CB_FORMAT_DATA_RESPONSE;
         response.common.msgFlags = CB_RESPONSE_FAIL;
-        const auto* bytes = self->channels->clipboardProtocol.localReply();
-        if (!self->worker->stopping_ && request->requestedFormatId == CF_UNICODETEXT && bytes) {
+        const auto& protocol = self->channels->clipboardProtocol;
+        const auto* bytes = request->requestedFormatId == CF_UNICODETEXT ? protocol.localReply() :
+            request->requestedFormatId == ClipboardFileListFormatId ? protocol.localFileList() : nullptr;
+        if (!self->worker->stopping_ && bytes) {
             response.common.msgFlags = CB_RESPONSE_OK; response.common.dataLen = bytes->size();
             response.requestedFormatData = reinterpret_cast<const BYTE*>(bytes->constData());
         }
         return c->ClientFormatDataResponse(c, &response);
+    }
+    static UINT fileContentsRequest(CliprdrClientContext* c, const CLIPRDR_FILE_CONTENTS_REQUEST* request) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
+        auto* self = clip(c); refreshClipboard(self);
+        CLIPRDR_FILE_CONTENTS_RESPONSE response{}; response.common.msgType = CB_FILECONTENTS_RESPONSE;
+        response.common.msgFlags = CB_RESPONSE_FAIL; response.streamId = request->streamId;
+        std::optional<QByteArray> bytes;
+        if (!self->worker->stopping_)
+            bytes = self->channels->clipboardProtocol.fileContents(request->haveClipDataId ? std::optional<quint32>(request->clipDataId) : std::nullopt,
+                request->listIndex, request->dwFlags, quint64(request->nPositionHigh) << 32 | request->nPositionLow, request->cbRequested);
+        if (bytes) {
+            response.common.msgFlags = CB_RESPONSE_OK; response.cbRequested = UINT32(bytes->size());
+            response.requestedData = reinterpret_cast<const BYTE*>(bytes->constData());
+        }
+        return c->ClientFileContentsResponse(c, &response);
+    }
+    static UINT fileContentsResponse(CliprdrClientContext* c, const CLIPRDR_FILE_CONTENTS_RESPONSE* response) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
+        auto* self = clip(c); refreshClipboard(self);
+        if (auto& download = self->channels->download) {
+            download->response(response->streamId, response->requestedData, response->cbRequested, response->common.msgFlags & CB_RESPONSE_OK);
+            if (download && !download->failed() && self->channels->downloadProgress.elapsed() >= 100 && !self->worker->stopping_) {
+                self->channels->downloadProgress.restart(); emit self->worker->fileTransferProgress(download->done(), download->total());
+            }
+        }
+        return pumpClipboard(self);
+    }
+    static UINT lockData(CliprdrClientContext* c, const CLIPRDR_LOCK_CLIPBOARD_DATA* lock) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
+        refreshClipboard(clip(c)); clip(c)->channels->clipboardProtocol.lock(lock->clipDataId); return CHANNEL_RC_OK;
+    }
+    static UINT unlockData(CliprdrClientContext* c, const CLIPRDR_UNLOCK_CLIPBOARD_DATA* unlock) {
+        std::lock_guard<std::recursive_mutex> guard(clip(c)->channels->clipboardLock);
+        clip(c)->channels->clipboardProtocol.unlock(unlock->clipDataId); return CHANNEL_RC_OK;
     }
     static void connected(void* c, const ChannelConnectedEventArgs* event) {
         auto* self = from(static_cast<rdpContext*>(c));
@@ -215,6 +352,8 @@ struct RdpWorker::Context {
             clip->MonitorReady = monitorReady; clip->ServerCapabilities = serverCapabilities;
             clip->ServerFormatList = formats; clip->ServerFormatListResponse = formatResponse;
             clip->ServerFormatDataRequest = dataRequest; clip->ServerFormatDataResponse = dataResponse;
+            clip->ServerFileContentsRequest = fileContentsRequest; clip->ServerFileContentsResponse = fileContentsResponse;
+            clip->ServerLockClipboardData = lockData; clip->ServerUnlockClipboardData = unlockData;
         } else if (!strcmp(event->name, DISP_DVC_CHANNEL_NAME)) {
             self->channels->display = static_cast<DispClientContext*>(event->pInterface);
             self->channels->display->custom = self; self->channels->display->DisplayControlCaps = displayCaps;
@@ -232,7 +371,9 @@ struct RdpWorker::Context {
         }
         std::lock_guard<std::mutex> lock(self->channels->mutex);
         if (!strcmp(event->name, CLIPRDR_SVC_CHANNEL_NAME)) {
+            std::lock_guard<std::recursive_mutex> guard(self->channels->clipboardLock);
             self->channels->clipboard = nullptr; self->channels->clipboardProtocol.reset();
+            cancelDownload(self, "The clipboard channel closed, so the file copy stopped.");
         }
         if (!strcmp(event->name, DISP_DVC_CHANNEL_NAME)) {
             self->channels->display = nullptr; self->channels->displayReady = false; emit self->worker->resizeAvailable(false);
@@ -331,7 +472,7 @@ struct RdpWorker::Context {
 
 RdpWorker::RdpWorker(RdpConfig config, QObject* parent) : QThread(parent), config_(std::move(config)) {
     if (config_.performance && !config_.performance->enabled()) config_.performance.reset();
-    qRegisterMetaType<ClipboardDelivery>();
+    qRegisterMetaType<ClipboardDelivery>(); qRegisterMetaType<ClipboardStamp>();
     input_.clipboardControl({config_.clipboard, config_.clipboard, {1, 0, 0}});
 }
 RdpWorker::~RdpWorker() { stop(); wait(); config_.password.fill(0); }
@@ -420,6 +561,13 @@ void RdpWorker::clipboardText(QString text, ClipboardStamp stamp) {
     if (stopping_ || text.size() > 512 * 1024 - 1) return;
     checkInputResult(input_.clipboard(std::move(text), stamp));
 }
+void RdpWorker::clipboardFiles(QStringList paths, ClipboardStamp stamp) {
+    if (!stopping_) checkInputResult(input_.clipboardFiles(std::move(paths), stamp));
+}
+void RdpWorker::downloadFiles(QString directory, quint64 list) {
+    if (!stopping_) checkInputResult(input_.download(std::move(directory), list));
+}
+void RdpWorker::cancelDownload() { if (!stopping_) checkInputResult(input_.cancelDownload()); }
 void RdpWorker::configureClipboard(ClipboardControl control) {
     if (!control.enabled) { std::lock_guard<std::mutex> lock(clipboardMutex_); pendingClipboard_.reset(); }
     if (!stopping_) checkInputResult(input_.clipboardControl(control));
@@ -458,6 +606,10 @@ void RdpWorker::run() {
         config_.password.fill(0); config_.password.clear();
         emit stateChanged("failed", "RDP settings conflict: " + conflict); return;
     }
+    if (const auto problem = rdpSharedFolderProblem(config_.options.sharedFolder); !problem.isEmpty()) {
+        config_.password.fill(0); config_.password.clear();
+        emit stateChanged("failed", problem + ". Choose another folder or clear Shared folder."); return;
+    }
     static std::once_flag init;
     std::call_once(init, [] {
         freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0);
@@ -485,6 +637,7 @@ void RdpWorker::run() {
         freerdp_settings_set_uint32(settings, FreeRDP_KeyboardLayout, 0x0409) &&
         freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 5000) &&
         freerdp_settings_set_bool(settings, FreeRDP_DeviceRedirection, FALSE) &&
+        applyRdpSharedFolder(settings, config_.options.sharedFolder) &&
         freerdp_settings_set_bool(settings, FreeRDP_NetworkAutoDetect, FALSE) &&
         freerdp_settings_set_bool(settings, FreeRDP_SupportHeartbeatPdu, FALSE) &&
         freerdp_settings_set_bool(settings, FreeRDP_SupportMultitransport, FALSE) &&
@@ -493,7 +646,8 @@ void RdpWorker::run() {
             config_.graphicsPolicy == RdpGraphicsPolicy::Gfx && rdpSoftwareAvcAvailable()) &&
         freerdp_settings_set_bool(settings, FreeRDP_SupportDynamicChannels, TRUE) &&
         freerdp_settings_set_bool(settings, FreeRDP_RedirectClipboard, TRUE) &&
-        freerdp_settings_set_uint32(settings, FreeRDP_ClipboardFeatureMask, CLIPRDR_FLAG_LOCAL_TO_REMOTE | CLIPRDR_FLAG_REMOTE_TO_LOCAL);
+        freerdp_settings_set_uint32(settings, FreeRDP_ClipboardFeatureMask, CLIPRDR_FLAG_LOCAL_TO_REMOTE | CLIPRDR_FLAG_REMOTE_TO_LOCAL |
+            CLIPRDR_FLAG_LOCAL_TO_REMOTE_FILES | CLIPRDR_FLAG_REMOTE_TO_LOCAL_FILES);
     config_.password.fill(0); config_.password.clear();
     const bool connected = configured && !stopping_ && freerdp_connect(instance);
     if (!connected && !stopping_)
@@ -518,8 +672,15 @@ void RdpWorker::run() {
             } else freerdp_input_send_mouse_event(instance->context->input, cmd.flags, cmd.x, cmd.y);
         }
         if (stopping_) break;
-        Context::clipboardBatch(c, batch);
-        if (Context::pumpClipboard(c) != CHANNEL_RC_OK) {
+        UINT clipboardStatus;
+        {
+            std::lock_guard<std::recursive_mutex> guard(channels.clipboardLock);
+            Context::clipboardBatch(c, batch);
+            if (batch.cancelDownload) Context::cancelDownload(c, "File copy canceled.");
+            if (batch.download) Context::startDownload(c, batch.download->first, batch.download->second);
+            clipboardStatus = Context::pumpClipboard(c);
+        }
+        if (clipboardStatus != CHANNEL_RC_OK) {
             emit stateChanged("failed", "RDP clipboard send failed; closing session"); break;
         }
         {
@@ -541,8 +702,17 @@ void RdpWorker::run() {
             emit stateChanged("failed", "RDP event handle count rejected"); break;
         }
         events[count] = input_.event();
-        const auto clipboardWait = channels.clipboardProtocol.responseWait();
+        qint64 clipboardWait, downloadWait;
+        {
+            std::lock_guard<std::recursive_mutex> guard(channels.clipboardLock);
+            clipboardWait = channels.clipboardProtocol.responseWait();
+            downloadWait = channels.download ? channels.download->responseWait() : -1;
+            // A slow file copy only stops itself; the session stays up.
+            if (downloadWait == 0) Context::cancelDownload(c, "The remote computer stopped sending file data, so the file copy stopped.");
+        }
         if (clipboardWait == 0) { emit stateChanged("failed", "RDP clipboard response timed out; reconnect the session"); break; }
+        if (downloadWait == 0) continue;
+        if (downloadWait > 0 && (clipboardWait < 0 || downloadWait < clipboardWait)) clipboardWait = downloadWait;
         const DWORD status = WaitForMultipleObjects(count + 1, events, FALSE, clipboardWait < 0 ? INFINITE : DWORD(clipboardWait));
         if (status == WAIT_TIMEOUT) continue;
         if (status == WAIT_FAILED || status >= WAIT_OBJECT_0 + count + 1) {
@@ -559,6 +729,7 @@ void RdpWorker::run() {
     { std::lock_guard<std::mutex> lock(lifetimeMutex_); context_ = nullptr; }
     freerdp_disconnect(instance);
     { std::lock_guard<std::mutex> lock(channels.mutex); channels.clipboard = nullptr; channels.display = nullptr; }
+    { std::lock_guard<std::recursive_mutex> guard(channels.clipboardLock); channels.download.reset(); }
     // Channel callbacks and codecs must be gone before GDI/context storage.
     if (graphics.close() != CHANNEL_RC_OK) emit stateChanged("failed", "RDP graphics channel cleanup failed");
     if (instance->context->gdi) gdi_free(instance);
